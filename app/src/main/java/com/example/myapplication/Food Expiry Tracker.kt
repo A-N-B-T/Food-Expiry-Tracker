@@ -1,0 +1,6513 @@
+@file:Suppress("DEPRECATION")
+
+package com.example.myapplication
+
+import android.Manifest
+import android.annotation.SuppressLint
+import android.app.Activity
+import android.app.DatePickerDialog
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
+import android.os.Bundle
+import android.widget.Toast
+import android.window.OnBackInvokedCallback
+import android.window.OnBackInvokedDispatcher
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.RequiresApi
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ExperimentalGetImage
+import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Category
+import androidx.compose.material.icons.filled.Checklist
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.FabPosition
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
+import androidx.core.content.edit
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.navigation.NavBackStackEntry
+import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavHostController
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.compose.rememberNavController
+import com.example.myapplication.ui.theme.MyApplicationTheme
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
+import com.google.mlkit.vision.barcode.BarcodeScannerOptions
+import com.google.mlkit.vision.barcode.BarcodeScanning
+import com.google.mlkit.vision.barcode.common.Barcode
+import com.google.mlkit.vision.common.InputImage
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import java.net.HttpURLConnection
+import java.net.URL
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
+import java.util.Calendar
+import java.util.Locale
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.coroutines.resume
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.roundToInt
+
+private const val THEME_PREFS = "app_settings"
+private const val THEME_KEY = "theme_mode"
+
+enum class ThemeMode { SYSTEM, LIGHT, DARK }
+
+enum class SelectionPurpose { DELETE, CATEGORY }
+
+private suspend fun LazyListState.animateScrollToTopSlowly(
+    fallbackItemSizePx: Float,
+    durationMillis: Int = 560
+) {
+    if (firstVisibleItemIndex == 0 && firstVisibleItemScrollOffset == 0) return
+
+    val averageVisibleItemSizePx =
+        layoutInfo.visibleItemsInfo
+            .map { it.size }
+            .average()
+            .takeIf { !it.isNaN() && it > 0.0 }
+            ?.toFloat()
+            ?: fallbackItemSizePx
+
+    val estimatedDistancePx =
+        (firstVisibleItemIndex * averageVisibleItemSizePx) + firstVisibleItemScrollOffset
+
+    if (estimatedDistancePx <= 0f) {
+        scrollToItem(0)
+        return
+    }
+
+    scroll {
+        var previousValue = 0f
+        animate(
+            initialValue = 0f,
+            targetValue = estimatedDistancePx,
+            animationSpec = tween(
+                durationMillis = durationMillis,
+                easing = FastOutSlowInEasing
+            )
+        ) { value, _ ->
+            val delta = value - previousValue
+            previousValue = value
+            scrollBy(-delta)
+        }
+    }
+
+    scrollToItem(0)
+}
+
+fun loadThemeMode(context: Context): ThemeMode {
+    val prefs = context.applicationContext.getSharedPreferences(THEME_PREFS,
+        Context.MODE_PRIVATE)
+    val raw = prefs.getString(THEME_KEY, ThemeMode.SYSTEM.name) ?: ThemeMode.SYSTEM.name
+
+    return when (raw.lowercase()) {
+        "system" -> ThemeMode.SYSTEM
+        "light"  -> ThemeMode.LIGHT
+        "dark"   -> ThemeMode.DARK
+        else     -> runCatching { ThemeMode.valueOf(raw) }.getOrDefault(ThemeMode.SYSTEM)
+    }
+}
+
+fun saveThemeMode(context: Context, mode: ThemeMode) {
+    val prefs = context.applicationContext.getSharedPreferences(THEME_PREFS,
+        Context.MODE_PRIVATE)
+    prefs.edit().putString(THEME_KEY, mode.name).apply()
+}
+
+private enum class GlassTone { CHROME, CARD, SEARCH, ACCENT }
+
+private data class GlassPalette(
+    val chrome: Color,
+    val card: Color,
+    val search: Color,
+    val accent: Color,
+    val border: Color,
+    val highlight: Color,
+    val tint: Color
+)
+
+@Composable
+private fun rememberGlassPalette(): GlassPalette {
+    val scheme = MaterialTheme.colorScheme
+    val isDark = scheme.background.luminance() < 0.5f
+
+    return remember(scheme, isDark) {
+        if (isDark) {
+            GlassPalette(
+                chrome = scheme.surfaceContainerHigh.copy(alpha = 0.60f),
+                card = scheme.surfaceVariant.copy(alpha = 0.46f),
+                search = scheme.surfaceContainer.copy(alpha = 0.64f),
+                accent = scheme.primary.copy(alpha = 0.20f),
+                border = scheme.outlineVariant.copy(alpha = 0.92f),
+                highlight = Color.White.copy(alpha = 0.10f),
+                tint = scheme.primary.copy(alpha = 0.11f)
+            )
+        } else {
+            GlassPalette(
+                chrome = Color.White.copy(alpha = 0.64f),
+                card = scheme.surfaceVariant.copy(alpha = 0.50f),
+                search = Color.White.copy(alpha = 0.74f),
+                accent = scheme.primary.copy(alpha = 0.14f),
+                border = scheme.outlineVariant.copy(alpha = 0.82f),
+                highlight = Color.White.copy(alpha = 0.46f),
+                tint = scheme.primary.copy(alpha = 0.05f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun glassToneColor(tone: GlassTone): Color {
+    val palette = rememberGlassPalette()
+    return when (tone) {
+        GlassTone.CHROME -> palette.chrome
+        GlassTone.CARD -> palette.card
+        GlassTone.SEARCH -> palette.search
+        GlassTone.ACCENT -> palette.accent
+    }
+}
+
+@Composable
+private fun glassBorderStroke(alpha: Float = 1f): BorderStroke {
+    val palette = rememberGlassPalette()
+    return BorderStroke(1.dp, palette.border.copy(alpha = alpha))
+}
+
+@Composable
+private fun GlassSurface(
+    modifier: Modifier = Modifier,
+    shape: Shape = RoundedCornerShape(28.dp),
+    tone: GlassTone = GlassTone.CARD,
+    containerColor: Color? = null,
+    borderColor: Color? = null,
+    showDecorativeOverlays: Boolean = true,
+    shadowElevation: Dp = if (tone == GlassTone.CHROME) 18.dp else 10.dp,
+    content: @Composable () -> Unit
+) {
+    val palette = rememberGlassPalette()
+
+    Surface(
+        modifier = modifier,
+        shape = shape,
+        color = containerColor ?: glassToneColor(tone),
+        tonalElevation = 0.dp,
+        shadowElevation = shadowElevation,
+        border = BorderStroke(1.dp, borderColor ?: palette.border)
+    ) {
+        Box {
+            if (showDecorativeOverlays) {
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .background(
+                            brush = Brush.verticalGradient(
+                                colors = listOf(
+                                    palette.highlight,
+                                    Color.Transparent
+                                )
+                            )
+                        )
+                )
+
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .background(
+                            brush = Brush.linearGradient(
+                                colors = listOf(
+                                    palette.tint,
+                                    Color.Transparent
+                                ),
+                                start = Offset(0f, 0f),
+                                end = Offset(900f, 700f)
+                            )
+                        )
+                )
+
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .background(
+                            brush = Brush.verticalGradient(
+                                colors = listOf(
+                                    Color.Transparent,
+                                    palette.tint.copy(alpha = palette.tint.alpha * 0.55f)
+                                )
+                            )
+                        )
+                )
+            }
+
+            content()
+        }
+    }
+}
+
+@Composable
+private fun FrostedGlassFill(
+    modifier: Modifier = Modifier,
+    primaryBlur: Dp = 100.dp,
+    accentBlur: Dp = 28.dp,
+    content: @Composable () -> Unit
+) {
+    val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
+
+    Box(modifier = modifier) {
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .blur(primaryBlur)
+                .background(
+                    brush = Brush.verticalGradient(
+                        colors = if (isDarkTheme) {
+                            listOf(
+                                Color.Black.copy(alpha = 0.75f),
+                                Color.Black.copy(alpha = 0.75f)
+                            )
+                        } else {
+                            listOf(
+                                Color.White.copy(alpha = 0.75f),
+                                Color.White.copy(alpha = 0.75f)
+                            )
+                        }
+                    )
+                )
+        )
+
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .blur(accentBlur)
+                .background(
+                    brush = Brush.linearGradient(
+                        colors = listOf(
+                            MaterialTheme.colorScheme.primary.copy(
+                                alpha = if (isDarkTheme) 0.10f else 0.07f
+                            ),
+                            Color.Transparent
+                        ),
+                        start = Offset(0f, 0f),
+                        end = Offset(700f, 420f)
+                    )
+                )
+        )
+
+        content()
+    }
+}
+
+@Composable
+private fun GlassCard(
+    modifier: Modifier = Modifier,
+    shape: Shape = RoundedCornerShape(22.dp),
+    tone: GlassTone = GlassTone.CARD,
+    containerColor: Color? = null,
+    shadowElevation: Dp = 8.dp,
+    showDecorativeOverlays: Boolean = true,
+    onClick: (() -> Unit)? = null,
+    content: @Composable () -> Unit
+) {
+    val clickableModifier =
+        if (onClick != null) {
+            modifier
+                .clip(shape)
+                .clickable(onClick = onClick)
+        } else {
+            modifier
+        }
+
+    GlassSurface(
+        modifier = clickableModifier,
+        shape = shape,
+        tone = tone,
+        containerColor = containerColor,
+        showDecorativeOverlays = showDecorativeOverlays,
+        shadowElevation = shadowElevation,
+        content = content
+    )
+}
+
+@Composable
+private fun FrostedGlassCard(
+    modifier: Modifier = Modifier,
+    shape: Shape = RoundedCornerShape(22.dp),
+    tone: GlassTone = GlassTone.CHROME,
+    containerColor: Color? = null,
+    showDecorativeOverlays: Boolean = true,
+    shadowElevation: Dp = 8.dp,
+    primaryBlur: Dp = 56.dp,
+    accentBlur: Dp = 18.dp,
+    onClick: (() -> Unit)? = null,
+    content: @Composable () -> Unit
+) {
+    val clickableModifier =
+        if (onClick != null) {
+            modifier
+                .clip(shape)
+                .clickable(onClick = onClick)
+        } else {
+            modifier
+        }
+
+    GlassSurface(
+        modifier = clickableModifier,
+        shape = shape,
+        tone = tone,
+        containerColor = containerColor,
+        showDecorativeOverlays = showDecorativeOverlays,
+        shadowElevation = shadowElevation
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(shape)
+        ) {
+            FrostedGlassFill(
+                modifier = Modifier.matchParentSize(),
+                primaryBlur = primaryBlur,
+                accentBlur = accentBlur
+            ) {}
+            content()
+        }
+    }
+}
+
+@Composable
+private fun BlackGlassCard(
+    modifier: Modifier = Modifier,
+    shape: Shape = RoundedCornerShape(22.dp),
+    shadowElevation: Dp = 8.dp,
+    primaryBlur: Dp = 32.dp,
+    accentBlur: Dp = 10.dp,
+    onClick: (() -> Unit)? = null,
+    content: @Composable () -> Unit
+) {
+    FrostedGlassCard(
+        modifier = modifier,
+        shape = shape,
+        tone = GlassTone.CHROME,
+        containerColor = Color.Transparent,
+        showDecorativeOverlays = false,
+        shadowElevation = shadowElevation,
+        primaryBlur = primaryBlur,
+        accentBlur = accentBlur,
+        onClick = onClick,
+        content = content
+    )
+}
+
+@Composable
+private fun MatchingPillCard(
+    modifier: Modifier = Modifier,
+    shape: Shape = RoundedCornerShape(25.dp),
+    shadowElevation: Dp = 6.dp,
+    onClick: (() -> Unit)? = null,
+    content: @Composable () -> Unit
+) {
+    ExactFrostedPillCard(
+        modifier = modifier,
+        shape = shape,
+        shadowElevation = shadowElevation,
+        onClick = onClick,
+        content = content
+    )
+}
+
+@Composable
+private fun ExactFrostedPillCard(
+    modifier: Modifier = Modifier,
+    shape: Shape = RoundedCornerShape(25.dp),
+    shadowElevation: Dp = 4.dp,
+    onClick: (() -> Unit)? = null,
+    content: @Composable () -> Unit
+) {
+    val clickableModifier =
+        if (onClick != null) {
+            modifier
+                .clip(shape)
+                .clickable(onClick = onClick)
+        } else {
+            modifier
+        }
+    val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
+
+    GlassSurface(
+        modifier = clickableModifier,
+        shape = shape,
+        tone = GlassTone.CHROME,
+        containerColor = Color.Transparent,
+        showDecorativeOverlays = false,
+        shadowElevation = shadowElevation
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(shape)
+        ) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(
+                        brush = Brush.verticalGradient(
+                            colors =
+                                if (isDarkTheme) {
+                                    listOf(
+                                        Color.Black.copy(alpha = 1f),
+                                        Color.Black.copy(alpha = 0.75f)
+                                    )
+                                } else {
+                                    listOf(
+                                        Color.White.copy(alpha = 1f),
+                                        Color.White.copy(alpha = 0.75f)
+                                    )
+                                }
+                        )
+                    )
+            )
+
+            FrostedGlassFill(
+                modifier = Modifier.matchParentSize(),
+                primaryBlur = if (isDarkTheme) 40.dp else 48.dp,
+                accentBlur = if (isDarkTheme) 12.dp else 14.dp
+            ) {}
+
+            content()
+        }
+    }
+}
+
+@Composable
+private fun PantryListGlassCard(
+    modifier: Modifier = Modifier,
+    shape: Shape = RoundedCornerShape(25.dp),
+    shadowElevation: Dp = 6.dp,
+    onClick: (() -> Unit)? = null,
+    content: @Composable () -> Unit
+) {
+    val clickableModifier =
+        if (onClick != null) {
+            modifier
+                .clip(shape)
+                .clickable(onClick = onClick)
+        } else {
+            modifier
+        }
+
+    val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val palette = rememberGlassPalette()
+    val topHighlight =
+        if (isDarkTheme) {
+            Color.White.copy(alpha = 0.05f)
+        } else {
+            Color.White.copy(alpha = 0.24f)
+        }
+    val baseStart =
+        if (isDarkTheme) {
+            Color.Black.copy(alpha = 0.92f)
+        } else {
+            Color.White.copy(alpha = 0.94f)
+        }
+    val baseEnd =
+        if (isDarkTheme) {
+            Color.Black.copy(alpha = 0.72f)
+        } else {
+            Color.White.copy(alpha = 0.82f)
+        }
+    val accentTint =
+        MaterialTheme.colorScheme.primary.copy(alpha = if (isDarkTheme) 0.06f else 0.04f)
+    val bottomDepth =
+        MaterialTheme.colorScheme.primary.copy(alpha = if (isDarkTheme) 0.03f else 0.02f)
+    val borderColor = palette.border.copy(alpha = if (isDarkTheme) 0.84f else 0.92f)
+
+    Box(
+        modifier = clickableModifier,
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(shape)
+                .drawWithCache {
+                    val baseBrush =
+                        Brush.verticalGradient(
+                            colors = listOf(baseStart, baseEnd)
+                        )
+                    val topGlowBrush =
+                        Brush.verticalGradient(
+                            colors = listOf(topHighlight, Color.Transparent)
+                        )
+                    val accentBrush =
+                        Brush.linearGradient(
+                            colors = listOf(accentTint, Color.Transparent),
+                            start = Offset(0f, 0f),
+                            end = Offset(size.width * 1.15f, size.height * 0.78f)
+                        )
+                    val depthBrush =
+                        Brush.verticalGradient(
+                            colors = listOf(Color.Transparent, bottomDepth)
+                        )
+
+                    onDrawBehind {
+                        drawRect(baseBrush)
+                        drawRect(topGlowBrush)
+                        drawRect(accentBrush)
+                        drawRect(depthBrush)
+                    }
+                }
+                .border(
+                    width = 1.dp,
+                    color = borderColor,
+                    shape = shape
+                )
+        ) {
+            content()
+        }
+    }
+}
+
+@Composable
+private fun SelectionControlsWarmup() {
+    Box(
+        modifier = Modifier
+            .size(1.dp)
+            .graphicsLayer {
+                alpha = 0f
+                scaleX = 0f
+                scaleY = 0f
+            }
+    ) {
+        Box(
+            modifier = Modifier.width(36.dp),
+            contentAlignment = Alignment.CenterEnd
+        ) {
+            Checkbox(
+                modifier = Modifier.graphicsLayer {
+                    alpha = 1f
+                    scaleX = 1f
+                    scaleY = 1f
+                },
+                checked = false,
+                onCheckedChange = {}
+            )
+        }
+    }
+}
+
+@Composable
+private fun HomeAddFloatingActionButton(
+    visible: Boolean,
+    onClick: () -> Unit
+) {
+    val density = LocalDensity.current
+    val imeInsets = WindowInsets.ime
+    var keyboardVisible by remember { mutableStateOf(false) }
+    var showForKeyboard by remember { mutableStateOf(true) }
+
+    LaunchedEffect(density) {
+        snapshotFlow { imeInsets.getBottom(density) > 0 }
+            .collect { keyboardVisible = it }
+    }
+
+    LaunchedEffect(keyboardVisible) {
+        if (keyboardVisible) {
+            showForKeyboard = false
+        } else {
+            delay(24)
+            showForKeyboard = true
+        }
+    }
+
+    AnimatedVisibility(
+        visible = visible && showForKeyboard,
+        enter = fadeIn(tween(430)) + slideInVertically(tween(430)) { it / 2 },
+        exit = fadeOut(tween(430)) + slideOutVertically(tween(430)) { it / 2 }
+    ) {
+        val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
+
+        EditCategoriesStyledFab(
+            onClick = onClick,
+            icon = Icons.Default.Add,
+            contentDescription = "Add",
+            backgroundTint = MaterialTheme.colorScheme.primary,
+            iconTint = MaterialTheme.colorScheme.onPrimary,
+            tintAlpha = if (isDarkTheme) 0.76f else 0.62f,
+            modifier = Modifier.padding(bottom = 90.dp)
+        )
+    }
+}
+
+@Composable
+private fun EditCategoriesStyledFab(
+    onClick: () -> Unit,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    contentDescription: String,
+    backgroundTint: Color,
+    iconTint: Color,
+    modifier: Modifier = Modifier,
+    tintAlpha: Float = 0.62f
+) {
+    val shape = RoundedCornerShape(50.dp)
+
+    EditCategoriesBackgroundSurface(
+        modifier = modifier
+            .size(50.dp)
+            .clip(shape)
+            .clickable(onClick = onClick),
+        shape = shape,
+        shadowElevation = 14.dp
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clip(shape)
+                .background(backgroundTint.copy(alpha = tintAlpha)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = contentDescription,
+                tint = iconTint
+            )
+        }
+    }
+}
+
+@Composable
+private fun GlassAlertDialog(
+    onDismissRequest: () -> Unit,
+    title: (@Composable () -> Unit)? = null,
+    text: (@Composable () -> Unit)? = null,
+    confirmButton: @Composable () -> Unit,
+    dismissButton: (@Composable () -> Unit)? = null
+) {
+    val animatedImeShiftPx = rememberAnimatedImeShiftPx(label = "glassAlertDialogImeShift")
+    val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val dialogShape = RoundedCornerShape(28.dp)
+    val dialogModifier =
+        Modifier
+            .fillMaxWidth()
+            .graphicsLayer { translationY = -animatedImeShiftPx }
+
+    Dialog(
+        onDismissRequest = onDismissRequest,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 24.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            val dialogContent: @Composable () -> Unit = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(22.dp)
+                ) {
+                    title?.let {
+                        it()
+                    }
+
+                    if (text != null) {
+                        if (title != null) {
+                            Spacer(Modifier.height(12.dp))
+                        }
+                        text()
+                    }
+
+                    Spacer(Modifier.height(20.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        dismissButton?.let {
+                            it()
+                        }
+                        confirmButton()
+                    }
+                }
+            }
+
+            if (isDarkTheme) {
+                BlackGlassCard(
+                    modifier = dialogModifier,
+                    shape = dialogShape,
+                    shadowElevation = 16.dp,
+                    primaryBlur = 100.dp,
+                    accentBlur = 28.dp,
+                    content = dialogContent
+                )
+            } else {
+                ExactFrostedPillCard(
+                    modifier = dialogModifier,
+                    shape = dialogShape,
+                    shadowElevation = 16.dp,
+                    content = dialogContent
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AppBackdrop(modifier: Modifier = Modifier) {
+    val scheme = MaterialTheme.colorScheme
+    val isDark = scheme.background.luminance() < 0.5f
+
+    Box(
+        modifier = modifier.drawWithCache {
+            if (isDark) {
+                onDrawBehind {
+                    drawRect(Color.Black)
+                }
+            } else {
+                val glowRadius = max(size.width, size.height) * 0.85f
+                val baseBrush =
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color(0xFFFDFEFF),
+                            scheme.background,
+                            Color(0xFFF2F7FD)
+                        )
+                    )
+                val primaryGlow =
+                    Brush.radialGradient(
+                        colors = listOf(
+                            scheme.primary.copy(alpha = 0.10f),
+                            Color.Transparent
+                        ),
+                        center = Offset(size.width * 0.15f, size.height * 0.08f),
+                        radius = glowRadius
+                    )
+                val tertiaryGlow =
+                    Brush.radialGradient(
+                        colors = listOf(
+                            scheme.tertiary.copy(alpha = 0.06f),
+                            Color.Transparent
+                        ),
+                        center = Offset(size.width * 0.92f, size.height * 0.88f),
+                        radius = glowRadius
+                    )
+
+                onDrawBehind {
+                    drawRect(baseBrush)
+                    drawRect(primaryGlow)
+                    drawRect(tertiaryGlow)
+                }
+            }
+        }
+    )
+}
+
+@Composable
+fun SlimTopBar(
+    modifier: Modifier = Modifier,
+    title: String,
+    onBack: (() -> Unit)? = null,
+    actions: @Composable RowScope.() -> Unit = {}
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 3.dp)
+    ) {
+        GlassSurface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(28.dp),
+            tone = GlassTone.CHROME
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(54.dp)
+                    .padding(horizontal = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (onBack != null) {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.Filled.KeyboardArrowLeft, contentDescription = "Back")
+                    }
+                } else {
+                    Spacer(Modifier.width(48.dp))
+                }
+
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold
+                )
+
+                Spacer(Modifier.weight(1f))
+                actions()
+            }
+        }
+    }
+}
+
+@Composable
+fun AppTheme(mode: ThemeMode, content: @Composable () -> Unit) {
+    val dark = when (mode) {
+        ThemeMode.SYSTEM -> isSystemInDarkTheme()
+        ThemeMode.LIGHT -> false
+        ThemeMode.DARK -> true
+    }
+
+    MyApplicationTheme(
+        darkTheme = dark,
+        dynamicColor = false,
+    ) {
+        ApplySystemBarStyle(isDark = dark)
+        content()
+    }
+}
+
+@Composable
+private fun ApplySystemBarStyle(isDark: Boolean) {
+    val view = LocalView.current
+    if (view.isInEditMode) return
+
+    SideEffect {
+        val window = (view.context as Activity).window
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.statusBarColor = Color.Transparent.toArgb()
+        window.navigationBarColor = Color.Transparent.toArgb()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.isStatusBarContrastEnforced = false
+            window.isNavigationBarContrastEnforced = false
+        }
+
+        WindowInsetsControllerCompat(window, view).apply {
+            isAppearanceLightStatusBars = !isDark
+            isAppearanceLightNavigationBars = !isDark
+        }
+    }
+}
+
+@Composable
+private fun OverlayBackHandler(
+    enabled: Boolean,
+    onBack: () -> Unit
+) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+
+    val view = LocalView.current
+    val currentOnBack = rememberUpdatedState(onBack)
+
+    DisposableEffect(view, enabled) {
+        if (!enabled) {
+            onDispose {}
+        } else {
+            val activity = view.context as? Activity
+            if (activity == null) {
+                onDispose {}
+            } else {
+                val callback = OnBackInvokedCallback {
+                    currentOnBack.value()
+                }
+
+                activity.onBackInvokedDispatcher.registerOnBackInvokedCallback(
+                    OnBackInvokedDispatcher.PRIORITY_OVERLAY,
+                    callback
+                )
+
+                onDispose {
+                    activity.onBackInvokedDispatcher.unregisterOnBackInvokedCallback(callback)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun rememberAnimatedImeShiftPx(
+    multiplier: Float = 0.5f,
+    label: String
+): Float {
+    val density = LocalDensity.current
+    val imeBottomPx = WindowInsets.ime.getBottom(density).toFloat()
+    val targetShiftPx = imeBottomPx * multiplier
+
+    val animatedShiftPx by animateFloatAsState(
+        targetValue = targetShiftPx,
+        animationSpec = tween(
+            durationMillis = 260,
+            easing = LinearOutSlowInEasing
+        ),
+        label = label
+    )
+
+    return animatedShiftPx
+}
+
+@Immutable
+data class FoodItem(val name: String, val expiry: String, val category: String? = null)
+
+private data class SortedFoodSnapshot(
+    val item: FoodItem,
+    val expiryBucket: Int,
+    val expiryDistance: Int,
+    val nameKey: String
+)
+
+private data class HistoryEntry(
+    val name: String,
+    val lastUsedAt: Long = System.currentTimeMillis()
+)
+
+private const val FOOD_PREFS = "food_prefs"
+private const val FOOD_LIST_KEY = "food_list"
+private const val HISTORY_LIST_KEY = "history_list"
+private const val CATEGORIES_LIST_KEY = "categories_list"
+private const val NOTIF_FIRST_PROMPT_SHOWN_KEY = "notif_first_prompt_shown"
+private const val HISTORY_RETENTION_DAYS = 30L
+private const val DAY_IN_MILLIS = 86_400_000L
+private const val SWIPE_DELETE_EXIT_DURATION_MS = 420
+private const val SWIPE_DELETE_REMOVE_DELAY_MS = 420L
+private const val SWIPE_RESET_DURATION_MS = 220
+private const val SWIPE_ITEM_SPACING_DP = 10
+private const val SWIPE_ITEM_PLACEMENT_DURATION_MS = 320
+private const val BOTTOM_TAB_TRANSITION_GUARD_MS = 460L
+private const val EDIT_CATEGORIES_SHEET_EXIT_DURATION_MS = 250
+private const val EDIT_CATEGORIES_SHEET_ENTER_DURATION_MS = 260
+
+private const val BARCODE_CACHE_KEY = "barcode_cache"
+private const val EXTRA_SCANNED_BARCODE = "extra_scanned_barcode"
+private const val EXTRA_BARCODE_SCAN_MESSAGE = "extra_barcode_scan_message"
+
+private fun shortListScrollRunway(itemCount: Int): Dp =
+    when {
+        itemCount >= 20 -> 0.dp
+        itemCount >= 12 -> 36.dp
+        itemCount >= 8 -> 84.dp
+        itemCount >= 5 -> 140.dp
+        itemCount >= 3 -> 220.dp
+        itemCount > 0 -> 280.dp
+        else -> 0.dp
+    }
+
+private fun Modifier.blurWhen(radius: Dp): Modifier =
+    if (radius > 0.dp) blur(radius) else this
+
+private fun AnimatedContentTransitionScope<NavBackStackEntry>.bottomTabEnterTransition(): EnterTransition {
+    val from = bottomBarRouteIndex(initialState.destination.route)
+    val to = bottomBarRouteIndex(targetState.destination.route)
+    val movingLeft = to > from
+    val slideDirection =
+        if (movingLeft) {
+            AnimatedContentTransitionScope.SlideDirection.Left
+        } else {
+            AnimatedContentTransitionScope.SlideDirection.Right
+        }
+
+    return fadeIn(
+        animationSpec = tween(
+            durationMillis = 430,
+            easing = LinearOutSlowInEasing
+        )
+    ) + slideIntoContainer(
+        towards = slideDirection,
+        animationSpec = tween(
+            durationMillis = 430,
+            easing = FastOutSlowInEasing
+        )
+    )
+}
+
+private fun AnimatedContentTransitionScope<NavBackStackEntry>.bottomTabExitTransition(): ExitTransition {
+    val from = bottomBarRouteIndex(initialState.destination.route)
+    val to = bottomBarRouteIndex(targetState.destination.route)
+    val movingLeft = to > from
+    val slideDirection =
+        if (movingLeft) {
+            AnimatedContentTransitionScope.SlideDirection.Left
+        } else {
+            AnimatedContentTransitionScope.SlideDirection.Right
+        }
+
+    return fadeOut(
+        animationSpec = tween(
+            durationMillis = 380,
+            easing = FastOutSlowInEasing
+        )
+    ) + slideOutOfContainer(
+        towards = slideDirection,
+        animationSpec = tween(
+            durationMillis = 430,
+            easing = FastOutSlowInEasing
+        )
+    )
+}
+
+private data class BarcodeCacheEntry(
+    val barcode: String,
+    val name: String,
+    val source: String,
+    val savedAt: Long = System.currentTimeMillis()
+)
+
+private data class BarcodeLookupResult(
+    val barcode: String,
+    val productName: String,
+    val source: String,
+    val wasCached: Boolean
+)
+
+private data class OffLookupResponse(
+    val status: Int? = null,
+    val product: OffLookupProduct? = null
+)
+
+private data class OffLookupProduct(
+    val product_name: String? = null,
+    val product_name_en: String? = null,
+    val product_name_ar: String? = null,
+    val brands: String? = null
+)
+
+private fun normalizeBarcode(raw: String): String {
+    return raw.trim().replace(" ", "")
+}
+
+private fun loadBarcodeCache(
+    prefs: android.content.SharedPreferences,
+    gson: Gson
+): MutableMap<String, BarcodeCacheEntry> {
+    val json = prefs.getString(BARCODE_CACHE_KEY, null) ?: return mutableMapOf()
+    val type = object : TypeToken<MutableMap<String, BarcodeCacheEntry>>() {}.type
+    return runCatching {
+        gson.fromJson<MutableMap<String, BarcodeCacheEntry>>(json, type)
+    }.getOrElse { mutableMapOf() }
+}
+
+private fun saveBarcodeCache(
+    prefs: android.content.SharedPreferences,
+    gson: Gson,
+    map: Map<String, BarcodeCacheEntry>
+) {
+    prefs.edit { putString(BARCODE_CACHE_KEY, gson.toJson(map)) }
+}
+
+private fun saveBarcodeNameToCache(
+    context: Context,
+    barcode: String,
+    productName: String,
+    source: String
+) {
+    val cleanedBarcode = normalizeBarcode(barcode)
+    val cleanedName = productName.trim().replace(Regex("\\s+"), " ")
+    if (cleanedBarcode.isBlank() || cleanedName.isBlank()) return
+
+    val prefs = context.applicationContext.getSharedPreferences(FOOD_PREFS, Context.MODE_PRIVATE)
+    val gson = Gson()
+    val cache = loadBarcodeCache(prefs, gson)
+    cache[cleanedBarcode] = BarcodeCacheEntry(
+        barcode = cleanedBarcode,
+        name = cleanedName,
+        source = source
+    )
+    saveBarcodeCache(prefs, gson, cache)
+}
+
+private fun getBarcodeNameFromCache(
+    context: Context,
+    barcode: String
+): BarcodeLookupResult? {
+    val cleanedBarcode = normalizeBarcode(barcode)
+    if (cleanedBarcode.isBlank()) return null
+
+    val prefs = context.applicationContext.getSharedPreferences(FOOD_PREFS, Context.MODE_PRIVATE)
+    val gson = Gson()
+    val cache = loadBarcodeCache(prefs, gson)
+    val entry = cache[cleanedBarcode] ?: return null
+
+    return BarcodeLookupResult(
+        barcode = entry.barcode,
+        productName = entry.name,
+        source = entry.source,
+        wasCached = true
+    )
+}
+
+private fun buildBestProductName(
+    rawName: String?,
+    rawNameEn: String? = null,
+    rawNameAr: String? = null,
+    brand: String? = null,
+    barcode: String? = null
+): String? {
+    val chosenName = listOf(
+        rawNameAr,
+        rawNameEn,
+        rawName
+    ).firstOrNull { !it.isNullOrBlank() }
+        ?.replace(Regex("\\s+"), " ")
+        ?.trim()
+        .orEmpty()
+
+    val firstBrand = brand
+        ?.split(",")
+        ?.firstOrNull()
+        ?.replace(Regex("\\s+"), " ")
+        ?.trim()
+        .orEmpty()
+
+    val combined = when {
+        chosenName.isBlank() -> firstBrand
+        firstBrand.isBlank() -> chosenName
+        chosenName.startsWith(firstBrand, ignoreCase = true) -> chosenName
+        else -> "$firstBrand $chosenName"
+    }.replace(Regex("\\s+"), " ").trim()
+
+    if (combined.isBlank()) return null
+
+    val cleanedBarcode = barcode?.trim().orEmpty()
+
+    if (cleanedBarcode.isNotBlank() && combined == cleanedBarcode) return null
+    if (firstBrand.isNotBlank() && combined.equals(firstBrand, ignoreCase = true)) return null
+    if (combined.length < 4) return null
+
+    return combined
+}
+
+private suspend fun lookupFromOpenFoodFacts(barcode: String): BarcodeLookupResult? {
+    return withContext(Dispatchers.IO) {
+        val url = URL(
+            "https://world.openfoodfacts.net/api/v2/product/$barcode" +
+                    "?fields=product_name,product_name_en,product_name_ar,brands"
+        )
+
+        val connection = (url.openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 3500
+            readTimeout = 3500
+        }
+
+        try {
+            if (connection.responseCode !in 200..299) return@withContext null
+
+            val body = connection.inputStream.bufferedReader().use { it.readText() }
+            val response = Gson().fromJson(body, OffLookupResponse::class.java) ?: return@withContext null
+            if (response.status != 1) return@withContext null
+
+            val product = response.product ?: return@withContext null
+
+            val bestName = buildBestProductName(
+                rawName = product.product_name,
+                rawNameEn = product.product_name_en,
+                rawNameAr = product.product_name_ar,
+                brand = product.brands,
+                barcode = barcode
+            ) ?: return@withContext null
+
+            BarcodeLookupResult(
+                barcode = barcode,
+                productName = bestName,
+                source = "Open Food Facts",
+                wasCached = false
+            )
+        } catch (_: Exception) {
+            null
+        } finally {
+            connection.disconnect()
+        }
+    }
+}
+
+private suspend fun lookupBarcodeName(
+    context: Context,
+    barcode: String
+): BarcodeLookupResult? {
+    val cleanedBarcode = normalizeBarcode(barcode)
+    if (cleanedBarcode.isBlank()) return null
+
+    getBarcodeNameFromCache(context, cleanedBarcode)?.let { return it }
+
+    val providers = listOf<suspend (String) -> BarcodeLookupResult?> { code ->
+        withTimeoutOrNull(
+            3500
+        ) { lookupFromOpenFoodFacts(code) }
+    }
+    for (provider in providers) {
+        val result = provider(cleanedBarcode)
+        if (result != null) {
+            saveBarcodeNameToCache(
+                context = context,
+                barcode = cleanedBarcode,
+                productName = result.productName,
+                source = result.source
+            )
+            return result.copy(wasCached = false)
+        }
+    }
+
+    return null
+}
+
+private suspend fun Context.getCameraProvider(): ProcessCameraProvider =
+    suspendCancellableCoroutine { continuation ->
+        val future = ProcessCameraProvider.getInstance(this)
+        future.addListener(
+            {
+                continuation.resume(future.get())
+            },
+            ContextCompat.getMainExecutor(this)
+        )
+    }
+
+private fun normalizeFoodName(raw: String): String {
+    return raw
+        .trim()
+        .lowercase(Locale.US)
+        .replace(Regex("\\s+"), " ")
+        .replace(Regex("[^\\p{L}\\p{N} ]"), "")
+}
+
+private fun cleanHistoryName(raw: String): String {
+    return raw.trim().replace(Regex("\\s+"), " ")
+}
+
+private fun loadFoodList(prefs: android.content.SharedPreferences, gson: Gson): MutableList<FoodItem> {
+    val json = prefs.getString(FOOD_LIST_KEY, null) ?: return mutableListOf()
+    val type = object : TypeToken<MutableList<FoodItem>>() {}.type
+    return runCatching { gson.fromJson<MutableList<FoodItem>>(json, type) }.getOrElse { mutableListOf() }
+}
+
+private fun saveFoodList(prefs: android.content.SharedPreferences, gson: Gson, list: List<FoodItem>) {
+    val json = gson.toJson(list)
+    if (prefs.getString(FOOD_LIST_KEY, null) == json) return
+    prefs.edit { putString(FOOD_LIST_KEY, json) }
+}
+
+private fun loadStringList(
+    prefs: android.content.SharedPreferences,
+    gson: Gson,
+    key: String
+): MutableList<String> {
+    val json = prefs.getString(key, null) ?: return mutableListOf()
+    val type = object : TypeToken<MutableList<String>>() {}.type
+    return runCatching { gson.fromJson<MutableList<String>>(json, type) }.getOrElse { mutableListOf() }
+}
+
+private fun saveStringList(
+    prefs: android.content.SharedPreferences,
+    gson: Gson,
+    key: String,
+    list: List<String>
+) {
+    val json = gson.toJson(list)
+    if (prefs.getString(key, null) == json) return
+    prefs.edit { putString(key, json) }
+}
+
+private suspend fun saveFoodListAsync(
+    prefs: android.content.SharedPreferences,
+    gson: Gson,
+    list: List<FoodItem>
+) {
+    val json = withContext(Dispatchers.Default) { gson.toJson(list) }
+    withContext(Dispatchers.IO) {
+        if (prefs.getString(FOOD_LIST_KEY, null) != json) {
+            prefs.edit { putString(FOOD_LIST_KEY, json) }
+        }
+    }
+}
+
+private fun reminderDaysLabel(days: Int): String {
+    return if (days == 1) "1 day" else "$days days"
+}
+
+private suspend fun saveStringListAsync(
+    prefs: android.content.SharedPreferences,
+    gson: Gson,
+    key: String,
+    list: List<String>
+) {
+    val json = withContext(Dispatchers.Default) { gson.toJson(list) }
+    withContext(Dispatchers.IO) {
+        if (prefs.getString(key, null) != json) {
+            prefs.edit { putString(key, json) }
+        }
+    }
+}
+
+private fun <T> replaceListContentsIfChanged(
+    target: MutableList<T>,
+    updated: List<T>
+) {
+    val isSame =
+        target.size == updated.size &&
+                target.indices.all { index -> target[index] == updated[index] }
+
+    if (isSame) return
+
+    target.clear()
+    target.addAll(updated)
+}
+
+private fun historyCutoffMillis(now: Long = System.currentTimeMillis()): Long {
+    return now - (HISTORY_RETENTION_DAYS * DAY_IN_MILLIS)
+}
+
+private fun normalizeHistoryEntries(
+    entries: List<HistoryEntry>,
+    now: Long = System.currentTimeMillis()
+): MutableList<HistoryEntry> {
+    val cutoff = historyCutoffMillis(now)
+    val deduped = LinkedHashMap<String, HistoryEntry>()
+
+    entries.forEach { entry ->
+        val cleanedName = cleanHistoryName(entry.name)
+        if (cleanedName.isBlank()) return@forEach
+
+        val normalizedKey = normalizeFoodName(cleanedName)
+        if (normalizedKey.isBlank()) return@forEach
+
+        val sanitized = HistoryEntry(
+            name = cleanedName,
+            lastUsedAt = entry.lastUsedAt.takeIf { it > 0L } ?: now
+        )
+
+        if (sanitized.lastUsedAt < cutoff) return@forEach
+
+        val existing = deduped[normalizedKey]
+        if (existing == null || sanitized.lastUsedAt > existing.lastUsedAt) {
+            deduped[normalizedKey] = sanitized
+        }
+    }
+
+    return deduped.values
+        .sortedByDescending { it.lastUsedAt }
+        .toMutableList()
+}
+
+private fun loadHistoryEntries(
+    prefs: android.content.SharedPreferences,
+    gson: Gson,
+    now: Long = System.currentTimeMillis()
+): MutableList<HistoryEntry> {
+    val json = prefs.getString(HISTORY_LIST_KEY, null) ?: return mutableListOf()
+
+    val historyType = object : TypeToken<MutableList<HistoryEntry>>() {}.type
+    val savedEntries = runCatching {
+        gson.fromJson<MutableList<HistoryEntry>>(json, historyType)
+    }.getOrNull()
+
+    if (savedEntries != null) {
+        return normalizeHistoryEntries(savedEntries, now)
+    }
+
+    val legacyType = object : TypeToken<MutableList<String>>() {}.type
+    val legacyEntries = runCatching {
+        gson.fromJson<MutableList<String>>(json, legacyType)
+    }.getOrElse { mutableListOf() } ?: mutableListOf()
+
+    val migratedEntries = legacyEntries.mapIndexed { index, name ->
+        HistoryEntry(
+            name = name,
+            lastUsedAt = now - index.toLong()
+        )
+    }
+
+    return normalizeHistoryEntries(migratedEntries, now)
+}
+
+private fun saveHistoryEntries(
+    prefs: android.content.SharedPreferences,
+    gson: Gson,
+    entries: List<HistoryEntry>
+) {
+    prefs.edit { putString(HISTORY_LIST_KEY, gson.toJson(entries)) }
+}
+
+private fun loadAndSyncHistoryEntries(
+    prefs: android.content.SharedPreferences,
+    gson: Gson
+): MutableList<HistoryEntry> {
+    val entries = loadHistoryEntries(prefs, gson)
+    if (prefs.contains(HISTORY_LIST_KEY)) {
+        saveHistoryEntries(prefs, gson, entries)
+    }
+    return entries
+}
+
+private fun recordFoodNameInHistory(
+    prefs: android.content.SharedPreferences,
+    gson: Gson,
+    history: MutableList<HistoryEntry>,
+    name: String,
+    now: Long = System.currentTimeMillis()
+) {
+    val cleaned = cleanHistoryName(name)
+    val key = normalizeFoodName(cleaned)
+    if (key.isBlank()) return
+
+    val updatedEntries = history
+        .filterNot { normalizeFoodName(it.name) == key }
+        .toMutableList()
+        .apply {
+            add(
+                0,
+                HistoryEntry(
+                    name = cleaned,
+                    lastUsedAt = now
+                )
+            )
+        }
+
+    val normalizedEntries = normalizeHistoryEntries(updatedEntries, now)
+    history.clear()
+    history.addAll(normalizedEntries)
+    saveHistoryEntries(prefs, gson, normalizedEntries)
+}
+
+private fun addFoodNameToHistory(
+    prefs: android.content.SharedPreferences,
+    gson: Gson,
+    name: String
+) {
+    val history = loadHistoryEntries(prefs, gson)
+    recordFoodNameInHistory(prefs, gson, history, name)
+}
+
+private fun removeFoodNameFromHistory(
+    prefs: android.content.SharedPreferences,
+    gson: Gson,
+    history: MutableList<HistoryEntry>,
+    name: String
+) {
+    val key = normalizeFoodName(name)
+    if (key.isBlank()) return
+
+    val removed = history.removeAll { normalizeFoodName(it.name) == key }
+    if (removed) {
+        saveHistoryEntries(prefs, gson, history)
+    }
+}
+
+private val EXPIRY_FORMATTER: DateTimeFormatter =
+    DateTimeFormatter.ofPattern("d/M/yyyy", Locale.US)
+
+private fun isValidFutureExpiryDate(input: String): Boolean {
+    return try {
+        val parsedDate = LocalDate.parse(input, EXPIRY_FORMATTER)
+        parsedDate.isAfter(LocalDate.now())
+    } catch (_: Exception) {
+        false
+    }
+}
+
+private fun openExpiryDatePicker(
+    context: Context,
+    onDatePicked: (String) -> Unit
+) {
+    val tomorrow = Calendar.getInstance().apply { add(Calendar.DAY_OF_MONTH, 1) }
+
+    val year = tomorrow.get(Calendar.YEAR)
+    val month = tomorrow.get(Calendar.MONTH)
+    val day = tomorrow.get(Calendar.DAY_OF_MONTH)
+
+    val minDateMillis = Calendar.getInstance().apply {
+        set(Calendar.HOUR_OF_DAY, 0)
+        set(Calendar.MINUTE, 0)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+        add(Calendar.DAY_OF_MONTH, 1)
+    }.timeInMillis
+
+    val dialog = DatePickerDialog(
+        context,
+        { _, selectedYear, selectedMonth, selectedDay ->
+            onDatePicked(
+                String.format(
+                    Locale.US,
+                    "%02d/%02d/%04d",
+                    selectedDay,
+                    selectedMonth + 1,
+                    selectedYear
+                )
+            )
+        },
+        year,
+        month,
+        day
+    )
+
+    dialog.datePicker.minDate = minDateMillis
+    dialog.show()
+}
+
+private fun parseExpiryOrDefault(value: String): Triple<Int, Int, Int> {
+    return try {
+        val parsed = LocalDate.parse(value, EXPIRY_FORMATTER)
+        Triple(parsed.dayOfMonth, parsed.monthValue, parsed.year)
+    } catch (_: Exception) {
+        val tomorrow = LocalDate.now().plusDays(1)
+        Triple(tomorrow.dayOfMonth, tomorrow.monthValue, tomorrow.year)
+    }
+}
+
+private fun daysInMonth(month: Int, year: Int): Int {
+    return try {
+        java.time.YearMonth.of(year, month).lengthOfMonth()
+    } catch (_: Exception) {
+        31
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun WheelPickerColumn(
+    values: List<String>,
+    selectedIndex: Int,
+    onSelectedIndexChange: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val pickerTextColor = if (isDarkTheme) Color.White else Color.Black
+    val pickerDividerColor =
+        if (isDarkTheme) Color.White.copy(alpha = 0.40f) else Color.Black.copy(alpha = 0.42f)
+
+    val itemHeight = 48.dp
+    val listState = rememberLazyListState(
+        initialFirstVisibleItemIndex = selectedIndex.coerceIn(values.indices)
+    )
+    val flingBehavior = rememberSnapFlingBehavior(lazyListState = listState)
+    val density = LocalDensity.current
+    val itemHeightPx = remember(density) { with(density) { itemHeight.roundToPx() } }
+    var suppressSelectionCallback by remember { mutableStateOf(false) }
+
+    val centeredIndex by remember {
+        derivedStateOf {
+            val extra =
+                if (listState.firstVisibleItemScrollOffset > itemHeightPx / 2) 1 else 0
+
+            (listState.firstVisibleItemIndex + extra).coerceIn(values.indices)
+        }
+    }
+
+    LaunchedEffect(centeredIndex) {
+        if (!suppressSelectionCallback && centeredIndex != selectedIndex) {
+            onSelectedIndexChange(centeredIndex)
+        }
+    }
+
+    LaunchedEffect(selectedIndex, values.size) {
+        val safeIndex = selectedIndex.coerceIn(values.indices)
+        if (!listState.isScrollInProgress && centeredIndex != safeIndex) {
+            suppressSelectionCallback = true
+            try {
+                listState.animateScrollToItem(safeIndex)
+            } finally {
+                suppressSelectionCallback = false
+            }
+        }
+    }
+
+    Box(
+        modifier = modifier.height(itemHeight * 3)
+    ) {
+        LazyColumn(
+            state = listState,
+            flingBehavior = flingBehavior,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(vertical = itemHeight),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            items(values.size) { index ->
+                val isSelected = index == centeredIndex
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(itemHeight),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = values[index],
+                        color = pickerTextColor.copy(alpha = if (isSelected) 1f else 0.78f),
+                        fontSize = if (isSelected) 20.sp else 18.sp,
+                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+                    )
+                }
+            }
+        }
+
+        Column(
+            modifier = Modifier
+                .align(Alignment.Center)
+                .fillMaxWidth(0.8f)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(pickerDividerColor)
+            )
+
+            Spacer(modifier = Modifier.height(46.dp))
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(pickerDividerColor)
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun ExpiryWheelPickerDialog(
+    initialValue: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    val parsed = remember(initialValue) { parseExpiryOrDefault(initialValue) }
+
+    var selectedDay by remember(parsed) { mutableIntStateOf(parsed.first) }
+    var selectedMonth by remember(parsed) { mutableIntStateOf(parsed.second) }
+    var selectedYear by remember(parsed) { mutableIntStateOf(parsed.third) }
+
+    val currentYear = remember { LocalDate.now().year }
+    val yearValues = remember(currentYear) {
+        (currentYear..(currentYear + 73)).map { it.toString() }
+    }
+
+    val maxDay = remember(selectedMonth, selectedYear) {
+        daysInMonth(selectedMonth, selectedYear)
+    }
+
+    LaunchedEffect(selectedMonth, selectedYear) {
+        if (selectedDay > maxDay) {
+            selectedDay = maxDay
+        }
+    }
+
+    val dayValues = remember(maxDay) {
+        (1..maxDay).map { String.format(Locale.US, "%02d", it) }
+    }
+
+    val monthValues = remember {
+        (1..12).map { String.format(Locale.US, "%02d", it) }
+    }
+
+    var animateIn by remember { mutableStateOf(false) }
+
+    val dialogScale by animateFloatAsState(
+        targetValue = if (animateIn) 1f else 0.92f,
+        animationSpec = tween(220),
+        label = "dialogScale"
+    )
+
+    val dialogAlpha by animateFloatAsState(
+        targetValue = if (animateIn) 1f else 0f,
+        animationSpec = tween(220),
+        label = "dialogAlpha"
+    )
+
+    LaunchedEffect(Unit) {
+        animateIn = true
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            ExactFrostedPillCard(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp)
+                    .graphicsLayer {
+                        scaleX = dialogScale
+                        scaleY = dialogScale
+                        alpha = dialogAlpha
+                },
+                shape = RoundedCornerShape(28.dp),
+                shadowElevation = 12.dp
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(20.dp)
+                ) {
+                    Text(
+                        text = "Select Expiry Date",
+                        style = MaterialTheme.typography.titleLarge
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        WheelPickerColumn(
+                            values = dayValues,
+                            selectedIndex = (selectedDay - 1).coerceIn(dayValues.indices),
+                            onSelectedIndexChange = { selectedDay = it + 1 },
+                            modifier = Modifier.width(82.dp)
+                        )
+
+                        WheelPickerColumn(
+                            values = monthValues,
+                            selectedIndex = (selectedMonth - 1).coerceIn(monthValues.indices),
+                            onSelectedIndexChange = { selectedMonth = it + 1 },
+                            modifier = Modifier.width(82.dp)
+                        )
+
+                        WheelPickerColumn(
+                            values = yearValues,
+                            selectedIndex = (selectedYear - currentYear).coerceIn(yearValues.indices),
+                            onSelectedIndexChange = { selectedYear = currentYear + it },
+                            modifier = Modifier.width(100.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        TextButton(onClick = onDismiss) {
+                            Text("Cancel")
+                        }
+
+                        TextButton(
+                            onClick = {
+                                val selectedDate = LocalDate.of(selectedYear, selectedMonth, selectedDay)
+
+                                if (!selectedDate.isAfter(LocalDate.now())) {
+                                    return@TextButton
+                                }
+
+                                val pickedDate = String.format(
+                                    Locale.US,
+                                    "%02d/%02d/%04d",
+                                    selectedDay,
+                                    selectedMonth,
+                                    selectedYear
+                                )
+
+                                onConfirm(pickedDate)
+                                onDismiss()
+                            }
+                        ) {
+                            Text("Done")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ExpiryDateInputField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    onCalendarClick: () -> Unit
+) {
+    var showWheelPicker by remember { mutableStateOf(false) }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier.weight(1f)
+        ) {
+            OutlinedTextField(
+                value = value,
+                onValueChange = {},
+                readOnly = true,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Expiry Date") },
+                placeholder = { Text("DD/MM/YYYY") },
+                singleLine = true
+            )
+
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .clickable { showWheelPicker = true }
+            )
+        }
+
+        Spacer(modifier = Modifier.width(8.dp))
+
+        IconButton(
+            onClick = onCalendarClick,
+            modifier = Modifier.size(56.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.DateRange,
+                contentDescription = "Open calendar",
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(24.dp)
+            )
+        }
+    }
+
+    if (showWheelPicker) {
+        ExpiryWheelPickerDialog(
+            initialValue = value,
+            onDismiss = { showWheelPicker = false },
+            onConfirm = { pickedDate ->
+                onValueChange(pickedDate)
+                showWheelPicker = false
+            }
+        )
+    }
+}
+
+private fun daysUntil(expiry: String): Int? = try {
+    val target = LocalDate.parse(expiry, EXPIRY_FORMATTER)
+    ChronoUnit.DAYS.between(LocalDate.now(), target).toInt()
+} catch (_: Exception) {
+    null
+}
+
+private data class CountdownStyle(val bg: Color, val fg: Color)
+
+private fun countdownTextColor(background: Color): Color {
+    return if (background.luminance() > 0.58f) Color.Black else Color.White
+}
+
+private fun countdownStyle(daysLeft: Int?): CountdownStyle {
+    val bg = when {
+        daysLeft == null -> Color(0xFF9CA8B7)
+        daysLeft < 0 -> Color(0xFFA9505A)
+        daysLeft == 0 -> Color(0xFFFF3D2E)
+        daysLeft == 1 -> Color(0xFFFF5B45)
+        daysLeft == 2 -> Color(0xFFFF7A33)
+        daysLeft == 3 -> Color(0xFFFFA025)
+        daysLeft == 4 -> Color(0xFFFFDB25)
+        daysLeft == 5 -> Color(0xFF8DE83D)
+        daysLeft == 6 -> Color(0xFF78DA45)
+        daysLeft == 7 -> Color(0xFF3DCC5C)
+        else -> Color(0xFF9CA8B7)
+    }
+
+    return CountdownStyle(bg = bg, fg = countdownTextColor(bg))
+}
+
+@Composable
+private fun ExpiryCountdownBadge(expiry: String) {
+    val daysLeft = remember(expiry) { daysUntil(expiry) }
+    val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
+
+    val text = when {
+        daysLeft == null -> "--"
+        daysLeft < 0 -> "Expired"
+        daysLeft == 0 -> "Expires Today"
+        daysLeft == 1 -> "1 day left"
+        else -> "$daysLeft days left"
+    }
+
+    val style = remember(daysLeft) { countdownStyle(daysLeft) }
+    val shape = RoundedCornerShape(50.dp)
+    val isNeutralBadge = daysLeft == null || daysLeft > 7
+    val topAlpha = remember(daysLeft, isDarkTheme) {
+        when {
+            daysLeft == null || daysLeft > 7 -> if (isDarkTheme) 0.62f else 0.60f
+            daysLeft < 0 -> if (isDarkTheme) 0.86f else 0.76f
+            daysLeft <= 1 -> if (isDarkTheme) 0.90f else 0.95f
+            daysLeft <= 4 -> if (isDarkTheme) 0.84f else 0.90f
+            else -> if (isDarkTheme) 0.80f else 0.86f
+        }
+    }
+    val bottomAlpha = remember(topAlpha, isDarkTheme) {
+        (topAlpha - if (isDarkTheme) 0.10f else 0.12f).coerceAtLeast(0.52f)
+    }
+    val accentTop = remember(style.bg, topAlpha) { style.bg.copy(alpha = topAlpha) }
+    val accentBottom = remember(style.bg, bottomAlpha) { style.bg.copy(alpha = bottomAlpha) }
+    val textColor = if (isDarkTheme) Color.White else Color(0xFF414141)
+    val borderTint = remember(style.bg, daysLeft, isDarkTheme) {
+        style.bg.copy(
+            alpha = when {
+                daysLeft == null || daysLeft > 7 -> if (isDarkTheme) 0.30f else 0.26f
+                daysLeft <= 1 -> if (isDarkTheme) 0.66f else 0.60f
+                else -> if (isDarkTheme) 0.54f else 0.50f
+            }
+        )
+    }
+
+    Box(
+        modifier = Modifier
+            .clip(shape)
+            .drawWithCache {
+                val baseBrush =
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            accentTop.copy(alpha = if (isNeutralBadge) accentTop.alpha * 0.72f else accentTop.alpha),
+                            accentBottom
+                        )
+                    )
+                val highlightBrush =
+                    Brush.linearGradient(
+                        colors = listOf(
+                            Color.White.copy(alpha = if (isDarkTheme) 0.10f else 0.16f),
+                            Color.Transparent
+                        ),
+                        start = Offset(0f, 0f),
+                        end = Offset(size.width * 0.95f, size.height * 0.55f)
+                    )
+
+                onDrawBehind {
+                    drawRect(baseBrush)
+                    drawRect(highlightBrush)
+                }
+            }
+            .border(
+                width = 1.dp,
+                color = borderTint,
+                shape = shape
+            )
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodyMedium,
+            color = textColor,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+        )
+    }
+}
+
+@Composable
+fun CompactSearchBar(
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    textFieldModifier: Modifier = Modifier,
+    showClearButton: Boolean = true,
+    onTap: (() -> Unit)? = null
+) {
+    val density = LocalDensity.current
+    val focusManager = LocalFocusManager.current
+    val interactionSource = remember { MutableInteractionSource() }
+    var isFocused by remember { mutableStateOf(false) }
+    val isImeVisible = WindowInsets.ime.getBottom(density) > 0
+    var imeWasVisibleWhileFocused by remember { mutableStateOf(false) }
+
+    LaunchedEffect(isFocused, isImeVisible) {
+        if (!isFocused) {
+            imeWasVisibleWhileFocused = false
+            return@LaunchedEffect
+        }
+
+        if (isImeVisible) {
+            imeWasVisibleWhileFocused = true
+            return@LaunchedEffect
+        }
+
+        if (imeWasVisibleWhileFocused) {
+            focusManager.clearFocus(force = true)
+            imeWasVisibleWhileFocused = false
+        }
+    }
+
+    GlassSurface(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(44.dp)
+            .then(
+                if (onTap != null) {
+                    Modifier.clickable(
+                        interactionSource = interactionSource,
+                        indication = null,
+                        onClick = onTap
+                    )
+                } else {
+                    Modifier
+                }
+            ),
+        shape = RoundedCornerShape(50.dp),
+        tone = GlassTone.SEARCH,
+        shadowElevation = 8.dp
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Default.Search,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp)
+            )
+
+            Spacer(Modifier.width(8.dp))
+
+            Box(modifier = Modifier.weight(1f)) {
+                if (value.isBlank()) {
+                    Text(
+                        text = "Search foods...",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                BasicTextField(
+                    value = value,
+                    onValueChange = onValueChange,
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodySmall.copy(
+                        color = MaterialTheme.colorScheme.onSurface
+                    ),
+                    keyboardOptions = KeyboardOptions(
+                        imeAction = ImeAction.Done,
+                        capitalization = KeyboardCapitalization.Sentences
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .then(textFieldModifier)
+                        .onFocusChanged { isFocused = it.isFocused }
+                )
+            }
+
+            if (showClearButton && value.isNotBlank()) {
+                IconButton(onClick = { onValueChange("") }) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Clear",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CategoryChip(
+    text: String,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    val palette = rememberGlassPalette()
+    val bg = if (selected) palette.accent else palette.card.copy(alpha = 0.52f)
+
+    val fg = if (selected) MaterialTheme.colorScheme.primary
+    else MaterialTheme.colorScheme.onSurfaceVariant
+
+    val outline = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.20f)
+    else palette.border
+
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(50.dp))
+            .border(1.dp, outline, RoundedCornerShape(50.dp))
+            .background(bg)
+            .clickable { onClick() }
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+    ) {
+        Text(
+            text = text,
+            color = fg,
+            style = MaterialTheme.typography.bodySmall
+        )
+    }
+}
+
+@Composable
+private fun EditCategoriesChip(onClick: () -> Unit) {
+    val palette = rememberGlassPalette()
+
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(50.dp))
+            .border(1.dp, palette.border, RoundedCornerShape(50.dp))
+            .background(palette.card.copy(alpha = 0.52f))
+            .clickable { onClick() }
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = Icons.Default.Edit,
+            contentDescription = "Edit categories",
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(18.dp)
+        )
+    }
+}
+
+@Composable
+private fun EditCategoriesBackgroundFill(
+    modifier: Modifier = Modifier,
+) {
+    val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
+
+    Box(
+        modifier = modifier.fillMaxSize()
+    ) {
+        if (isDarkTheme) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(
+                        brush = Brush.verticalGradient(
+                            colors = listOf(
+                                Color(0xFF141A20),
+                                Color(0xFF0D1115),
+                                Color(0xFF080A0D)
+                            )
+                        )
+                    )
+            )
+
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.10f),
+                                Color.Transparent
+                            ),
+                            center = Offset(140f, 80f),
+                            radius = 520f
+                        )
+                    )
+            )
+
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(
+                        brush = Brush.verticalGradient(
+                            colors = listOf(
+                                Color.White.copy(alpha = 0.035f),
+                                Color.Transparent,
+                                Color.Black.copy(alpha = 0.14f)
+                            )
+                        )
+                    )
+            )
+        } else {
+            AppBackdrop(Modifier.matchParentSize())
+        }
+    }
+}
+
+@Composable
+private fun EditCategoriesBackgroundSurface(
+    modifier: Modifier = Modifier,
+    shape: Shape = RoundedCornerShape(28.dp),
+    shadowElevation: Dp = 12.dp,
+    content: @Composable () -> Unit
+) {
+    Surface(
+        modifier = modifier,
+        shape = shape,
+        color = Color.Transparent,
+        shadowElevation = shadowElevation
+    ) {
+        Box(
+            modifier = Modifier
+                .clip(shape)
+        ) {
+            EditCategoriesBackgroundFill(Modifier.matchParentSize())
+            content()
+        }
+    }
+}
+
+@Composable
+private fun SelectionActionChip(
+    modifier: Modifier = Modifier,
+    text: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    contentDescription: String,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    val palette = rememberGlassPalette()
+    val background = if (enabled) {
+        palette.card.copy(alpha = 0.52f)
+    } else {
+        palette.card.copy(alpha = 0.35f)
+    }
+    val borderColor = if (enabled) palette.border else palette.border.copy(alpha = 0.55f)
+    val foreground = if (enabled) {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+    }
+
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(50.dp))
+            .border(1.dp, borderColor, RoundedCornerShape(50.dp))
+            .background(background)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = contentDescription,
+                tint = foreground,
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text = text,
+                color = foreground,
+                fontSize = 12.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun EditCategoriesBottomSheet(
+    show: Boolean,
+    categories: List<String>,
+    initialCategories: List<String>,
+    onBeginDismiss: () -> Unit,
+    onDismiss: () -> Unit,
+    onAddClick: () -> Unit,
+    onDeleteClick: (String) -> Unit
+) {
+    if (!show) return
+
+    val scope = rememberCoroutineScope()
+    var isVisible by remember(show) { mutableStateOf(false) }
+    var isDismissing by remember(show) { mutableStateOf(false) }
+    val cardScale by animateFloatAsState(
+        targetValue = if (isVisible) 1f else 0.94f,
+        animationSpec = tween(
+            durationMillis = if (isVisible) {
+                EDIT_CATEGORIES_SHEET_ENTER_DURATION_MS
+            } else {
+                EDIT_CATEGORIES_SHEET_EXIT_DURATION_MS
+            },
+            easing = if (isVisible) {
+                LinearOutSlowInEasing
+            } else {
+                FastOutLinearInEasing
+            }
+        ),
+        label = "editCategoriesCardScale"
+    )
+    val cardAlpha by animateFloatAsState(
+        targetValue = if (isVisible) 1f else 0f,
+        animationSpec = tween(
+            durationMillis = if (isVisible) {
+                EDIT_CATEGORIES_SHEET_ENTER_DURATION_MS
+            } else {
+                180
+            },
+            easing = if (isVisible) {
+                LinearOutSlowInEasing
+            } else {
+                FastOutLinearInEasing
+            }
+        ),
+        label = "editCategoriesCardAlpha"
+    )
+    val scrimAlpha by animateFloatAsState(
+        targetValue = if (isVisible) 1f else 0f,
+        animationSpec = if (isVisible) {
+            tween(
+                durationMillis = EDIT_CATEGORIES_SHEET_ENTER_DURATION_MS,
+                easing = FastOutSlowInEasing
+            )
+        } else {
+            tween(durationMillis = 0)
+        },
+        label = "editCategoriesScrimAlpha"
+    )
+
+    LaunchedEffect(show) {
+        if (show) {
+            isVisible = true
+        }
+    }
+
+    fun dismissSheet() {
+        if (isDismissing) return
+
+        isDismissing = true
+        onBeginDismiss()
+        isVisible = false
+
+        scope.launch {
+            delay(EDIT_CATEGORIES_SHEET_EXIT_DURATION_MS.toLong())
+            onDismiss()
+        }
+    }
+
+    BackHandler(onBack = ::dismissSheet)
+
+    Dialog(
+        onDismissRequest = ::dismissSheet,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(Color.Black.copy(alpha = 0.28f * scrimAlpha))
+                    .clickable { dismissSheet() }
+            )
+
+            val cardShape = RoundedCornerShape(30.dp)
+
+            EditCategoriesBackgroundSurface(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp, vertical = 28.dp)
+                    .graphicsLayer {
+                        scaleX = cardScale
+                        scaleY = cardScale
+                        alpha = cardAlpha
+                    },
+                shape = cardShape,
+                shadowElevation = 14.dp
+            ) {
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    Column {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 18.dp, vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Edit Categories", style = MaterialTheme.typography.titleLarge)
+                            Spacer(Modifier.weight(1f))
+                            TextButton(onClick = ::dismissSheet) {
+                                Text("Cancel")
+                            }
+                        }
+
+                        LazyColumn(
+                            modifier = Modifier.heightIn(max = 500.dp),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            items(categories, key = { it }) { cat ->
+                                val isDefault =
+                                    initialCategories.any { it.equals(cat, ignoreCase = true) }
+                                val isDarkTheme =
+                                    MaterialTheme.colorScheme.background.luminance() < 0.5f
+                                val deleteTint =
+                                    if (isDarkTheme) Color(0xFFFF6B63)
+                                    else MaterialTheme.colorScheme.error
+
+                                ExactFrostedPillCard(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(25.dp),
+                                    shadowElevation = 4.dp
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(16.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = cat,
+                                            style = MaterialTheme.typography.titleMedium,
+                                            modifier = Modifier.weight(1f)
+                                        )
+
+                                        if (!isDefault) {
+                                            IconButton(onClick = { onDeleteClick(cat) }) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Delete,
+                                                    contentDescription = "Delete category",
+                                                    tint = deleteTint
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            item {
+                                Spacer(Modifier.height(8.dp))
+                                Button(
+                                    onClick = onAddClick,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(bottom = 20.dp)
+                                ) {
+                                    Text("+ Add Category")
+                                }
+                            }
+                        }
+                }
+            }
+        }
+    }
+}
+}
+
+@Composable
+private fun BulkCategorySelectionSheet(
+    show: Boolean,
+    categories: List<String>,
+    onBeginDismiss: () -> Unit,
+    onDismiss: () -> Unit,
+    onCategorySelected: (String?) -> Unit
+) {
+    if (!show) return
+
+    val scope = rememberCoroutineScope()
+    var isVisible by remember(show) { mutableStateOf(false) }
+    var isDismissing by remember(show) { mutableStateOf(false) }
+    val cardScale by animateFloatAsState(
+        targetValue = if (isVisible) 1f else 0.94f,
+        animationSpec = tween(
+            durationMillis = if (isVisible) {
+                EDIT_CATEGORIES_SHEET_ENTER_DURATION_MS
+            } else {
+                EDIT_CATEGORIES_SHEET_EXIT_DURATION_MS
+            },
+            easing = if (isVisible) {
+                LinearOutSlowInEasing
+            } else {
+                FastOutLinearInEasing
+            }
+        ),
+        label = "bulkCategoryCardScale"
+    )
+    val cardAlpha by animateFloatAsState(
+        targetValue = if (isVisible) 1f else 0f,
+        animationSpec = tween(
+            durationMillis = if (isVisible) {
+                EDIT_CATEGORIES_SHEET_ENTER_DURATION_MS
+            } else {
+                180
+            },
+            easing = if (isVisible) {
+                LinearOutSlowInEasing
+            } else {
+                FastOutLinearInEasing
+            }
+        ),
+        label = "bulkCategoryCardAlpha"
+    )
+    val scrimAlpha by animateFloatAsState(
+        targetValue = if (isVisible) 1f else 0f,
+        animationSpec = if (isVisible) {
+            tween(
+                durationMillis = EDIT_CATEGORIES_SHEET_ENTER_DURATION_MS,
+                easing = FastOutSlowInEasing
+            )
+        } else {
+            tween(durationMillis = 0)
+        },
+        label = "bulkCategoryScrimAlpha"
+    )
+
+    LaunchedEffect(show) {
+        if (show) {
+            isVisible = true
+        }
+    }
+
+    fun dismissSheet() {
+        if (isDismissing) return
+
+        isDismissing = true
+        onBeginDismiss()
+        isVisible = false
+
+        scope.launch {
+            delay(EDIT_CATEGORIES_SHEET_EXIT_DURATION_MS.toLong())
+            onDismiss()
+        }
+    }
+
+    fun selectCategory(category: String?) {
+        onCategorySelected(category)
+        dismissSheet()
+    }
+
+    BackHandler(onBack = ::dismissSheet)
+
+    Dialog(
+        onDismissRequest = ::dismissSheet,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(Color.Black.copy(alpha = 0.28f * scrimAlpha))
+                    .clickable { dismissSheet() }
+            )
+
+            val cardShape = RoundedCornerShape(30.dp)
+            val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
+
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp, vertical = 28.dp)
+                    .graphicsLayer {
+                        scaleX = cardScale
+                        scaleY = cardScale
+                        alpha = cardAlpha
+                    },
+                shape = cardShape,
+                color = Color.Transparent,
+                shadowElevation = 14.dp
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(cardShape)
+                ) {
+                    if (isDarkTheme) {
+                        Box(
+                            modifier = Modifier
+                                .matchParentSize()
+                                .background(
+                                    brush = Brush.verticalGradient(
+                                        colors = listOf(
+                                            Color(0xFF141A20),
+                                            Color(0xFF0D1115),
+                                            Color(0xFF080A0D)
+                                        )
+                                    )
+                                )
+                        )
+
+                        Box(
+                            modifier = Modifier
+                                .matchParentSize()
+                                .background(
+                                    brush = Brush.radialGradient(
+                                        colors = listOf(
+                                            MaterialTheme.colorScheme.primary.copy(alpha = 0.10f),
+                                            Color.Transparent
+                                        ),
+                                        center = Offset(140f, 80f),
+                                        radius = 520f
+                                    )
+                                )
+                        )
+
+                        Box(
+                            modifier = Modifier
+                                .matchParentSize()
+                                .background(
+                                    brush = Brush.verticalGradient(
+                                        colors = listOf(
+                                            Color.White.copy(alpha = 0.035f),
+                                            Color.Transparent,
+                                            Color.Black.copy(alpha = 0.14f)
+                                        )
+                                    )
+                                )
+                        )
+                    } else {
+                        AppBackdrop(Modifier.matchParentSize())
+                    }
+
+                    Column {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 18.dp, vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Add to category", style = MaterialTheme.typography.titleLarge)
+                            Spacer(Modifier.weight(1f))
+                            TextButton(onClick = ::dismissSheet) {
+                                Text("Cancel")
+                            }
+                        }
+
+                        LazyColumn(
+                            modifier = Modifier.heightIn(max = 500.dp),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            item {
+                                ExactFrostedPillCard(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(25.dp),
+                                    shadowElevation = 4.dp,
+                                    onClick = { selectCategory(null) }
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(16.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "None",
+                                            style = MaterialTheme.typography.titleMedium
+                                        )
+                                    }
+                                }
+                            }
+
+                            items(categories, key = { it }) { cat ->
+                                ExactFrostedPillCard(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(25.dp),
+                                    shadowElevation = 4.dp,
+                                    onClick = { selectCategory(cat) }
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(16.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = cat,
+                                            style = MaterialTheme.typography.titleMedium
+                                        )
+                                    }
+                                }
+                            }
+
+                            item { Spacer(Modifier.height(20.dp)) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun MyPantryTopBar(
+    modifier: Modifier = Modifier,
+    isSelecting: Boolean,
+    selectedItemsCount: Int,
+    hasVisibleItems: Boolean,
+    allVisibleItemsSelected: Boolean,
+
+    showSearchBar: Boolean,
+    searchQuery: String,
+    onSearchQueryChange: (String) -> Unit,
+    onShowSearchBar: () -> Unit,
+    searchTextFieldModifier: Modifier,
+    onSearchBarTap: () -> Unit,
+
+    categories: List<String>,
+    selectedFilterCategory: String,
+    onFilterChange: (String) -> Unit,
+
+    onEnterSelectionMode: () -> Unit,
+    onToggleSelectAll: () -> Unit,
+
+    onBulkAddToCategoryClick: () -> Unit,
+    onBulkCustomCategoryClick: () -> Unit,
+
+    onAddCategoryClick: () -> Unit
+) {
+    val enabled = selectedItemsCount > 0
+    val selectionTitle =
+        if (selectedItemsCount == 1) "1 item selected"
+        else "$selectedItemsCount items selected"
+    val categoryRowState = rememberLazyListState()
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 3.dp)
+    ) {
+        EditCategoriesBackgroundSurface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(30.dp),
+            shadowElevation = 12.dp
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .animateContentSize()
+                    .padding(horizontal = 16.dp, vertical = 14.dp)
+            ) {
+                if (isSelecting) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = selectionTitle,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(start = 8.dp)
+                        )
+                        TextButton(
+                            onClick = onToggleSelectAll,
+                            enabled = hasVisibleItems,
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)
+                        ) {
+                            Text(
+                                text = if (allVisibleItemsSelected) "Clear all" else "Select all",
+                                fontSize = 13.sp
+                            )
+                        }
+                    }
+
+                    Spacer(Modifier.height(6.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        SelectionActionChip(
+                            modifier = Modifier.weight(1f),
+                            text = "Add to category",
+                            icon = Icons.Default.Category,
+                            contentDescription = "Add to category",
+                            enabled = enabled,
+                            onClick = onBulkAddToCategoryClick
+                        )
+
+                        SelectionActionChip(
+                            modifier = Modifier.weight(1f),
+                            text = "Custom category",
+                            icon = Icons.Default.Edit,
+                            contentDescription = "Custom category",
+                            enabled = enabled,
+                            onClick = onBulkCustomCategoryClick
+                        )
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "My Pantry",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.weight(1f)
+                        )
+
+                        IconButton(onClick = onShowSearchBar) {
+                            Icon(
+                                imageVector = Icons.Default.Search,
+                                contentDescription = "Show search"
+                            )
+                        }
+
+                        IconButton(onClick = onEnterSelectionMode) {
+                            Icon(
+                                Icons.Default.Checklist,
+                                contentDescription = "Enter selection mode"
+                            )
+                        }
+                    }
+                }
+
+                AnimatedVisibility(
+                    visible = !isSelecting && showSearchBar,
+                    enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(tween(350)),
+                    exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut(tween(350))
+                ) {
+                    Column {
+                        Spacer(Modifier.height(10.dp))
+
+                        CompactSearchBar(
+                            value = searchQuery,
+                            onValueChange = onSearchQueryChange,
+                            textFieldModifier = searchTextFieldModifier,
+                            onTap = onSearchBarTap
+                        )
+
+                        Spacer(Modifier.height(10.dp))
+                    }
+                }
+
+                AnimatedVisibility(
+                    visible = !isSelecting,
+                    enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(tween(350)),
+                    exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut(tween(350))
+                ) {
+                    Column {
+                        if (!showSearchBar) {
+                            Spacer(Modifier.height(10.dp))
+                        }
+
+                        LazyRow(
+                            state = categoryRowState,
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            item {
+                                EditCategoriesChip(onClick = { onAddCategoryClick() })
+                            }
+
+                            item {
+                                CategoryChip(
+                                    text = "All",
+                                    selected = selectedFilterCategory == "All",
+                                    onClick = { onFilterChange("All") }
+                                )
+                            }
+
+                            items(categories, key = { it }) { cat ->
+                                CategoryChip(
+                                    text = cat,
+                                    selected = selectedFilterCategory.equals(cat, ignoreCase = true),
+                                    onClick = { onFilterChange(cat) }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CategoryDropdown(
+    categories: List<String>,
+    initialCategories: List<String>,
+    selectedCategory: String?,
+    isCustom: Boolean,
+    onPickCategory: (String?) -> Unit,
+    onPickCustom: () -> Unit,
+    onDeleteCategory: (String) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Column(Modifier.fillMaxWidth()) {
+        ExposedDropdownMenuBox(
+            expanded = expanded,
+            onExpandedChange = { expanded = !expanded }
+        ) {
+            OutlinedTextField(
+                value = if (isCustom) "Custom..." else (selectedCategory ?: "None"),
+                onValueChange = {},
+                readOnly = true,
+                modifier = Modifier
+                    .menuAnchor()
+                    .fillMaxWidth(),
+                label = { Text("Select category") },
+                trailingIcon = {
+                    ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
+                }
+            )
+
+            ExposedDropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false }
+            ) {
+                ScrollableCategoryMenuContent(
+                    categories = categories,
+                    showCustomOption = true,
+                    onPickNone = {
+                        expanded = false
+                        onPickCategory(null)
+                    },
+                    onPickCustom = {
+                        expanded = false
+                        onPickCustom()
+                    },
+                    onPickCategory = { cat ->
+                        expanded = false
+                        onPickCategory(cat)
+                    }
+                )
+            }
+        }
+    }
+}
+
+@SuppressLint("FrequentlyChangingValue")
+@Composable
+private fun ScrollableCategoryMenuContent(
+    categories: List<String>,
+    showCustomOption: Boolean,
+    onPickNone: () -> Unit,
+    onPickCustom: (() -> Unit)? = null,
+    onPickCategory: (String) -> Unit
+) {
+    val scrollState = rememberScrollState()
+    val density = LocalDensity.current
+    val maxMenuHeight = 180.dp
+    val thumbHeight = 36.dp
+
+    val maxThumbOffsetPx = with(density) { (maxMenuHeight - thumbHeight).toPx() }
+    val thumbOffsetPx =
+        if (scrollState.maxValue == 0) 0f
+        else (scrollState.value.toFloat() / scrollState.maxValue.toFloat()) * maxThumbOffsetPx
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(max = maxMenuHeight)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(scrollState)
+                .padding(end = 10.dp)
+        ) {
+            DropdownMenuItem(
+                text = { Text("None") },
+                onClick = onPickNone
+            )
+
+            if (showCustomOption) {
+                DropdownMenuItem(
+                    text = { Text("Custom...") },
+                    onClick = { onPickCustom?.invoke() }
+                )
+            }
+
+            categories.forEach { cat ->
+                DropdownMenuItem(
+                    text = { Text(cat) },
+                    onClick = { onPickCategory(cat) }
+                )
+            }
+        }
+
+        if (scrollState.maxValue > 0) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 2.dp)
+                    .width(3.dp)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(50.dp))
+                    .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.16f))
+            )
+
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = with(density) { thumbOffsetPx.toDp() }, end = 2.dp)
+                    .width(3.dp)
+                    .height(thumbHeight)
+                    .clip(RoundedCornerShape(50.dp))
+                    .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f))
+            )
+        }
+    }
+}
+
+@SuppressLint("FrequentlyChangingValue")
+@Composable
+private fun LazyListFastScroller(
+    listState: LazyListState,
+    itemCount: Int,
+    modifier: Modifier = Modifier
+) {
+    if (itemCount <= 0) return
+
+    val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    var trackHeightPx by remember { mutableIntStateOf(0) }
+    var isDragging by remember { mutableStateOf(false) }
+    var lastDragIndex by remember { mutableIntStateOf(-1) }
+
+    val visibleItemsInfo = listState.layoutInfo.visibleItemsInfo
+    val visibleCount = visibleItemsInfo.size
+    if (visibleCount == 0 || itemCount <= visibleCount) return
+
+    val minThumbHeightPx = with(density) { 42.dp.roundToPx().toFloat() }
+    val averageItemSizePx = visibleItemsInfo
+        .map { it.size }
+        .average()
+        .toFloat()
+        .takeIf { it > 0f && !it.isNaN() }
+        ?: 1f
+
+    val lastStartIndex = (itemCount - visibleCount).coerceAtLeast(1)
+    val currentIndexEstimate = (
+        listState.firstVisibleItemIndex.toFloat() +
+            (listState.firstVisibleItemScrollOffset / averageItemSizePx)
+        ).coerceIn(0f, lastStartIndex.toFloat())
+
+    val progress = (currentIndexEstimate / lastStartIndex.toFloat()).coerceIn(0f, 1f)
+    val thumbHeightPx = if (trackHeightPx == 0) {
+        minThumbHeightPx
+    } else {
+        max(
+            minThumbHeightPx,
+            trackHeightPx * (visibleCount.toFloat() / itemCount.toFloat())
+        )
+    }
+    val maxThumbOffsetPx = (trackHeightPx - thumbHeightPx).coerceAtLeast(0f)
+    val thumbOffsetPx = progress * maxThumbOffsetPx
+    val thumbHeightDp = with(density) { thumbHeightPx.toDp() }
+
+    val trackAlpha by animateFloatAsState(
+        targetValue = if (isDragging || listState.isScrollInProgress) 0.18f else 0.10f,
+        animationSpec = tween(180),
+        label = "fastScrollTrackAlpha"
+    )
+    val thumbAlpha by animateFloatAsState(
+        targetValue = if (isDragging || listState.isScrollInProgress) 0.90f else 0.52f,
+        animationSpec = tween(180),
+        label = "fastScrollThumbAlpha"
+    )
+
+    Box(
+        modifier = modifier
+            .width(18.dp)
+            .fillMaxHeight()
+            .onSizeChanged { trackHeightPx = it.height }
+    ) {
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .width(4.dp)
+                .fillMaxHeight()
+                .clip(RoundedCornerShape(50.dp))
+                .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = trackAlpha))
+        )
+
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .offset { IntOffset(0, thumbOffsetPx.roundToInt()) }
+                .fillMaxWidth()
+                .height(thumbHeightDp)
+                .draggable(
+                    orientation = Orientation.Vertical,
+                    state = rememberDraggableState { delta ->
+                        val newOffset = (thumbOffsetPx + delta).coerceIn(0f, maxThumbOffsetPx)
+                        val newProgress =
+                            if (maxThumbOffsetPx == 0f) 0f else newOffset / maxThumbOffsetPx
+                        val targetIndex = (newProgress * lastStartIndex)
+                            .roundToInt()
+                            .coerceIn(0, lastStartIndex)
+
+                        if (targetIndex != lastDragIndex) {
+                            lastDragIndex = targetIndex
+                            scope.launch {
+                                listState.scrollToItem(targetIndex)
+                            }
+                        }
+                    },
+                    onDragStarted = {
+                        isDragging = true
+                        lastDragIndex = -1
+                    },
+                    onDragStopped = {
+                        isDragging = false
+                        lastDragIndex = -1
+                    }
+                ),
+            contentAlignment = Alignment.CenterEnd
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(4.dp)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(50.dp))
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = thumbAlpha))
+            )
+        }
+    }
+}
+
+class MainActivity : ComponentActivity() {
+    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
+    override fun onCreate(savedInstanceState: Bundle?) {
+        installSplashScreen()
+
+        super.onCreate(savedInstanceState)
+
+        val appCtx = applicationContext
+        createExpiryNotificationChannel(appCtx)
+
+        val notifPrefs = appCtx.getSharedPreferences(NOTIF_PREFS, MODE_PRIVATE)
+        if (notifPrefs.getBoolean(DAILY_ENABLED_KEY, false)) {
+            scheduleDailyExpiryWork(appCtx)
+        }
+
+        setContent {
+            val appCtx = this@MainActivity.applicationContext
+            var themeMode by remember { mutableStateOf(loadThemeMode(appCtx)) }
+
+            AppTheme(themeMode) {
+                Box(modifier = Modifier.fillMaxSize()) {
+                    AppBackdrop(Modifier.matchParentSize())
+                    AppNav(
+                        themeMode = themeMode,
+                        onThemeChange = { mode ->
+                            themeMode = mode
+                            saveThemeMode(appCtx, mode)
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AskNotificationPermissionOnFirstLaunch() {
+    val context = LocalContext.current
+    val appCtx = context.applicationContext
+
+    val prefs = remember {
+        appCtx.getSharedPreferences(NOTIF_PREFS, Context.MODE_PRIVATE)
+    }
+
+    val permissionLauncher =
+        rememberLauncherForActivityResult(
+            contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+        ) { granted ->
+
+        }
+
+    LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val alreadyPrompted = prefs.getBoolean(NOTIF_FIRST_PROMPT_SHOWN_KEY, false)
+
+            val alreadyGranted =
+                androidx.core.content.ContextCompat.checkSelfPermission(
+                    context,
+                    android.Manifest.permission.POST_NOTIFICATIONS
+                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+            if (!alreadyPrompted && !alreadyGranted) {
+                prefs.edit().putBoolean(NOTIF_FIRST_PROMPT_SHOWN_KEY, true).apply()
+                permissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+    }
+}
+
+private data class BottomBarItem(
+    val route: String,
+    val label: String,
+    val selectedIcon: androidx.compose.ui.graphics.vector.ImageVector,
+    val unselectedIcon: androidx.compose.ui.graphics.vector.ImageVector
+)
+
+private val bottomBarItems = listOf(
+    BottomBarItem(
+        route = Route.Home.r,
+        label = "Home",
+        selectedIcon = Icons.Filled.Home,
+        unselectedIcon = Icons.Outlined.Home
+    ),
+    BottomBarItem(
+        route = Route.History.r,
+        label = "History",
+        selectedIcon = Icons.Filled.History,
+        unselectedIcon = Icons.Outlined.History
+    ),
+    BottomBarItem(
+        route = Route.Recipe.r,
+        label = "AI",
+        selectedIcon = Icons.Filled.AutoAwesome,
+        unselectedIcon = Icons.Outlined.AutoAwesome
+    ),
+    BottomBarItem(
+        route = Route.Settings.r,
+        label = "Settings",
+        selectedIcon = Icons.Filled.Settings,
+        unselectedIcon = Icons.Outlined.Settings
+    )
+)
+
+private fun bottomBarRouteIndex(route: String?): Int {
+    val currentIndex = bottomBarItems.indexOfFirst { it.route == route }
+    if (currentIndex >= 0) return currentIndex
+
+    val homeIndex = bottomBarItems.indexOfFirst { it.route == Route.Home.r }
+    return if (homeIndex >= 0) homeIndex else 0
+}
+
+@RequiresApi(Build.VERSION_CODES.TIRAMISU)
+@Composable
+fun AppNav(
+    themeMode: ThemeMode,
+    onThemeChange: (ThemeMode) -> Unit
+) {
+    val navController = rememberNavController()
+    val backStack by navController.currentBackStackEntryAsState()
+    val current = backStack?.destination?.route
+    var showForm by rememberSaveable { mutableStateOf(false) }
+    var blurBackgroundForOverlay by rememberSaveable { mutableStateOf(false) }
+    var hideBottomBar by rememberSaveable { mutableStateOf(false) }
+    val layoutDir = LocalLayoutDirection.current
+
+    AskNotificationPermissionOnFirstLaunch()
+
+    Scaffold(
+        modifier = Modifier.blurWhen(if (showForm || blurBackgroundForOverlay) 16.dp else 0.dp),
+        containerColor = Color.Transparent,
+        contentColor = MaterialTheme.colorScheme.onBackground,
+        bottomBar = {
+            AnimatedVisibility(
+                visible = !(current == Route.Home.r && hideBottomBar),
+                enter = slideInVertically(
+                    initialOffsetY = { it },
+                    animationSpec = tween(350)
+                ) + fadeIn(
+                    animationSpec = tween(350)
+                ),
+                exit = slideOutVertically(
+                    targetOffsetY = { it },
+                    animationSpec = tween(350)
+                ) + fadeOut(
+                    animationSpec = tween(350)
+                )
+            ) {
+                BottomBar(navController, currentRoute = current)
+            }
+        }
+    ) { padding ->
+        NavHost(
+            navController = navController,
+            startDestination = Route.Home.r,
+            contentAlignment = Alignment.TopStart,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(
+                    start = padding.calculateStartPadding(layoutDir),
+                    end = padding.calculateEndPadding(layoutDir)
+                )
+                .statusBarsPadding()
+                .padding(top = 12.dp),
+
+            enterTransition = { bottomTabEnterTransition() },
+
+            exitTransition = { bottomTabExitTransition() },
+
+            popEnterTransition = { bottomTabEnterTransition() },
+
+            popExitTransition = { bottomTabExitTransition() },
+
+            sizeTransform = { null }
+        ) {
+            composable(Route.Home.r) {
+                HomeScreen(
+                    showForm = showForm,
+                    onShowFormChange = { showForm = it },
+                    onSelectionModeChange = { hideBottomBar = it },
+                    onOverlayVisibilityChange = { blurBackgroundForOverlay = it }
+                )
+            }
+
+            composable(Route.Settings.r) { SettingsScreen(navController) }
+            composable(Route.History.r) {
+                HistoryScreen(
+                    onOverlayVisibilityChange = { blurBackgroundForOverlay = it }
+                )
+            }
+            composable(Route.Recipe.r) { RecipeScreen() }
+
+            composable(Route.Theme.r) {
+                ThemeScreen(
+                    navController = navController,
+                    currentMode = themeMode,
+                    onModeChange = onThemeChange
+                )
+            }
+
+            composable(Route.Notifications.r) {
+                NotificationsScreen(navController)
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
+@Composable
+fun HistoryScreen(
+    onOverlayVisibilityChange: (Boolean) -> Unit
+) {
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences(FOOD_PREFS, Context.MODE_PRIVATE) }
+    val gson = remember { Gson() }
+    val density = LocalDensity.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+    val historySearchFocus = remember { FocusRequester() }
+
+    var search by rememberSaveable { mutableStateOf("") }
+    var showSearchBar by rememberSaveable { mutableStateOf(false) }
+
+    val history = remember {
+        mutableStateListOf<HistoryEntry>().apply {
+            addAll(loadAndSyncHistoryEntries(prefs, gson))
+        }
+    }
+    val pantryFoods = remember {
+        mutableStateListOf<FoodItem>().apply {
+            addAll(loadFoodList(prefs, gson))
+        }
+    }
+
+    val categories = remember {
+        mutableStateListOf<String>().apply {
+            addAll(loadStringList(prefs, gson, CATEGORIES_LIST_KEY))
+        }
+    }
+
+    DisposableEffect(prefs, gson) {
+        val listener =
+            android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+                when (key) {
+                    HISTORY_LIST_KEY -> replaceListContentsIfChanged(history, loadHistoryEntries(prefs, gson))
+                    FOOD_LIST_KEY -> replaceListContentsIfChanged(pantryFoods, loadFoodList(prefs, gson))
+                    CATEGORIES_LIST_KEY -> replaceListContentsIfChanged(
+                        categories,
+                        loadStringList(prefs, gson, CATEGORIES_LIST_KEY)
+                    )
+                }
+            }
+
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        onDispose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+
+    val filtered by remember {
+        derivedStateOf {
+            val q = search.trim()
+            val src = history.toList()
+            if (q.isBlank()) src else src.filter { it.name.contains(q, ignoreCase = true) }
+        }
+    }
+    val listState = rememberLazyListState()
+    val historyScrollRunway = shortListScrollRunway(filtered.size)
+    val isHistorySearchKeyboardVisible = WindowInsets.ime.getBottom(density) > 0
+    var historySearchKeyboardWasVisible by remember { mutableStateOf(false) }
+    var searchFabVisible by rememberSaveable { mutableStateOf(true) }
+
+    var quickAddName by remember { mutableStateOf<String?>(null) }
+    var quickAddExpiry by remember { mutableStateOf("") }
+    var quickAddCategory by remember { mutableStateOf<String?>(null) }
+    var quickAddError by remember { mutableStateOf<String?>(null) }
+    var historyNoticeMessage by remember { mutableStateOf<String?>(null) }
+    val shouldBlurBackground = quickAddName != null || historyNoticeMessage != null
+
+    SideEffect {
+        onOverlayVisibilityChange(shouldBlurBackground)
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { onOverlayVisibilityChange(false) }
+    }
+
+    fun closeHistorySearch() {
+        focusManager.clearFocus(force = true)
+        keyboard?.hide()
+        search = ""
+        showSearchBar = false
+        historySearchKeyboardWasVisible = false
+    }
+
+    OverlayBackHandler(enabled = showSearchBar) {
+        closeHistorySearch()
+    }
+
+    BackHandler(
+        enabled = showSearchBar &&
+                Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU &&
+                !isHistorySearchKeyboardVisible
+    ) {
+        closeHistorySearch()
+    }
+
+    LaunchedEffect(showSearchBar) {
+        if (showSearchBar) {
+            historySearchFocus.requestFocus()
+            keyboard?.show()
+        } else {
+            historySearchKeyboardWasVisible = false
+        }
+    }
+
+    LaunchedEffect(showSearchBar, isHistorySearchKeyboardVisible) {
+        if (!showSearchBar) return@LaunchedEffect
+
+        if (isHistorySearchKeyboardVisible) {
+            historySearchKeyboardWasVisible = true
+            return@LaunchedEffect
+        }
+
+        if (historySearchKeyboardWasVisible) {
+            closeHistorySearch()
+        }
+    }
+
+    LaunchedEffect(listState) {
+        var prevIndex = listState.firstVisibleItemIndex
+        var prevOffset = listState.firstVisibleItemScrollOffset
+        var currentFabVisible = searchFabVisible
+
+        snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
+            .collect { (index, offset) ->
+                val scrollingUp = if (index != prevIndex) index < prevIndex else offset < prevOffset
+                val newFabVisible = scrollingUp || (index == 0 && offset == 0)
+
+                if (currentFabVisible != newFabVisible) {
+                    currentFabVisible = newFabVisible
+                    searchFabVisible = newFabVisible
+                }
+
+                prevIndex = index
+                prevOffset = offset
+            }
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        Scaffold(
+            containerColor = Color.Transparent,
+            contentWindowInsets = WindowInsets.ime,
+            floatingActionButtonPosition = FabPosition.End,
+            floatingActionButton = {
+                AnimatedVisibility(
+                    visible = searchFabVisible && !showSearchBar,
+                    enter = fadeIn(tween(350)) + slideInVertically(tween(350)) { it / 2 },
+                    exit = fadeOut(tween(350)) + slideOutVertically(tween(350)) { it / 2 }
+                ) {
+                    val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
+
+                    EditCategoriesStyledFab(
+                        onClick = { showSearchBar = true },
+                        icon = Icons.Default.Search,
+                        contentDescription = "Search history",
+                        backgroundTint = MaterialTheme.colorScheme.primary,
+                        iconTint = MaterialTheme.colorScheme.onPrimary,
+                        tintAlpha = if (isDarkTheme) 0.76f else 0.62f,
+                        modifier = Modifier.padding(bottom = 90.dp)
+                    )
+                }
+            }
+        ) { innerPadding ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .padding(horizontal = 16.dp)
+            ) {
+                AnimatedVisibility(
+                    visible = showSearchBar,
+                    enter =
+                        fadeIn(
+                            animationSpec = tween(
+                                durationMillis = 320,
+                                easing = LinearOutSlowInEasing
+                            )
+                        ) +
+                                slideInVertically(
+                                    initialOffsetY = { -it / 3 },
+                                    animationSpec = tween(
+                                        durationMillis = 320,
+                                        easing = LinearOutSlowInEasing
+                                    )
+                                ) +
+                                expandVertically(
+                                    expandFrom = Alignment.Top,
+                                    animationSpec = tween(
+                                        durationMillis = 320,
+                                        easing = LinearOutSlowInEasing
+                                    )
+                                ),
+                    exit =
+                        fadeOut(
+                            animationSpec = tween(
+                                durationMillis = 220,
+                                easing = FastOutLinearInEasing
+                            )
+                        ) +
+                                slideOutVertically(
+                                    targetOffsetY = { -it / 4 },
+                                    animationSpec = tween(
+                                        durationMillis = 220,
+                                        easing = FastOutLinearInEasing
+                                    )
+                                ) +
+                                shrinkVertically(
+                                    shrinkTowards = Alignment.Top,
+                                    animationSpec = tween(
+                                        durationMillis = 220,
+                                        easing = FastOutLinearInEasing
+                                    )
+                                )
+                ) {
+                    Column {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            CompactSearchBar(
+                                value = search,
+                                onValueChange = { search = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                textFieldModifier = Modifier.focusRequester(historySearchFocus),
+                                showClearButton = false,
+                                onTap = {
+                                    historySearchFocus.requestFocus()
+                                    keyboard?.show()
+                                }
+                            )
+                        }
+
+                        Spacer(Modifier.height(12.dp))
+                    }
+                }
+
+                if (filtered.isEmpty()) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(if (search.isNotBlank()) "No history found" else "No history yet")
+                    }
+                } else {
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        LazyColumn(
+                            state = listState,
+                            modifier = Modifier.fillMaxSize(),
+                            overscrollEffect = null,
+                            contentPadding = PaddingValues(bottom = 80.dp + historyScrollRunway)
+                        ) {
+                            items(
+                                items = filtered,
+                                key = { normalizeFoodName(it.name) },
+                                contentType = { "history_food_item" }
+                            ) { entry ->
+                                HistoryFoodCard(
+                                    modifier = Modifier.animateItem(
+                                        fadeInSpec = null,
+                                        fadeOutSpec = null,
+                                        placementSpec = tween(
+                                            durationMillis = SWIPE_ITEM_PLACEMENT_DURATION_MS,
+                                            easing = FastOutSlowInEasing
+                                        )
+                                    ),
+                                    name = entry.name,
+                                    onQuickAdd = {
+                                        val existsInPantry = pantryFoods.any {
+                                            normalizeFoodName(it.name) == normalizeFoodName(entry.name)
+                                        }
+
+                                        if (existsInPantry) {
+                                            historyNoticeMessage =
+                                                "\"${entry.name}\" is already in your food list."
+                                        } else {
+                                            quickAddName = entry.name
+                                            quickAddExpiry = ""
+                                            quickAddCategory = null
+                                            quickAddError = null
+                                        }
+                                    },
+                                    onDelete = {
+                                        if (quickAddName == entry.name) {
+                                            quickAddName = null
+                                            quickAddExpiry = ""
+                                            quickAddCategory = null
+                                            quickAddError = null
+                                        }
+                                        removeFoodNameFromHistory(prefs, gson, history, entry.name)
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    historyNoticeMessage?.let { message ->
+        GlassAlertDialog(
+            onDismissRequest = { historyNoticeMessage = null },
+            title = { Text("Already Added") },
+            text = { Text(message) },
+            confirmButton = {
+                TextButton(onClick = { historyNoticeMessage = null }) {
+                    Text("OK")
+                }
+            }
+        )
+    }
+
+    if (quickAddName != null) {
+        GlassAlertDialog(
+            onDismissRequest = {
+                quickAddName = null
+                quickAddError = null
+            },
+            title = { Text("Quick Add", style = MaterialTheme.typography.titleLarge) },
+            text = {
+                Column {
+                    Text("Food: ${quickAddName!!}", fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(10.dp))
+
+                    ExpiryDateInputField(
+                        value = quickAddExpiry,
+                        onValueChange = { quickAddExpiry = it },
+                        onCalendarClick = {
+                            openExpiryDatePicker(context) { pickedDate ->
+                                quickAddExpiry = pickedDate
+                            }
+                        }
+                    )
+
+                    Spacer(Modifier.height(10.dp))
+
+                    var catExpanded by remember { mutableStateOf(false) }
+
+                    ExposedDropdownMenuBox(
+                        expanded = catExpanded,
+                        onExpandedChange = { catExpanded = !catExpanded }
+                    ) {
+                        OutlinedTextField(
+                            value = quickAddCategory ?: "None",
+                            onValueChange = {},
+                            readOnly = true,
+                            modifier = Modifier
+                                .menuAnchor()
+                                .fillMaxWidth(),
+                            label = { Text("Category") },
+                            trailingIcon = {
+                                ExposedDropdownMenuDefaults.TrailingIcon(expanded = catExpanded)
+                            }
+                        )
+
+                        ExposedDropdownMenu(
+                            expanded = catExpanded,
+                            onDismissRequest = { catExpanded = false }
+                        ) {
+                            ScrollableCategoryMenuContent(
+                                categories = categories,
+                                showCustomOption = false,
+                                onPickNone = {
+                                    quickAddCategory = null
+                                    catExpanded = false
+                                },
+                                onPickCategory = { cat ->
+                                    quickAddCategory = cat
+                                    catExpanded = false
+                                }
+                            )
+                        }
+                    }
+
+                    if (quickAddError != null) {
+                        Spacer(Modifier.height(8.dp))
+                        Spacer(Modifier.height(8.dp))
+                        Text(quickAddError!!, color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val name = quickAddName!!.trim()
+
+                        if (quickAddExpiry.isBlank()) {
+                            quickAddError = "Pick an expiry date first."
+                            return@TextButton
+                        }
+
+                        if (!isValidFutureExpiryDate(quickAddExpiry)) {
+                            quickAddError = "Enter a valid future date."
+                            return@TextButton
+                        }
+
+                        val exists =
+                            pantryFoods.any { normalizeFoodName(it.name) == normalizeFoodName(name) }
+                        if (exists) {
+                            quickAddError = "This food is already in your food list."
+                            return@TextButton
+                        }
+
+                        val newFood =
+                            FoodItem(
+                                name = name,
+                                expiry = quickAddExpiry,
+                                category = quickAddCategory
+                            )
+                        pantryFoods.add(newFood)
+                        saveFoodList(prefs, gson, pantryFoods)
+
+                        recordFoodNameInHistory(prefs, gson, history, name)
+
+                        quickAddName = null
+                        quickAddExpiry = ""
+                        quickAddCategory = null
+                        quickAddError = null
+                    }
+                ) {
+                    Text("Add")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    quickAddName = null
+                    quickAddError = null
+                }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun PantryFoodCard(
+    modifier: Modifier = Modifier,
+    food: FoodItem,
+    isSelecting: Boolean,
+    isSelected: Boolean,
+    onSelectionChange: (Boolean) -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val cardShape = RoundedCornerShape(25.dp)
+    val layoutDir = LocalLayoutDirection.current
+    val isRtl = layoutDir == LayoutDirection.Rtl
+    val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+
+    val thresholdPx = with(density) { 90.dp.toPx() }
+    val maxDragPx = with(density) { 350.dp.toPx() }
+    val revealPx = with(density) { 60.dp.toPx() }
+
+    val offsetX = remember(food) { Animatable(0f) }
+    var itemVisible by remember(food) { mutableStateOf(true) }
+
+    val isEditDragNow = if (!isRtl) offsetX.value > 0f else offsetX.value < 0f
+    val isDeleteDragNow = if (!isRtl) offsetX.value < 0f else offsetX.value > 0f
+
+    val reveal = (abs(offsetX.value) / revealPx).coerceIn(0f, 1f)
+    val bgAlpha = 0.15f + (0.85f * reveal)
+
+    val bg = when {
+        isEditDragNow -> MaterialTheme.colorScheme.secondaryContainer
+        isDeleteDragNow -> MaterialTheme.colorScheme.errorContainer
+        else -> Color.Transparent
+    }
+
+    val tint = when {
+        isEditDragNow -> MaterialTheme.colorScheme.onSecondaryContainer
+        isDeleteDragNow -> MaterialTheme.colorScheme.onErrorContainer
+        else -> MaterialTheme.colorScheme.onSurface
+    }
+
+    val icon = when {
+        isEditDragNow -> Icons.Default.Edit
+        isDeleteDragNow -> Icons.Default.Delete
+        else -> null
+    }
+
+    val label = when {
+        isEditDragNow -> "Edit"
+        isDeleteDragNow -> "Delete"
+        else -> ""
+    }
+
+    val align = when {
+        isEditDragNow -> Alignment.CenterStart
+        isDeleteDragNow -> Alignment.CenterEnd
+        else -> Alignment.CenterStart
+    }
+
+    val checkboxGapWidth by animateDpAsState(
+        targetValue = if (isSelecting) 10.dp else 0.dp,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "checkboxGapWidth"
+    )
+    val checkboxSlotWidth by animateDpAsState(
+        targetValue = if (isSelecting) 36.dp else 0.dp,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "checkboxSlotWidth"
+    )
+    val checkboxScale by animateFloatAsState(
+        targetValue = if (isSelecting) 1f else 0.9f,
+        animationSpec = tween(
+            durationMillis = if (isSelecting) 190 else 150,
+            easing = if (isSelecting) LinearOutSlowInEasing else FastOutLinearInEasing
+        ),
+        label = "checkboxScale"
+    )
+    val checkboxAlpha by animateFloatAsState(
+        targetValue = if (isSelecting) 1f else 0f,
+        animationSpec = tween(
+            durationMillis = if (isSelecting) 190 else 130,
+            easing = if (isSelecting) LinearOutSlowInEasing else FastOutLinearInEasing
+        ),
+        label = "checkboxAlpha"
+    )
+
+    AnimatedVisibility(
+        modifier = modifier.fillMaxWidth(),
+        visible = itemVisible,
+        exit =
+            shrinkVertically(
+                animationSpec = tween(
+                    durationMillis = SWIPE_DELETE_EXIT_DURATION_MS,
+                    easing = FastOutSlowInEasing
+                )
+            ) +
+                fadeOut(
+                    animationSpec = tween(
+                        durationMillis = SWIPE_DELETE_EXIT_DURATION_MS,
+                        easing = LinearOutSlowInEasing
+                    )
+                ) +
+                scaleOut(
+                    targetScale = 0.98f,
+                    animationSpec = tween(
+                        durationMillis = SWIPE_DELETE_EXIT_DURATION_MS,
+                        easing = FastOutSlowInEasing
+                    )
+                )
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = SWIPE_ITEM_SPACING_DP.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .clip(cardShape)
+                    .background(bg.copy(alpha = bgAlpha))
+                    .padding(horizontal = 24.dp),
+                contentAlignment = align
+            ) {
+                if (icon != null) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            icon,
+                            contentDescription = label,
+                            tint = tint.copy(alpha = reveal)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            label,
+                            color = tint.copy(alpha = reveal),
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            }
+
+            Box(
+                modifier = Modifier
+                    .offset { IntOffset(offsetX.value.roundToInt(), 0) }
+                    .draggable(
+                        orientation = Orientation.Horizontal,
+                        enabled = !isSelecting,
+                        state = rememberDraggableState { delta ->
+                            scope.launch {
+                                val newValue = (offsetX.value + delta).coerceIn(-maxDragPx, maxDragPx)
+                                offsetX.snapTo(newValue)
+                            }
+                        },
+                        onDragStopped = {
+                            val current = offsetX.value
+                            val farEnough = abs(current) >= thresholdPx
+                            var deleteTriggered = false
+
+                            if (!isSelecting && farEnough) {
+                                val isEdit = if (!isRtl) current > 0f else current < 0f
+
+                                if (isEdit) {
+                                    onEdit()
+                                } else {
+                                    deleteTriggered = true
+                                    scope.launch {
+                                        itemVisible = false
+                                        delay(SWIPE_DELETE_REMOVE_DELAY_MS)
+                                        onDelete()
+                                    }
+                                }
+                            }
+
+                            scope.launch {
+                                offsetX.animateTo(
+                                    targetValue = 0f,
+                                    animationSpec = tween(
+                                        durationMillis = if (deleteTriggered) {
+                                            SWIPE_DELETE_EXIT_DURATION_MS
+                                        } else {
+                                            SWIPE_RESET_DURATION_MS
+                                        },
+                                        easing = FastOutSlowInEasing
+                                    )
+                                )
+                            }
+                        }
+                    )
+            ) {
+                PantryListGlassCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = cardShape,
+                    shadowElevation = 6.dp,
+                    onClick = if (isSelecting) {
+                        { onSelectionChange(!isSelected) }
+                    } else {
+                        null
+                    }
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 15.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = food.name,
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+
+                            Text(
+                                text = "Expiry: ${food.expiry}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(10.dp))
+
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            ExpiryCountdownBadge(food.expiry)
+
+                            Spacer(modifier = Modifier.width(checkboxGapWidth))
+
+                            Box(
+                                modifier = Modifier
+                                    .width(checkboxSlotWidth)
+                                    .graphicsLayer { clip = true },
+                                contentAlignment = Alignment.CenterEnd
+                            ) {
+                                Checkbox(
+                                    modifier = Modifier.graphicsLayer {
+                                        alpha = checkboxAlpha
+                                        scaleX = checkboxScale
+                                        scaleY = checkboxScale
+                                    },
+                                    checked = isSelected,
+                                    onCheckedChange = if (isSelecting) {
+                                        onSelectionChange
+                                    } else {
+                                        null
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HistoryFoodCard(
+    modifier: Modifier = Modifier,
+    name: String,
+    onQuickAdd: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val cardShape = RoundedCornerShape(25.dp)
+    val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+
+    val thresholdPx = with(density) { 90.dp.toPx() }
+    val maxDragPx = with(density) { 350.dp.toPx() }
+    val revealPx = with(density) { 60.dp.toPx() }
+
+    val offsetX = remember(name) { Animatable(0f) }
+    var itemVisible by remember(name) { mutableStateOf(true) }
+
+    val isDeleteDragNow = offsetX.value < 0f
+
+    val reveal = (abs(offsetX.value) / revealPx).coerceIn(0f, 1f)
+    val bgAlpha = 0.15f + (0.85f * reveal)
+    val bg = if (isDeleteDragNow) MaterialTheme.colorScheme.errorContainer else Color.Transparent
+    val tint =
+        if (isDeleteDragNow) MaterialTheme.colorScheme.onErrorContainer
+        else MaterialTheme.colorScheme.onSurface
+    val align = Alignment.CenterEnd
+
+    AnimatedVisibility(
+        modifier = modifier.fillMaxWidth(),
+        visible = itemVisible,
+        exit =
+            shrinkVertically(
+                animationSpec = tween(
+                    durationMillis = SWIPE_DELETE_EXIT_DURATION_MS,
+                    easing = FastOutSlowInEasing
+                )
+            ) +
+                    fadeOut(
+                        animationSpec = tween(
+                            durationMillis = SWIPE_DELETE_EXIT_DURATION_MS,
+                            easing = LinearOutSlowInEasing
+                        )
+                    ) +
+                    scaleOut(
+                        targetScale = 0.98f,
+                        animationSpec = tween(
+                            durationMillis = SWIPE_DELETE_EXIT_DURATION_MS,
+                            easing = FastOutSlowInEasing
+                        )
+                    )
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = SWIPE_ITEM_SPACING_DP.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .clip(cardShape)
+                    .background(bg.copy(alpha = bgAlpha))
+                    .padding(horizontal = 24.dp),
+                contentAlignment = align
+            ) {
+                if (isDeleteDragNow) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Default.Delete,
+                            contentDescription = "Delete",
+                            tint = tint.copy(alpha = reveal)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "Delete",
+                            color = tint.copy(alpha = reveal),
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            }
+
+            Box(
+                modifier = Modifier
+                    .offset {
+                        IntOffset(
+                            offsetX.value.roundToInt(),
+                            0
+                        )
+                    }
+                    .draggable(
+                        orientation = Orientation.Horizontal,
+                        state = rememberDraggableState { delta ->
+                            scope.launch {
+                                val newValue =
+                                    (offsetX.value + delta).coerceIn(-maxDragPx, 0f)
+                                offsetX.snapTo(newValue)
+                            }
+                        },
+                        onDragStopped = {
+                            val current = offsetX.value
+                            val farEnough = abs(current) >= thresholdPx
+                            val isDelete = current < 0f
+                            val deleteTriggered = farEnough && isDelete
+
+                            if (deleteTriggered) {
+                                scope.launch {
+                                    itemVisible = false
+                                    delay(SWIPE_DELETE_REMOVE_DELAY_MS)
+                                    onDelete()
+                                }
+                            }
+
+                            scope.launch {
+                                offsetX.animateTo(
+                                    targetValue = 0f,
+                                    animationSpec = tween(
+                                        durationMillis = if (deleteTriggered) {
+                                            SWIPE_DELETE_EXIT_DURATION_MS
+                                        } else {
+                                            SWIPE_RESET_DURATION_MS
+                                        },
+                                        easing = FastOutSlowInEasing
+                                    )
+                                )
+                            }
+                        }
+                    )
+            ) {
+                PantryListGlassCard(
+                    shape = cardShape,
+                    shadowElevation = 6.dp
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = name,
+                            style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.weight(1f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+
+                        IconButton(onClick = onQuickAdd) {
+                            Icon(Icons.Default.Add, contentDescription = "Quick add")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun RecipeScreen() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        GlassSurface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(30.dp),
+            tone = GlassTone.CARD,
+            shadowElevation = 14.dp
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Icon(
+                    imageVector = Icons.Default.AutoAwesome,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(28.dp)
+                )
+
+                Spacer(Modifier.height(12.dp))
+
+                Text(
+                    text = "AI Recipes",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold
+                )
+
+                Spacer(Modifier.height(6.dp))
+
+                Text(
+                    text = "Recipe ideas and food suggestions will live here.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun HomeScreen(
+    showForm: Boolean,
+    onShowFormChange: (Boolean) -> Unit,
+    onSelectionModeChange: (Boolean) -> Unit,
+    onOverlayVisibilityChange: (Boolean) -> Unit
+) {
+    FoodEntryScreen(
+        showForm = showForm,
+        onShowFormChange = onShowFormChange,
+        onSelectionModeChange = onSelectionModeChange,
+        onOverlayVisibilityChange = onOverlayVisibilityChange
+    )
+}
+
+@Composable
+fun CategoryScreen() {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SettingsScreen(navController: NavHostController) {
+    Scaffold(
+        containerColor = Color.Transparent,
+        topBar = {
+            SlimTopBar(
+                title = "Settings",
+                onBack = { navController.popBackStack() }
+            )
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(16.dp)
+        ) {
+            SettingRow("Theme") {
+                navController.navigate(Route.Theme.r)
+            }
+            SettingRow("Notifications") {
+                navController.navigate(Route.Notifications.r)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingRow(title: String, onClick: () -> Unit) {
+    MatchingPillCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        shadowElevation = 6.dp,
+        onClick = onClick
+    ) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ThemeScreen(
+    navController: NavHostController,
+    currentMode: ThemeMode,
+    onModeChange: (ThemeMode) -> Unit
+) {
+    Scaffold(
+        containerColor = Color.Transparent,
+        topBar = {
+            SlimTopBar(
+                title = "Theme",
+                onBack = { navController.popBackStack() }
+            )
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(16.dp)
+        ) {
+            ThemeOption("System", "Follow your phone setting",
+                selected = currentMode == ThemeMode.SYSTEM
+            ) { onModeChange(ThemeMode.SYSTEM) }
+
+            ThemeOption("Light", "Always light mode",
+                selected = currentMode == ThemeMode.LIGHT
+            ) { onModeChange(ThemeMode.LIGHT) }
+
+            ThemeOption("Dark", "Always dark mode",
+                selected = currentMode == ThemeMode.DARK
+            ) { onModeChange(ThemeMode.DARK) }
+        }
+    }
+}
+
+@Composable
+private fun ThemeOption(
+    title: String,
+    subtitle: String,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    MatchingPillCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        shadowElevation = 6.dp,
+        onClick = onClick
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleMedium)
+                Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            RadioButton(selected = selected, onClick = onClick)
+        }
+    }
+}
+
+@RequiresApi(Build.VERSION_CODES.TIRAMISU)
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun NotificationsScreen(navController: NavHostController) {
+    val context = LocalContext.current
+    val appCtx = context.applicationContext
+
+    val prefs = remember {
+        appCtx.getSharedPreferences(NOTIF_PREFS, Context.MODE_PRIVATE)
+    }
+
+    var daysBefore by rememberSaveable {
+        mutableIntStateOf(
+            prefs.getInt(DAYS_BEFORE_KEY, 3)
+                .coerceIn(MIN_DAYS_BEFORE_REMINDER, MAX_DAYS_BEFORE_REMINDER)
+        )
+    }
+    var dailyEnabled by rememberSaveable {
+        mutableStateOf(prefs.getBoolean(DAILY_ENABLED_KEY, false))
+    }
+
+    val permissionLauncher =
+        rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { granted ->
+            if (granted) {
+                dailyEnabled = true
+                prefs.edit().putBoolean(DAILY_ENABLED_KEY, true).apply()
+                scheduleDailyExpiryWork(appCtx)
+            } else {
+                dailyEnabled = false
+                prefs.edit().putBoolean(DAILY_ENABLED_KEY, false).apply()
+            }
+        }
+
+    @SuppressLint("ObsoleteSdkInt")
+    fun hasNotifPermission(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.POST_NOTIFICATIONS
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        } else true
+    }
+
+    fun saveDays(newValue: Int) {
+        daysBefore = newValue.coerceIn(MIN_DAYS_BEFORE_REMINDER, MAX_DAYS_BEFORE_REMINDER)
+        prefs.edit().putInt(DAYS_BEFORE_KEY, daysBefore).apply()
+
+        if (dailyEnabled) scheduleDailyExpiryWork(appCtx)
+    }
+
+    Scaffold(
+        containerColor = Color.Transparent,
+        topBar = {
+            SlimTopBar(
+                title = "Notifications",
+                onBack = { navController.popBackStack() }
+            )
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Text(
+                "Notify me before food expires",
+                style = MaterialTheme.typography.titleMedium
+            )
+
+            MatchingPillCard(
+                shadowElevation = 6.dp
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("Days before:", style = MaterialTheme.typography.bodyLarge)
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(
+                            onClick = { saveDays(daysBefore - 1) },
+                            enabled = daysBefore > MIN_DAYS_BEFORE_REMINDER
+                        ) {
+                            Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Minus")
+                        }
+                        Text("$daysBefore", style = MaterialTheme.typography.titleLarge)
+                        IconButton(
+                            onClick = { saveDays(daysBefore + 1) },
+                            enabled = daysBefore < MAX_DAYS_BEFORE_REMINDER
+                        ) {
+                            Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "Plus")
+                        }
+                    }
+                }
+            }
+
+            MatchingPillCard(
+                shadowElevation = 6.dp
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Daily reminder", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            "Sends notification daily for foods expiring within ${reminderDaysLabel(daysBefore)}.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    Switch(
+                        checked = dailyEnabled,
+                        onCheckedChange = { checked ->
+                            if (!checked) {
+                                dailyEnabled = false
+                                prefs.edit().putBoolean(DAILY_ENABLED_KEY, false).apply()
+                                cancelDailyExpiryWork(appCtx)
+                            } else {
+
+                                if (hasNotifPermission()) {
+                                    dailyEnabled = true
+                                    prefs.edit().putBoolean(DAILY_ENABLED_KEY, true).apply()
+                                    scheduleDailyExpiryWork(appCtx)
+                                } else {
+
+                                    permissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                                }
+                            }
+                        }
+                    )
+                }
+            }
+
+            Button(
+                onClick = { runExpiryWorkNow(appCtx) },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Send test notification now")
+            }
+        }
+    }
+}
+
+@Composable
+fun BottomBar(navController: NavHostController, currentRoute: String?) {
+    val scope = rememberCoroutineScope()
+    var isTabTransitionLocked by remember { mutableStateOf(false) }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 18.dp)
+            .navigationBarsPadding()
+            .padding(bottom = 8.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        EditCategoriesBackgroundSurface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(55.dp),
+            shape = RoundedCornerShape(50.dp),
+            shadowElevation = 14.dp
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 2.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(3.dp)
+            ) {
+                bottomBarItems.forEach { item ->
+                    PillNavItem(
+                        modifier = Modifier.weight(1f),
+                        selected = currentRoute == item.route,
+                        label = item.label,
+                        selectedIcon = item.selectedIcon,
+                        unselectedIcon = item.unselectedIcon,
+                        onClick = {
+                            if (isTabTransitionLocked || currentRoute == item.route) return@PillNavItem
+
+                            isTabTransitionLocked = true
+                            navController.safeNavigate(item.route)
+
+                            scope.launch {
+                                delay(BOTTOM_TAB_TRANSITION_GUARD_MS)
+                                isTabTransitionLocked = false
+                            }
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PillNavItem(
+    modifier: Modifier = Modifier,
+    selected: Boolean,
+    label: String,
+    selectedIcon: androidx.compose.ui.graphics.vector.ImageVector,
+    unselectedIcon: androidx.compose.ui.graphics.vector.ImageVector,
+    onClick: () -> Unit
+) {
+    val palette = rememberGlassPalette()
+    val selectedBackground by animateColorAsState(
+        targetValue = if (selected) palette.accent else Color.Transparent,
+        animationSpec = tween(220),
+        label = "navSelectedBackground"
+    )
+
+    val contentTint by animateColorAsState(
+        targetValue = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        animationSpec = tween(220),
+        label = "navContentTint"
+    )
+
+    val itemScale by animateFloatAsState(
+        targetValue = if (selected) 1f else 0.97f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "navItemScale"
+    )
+
+    Box(
+        modifier = modifier
+            .fillMaxHeight()
+            .graphicsLayer {
+                scaleX = itemScale
+                scaleY = itemScale
+            }
+            .clip(RoundedCornerShape(50.dp))
+            .background(selectedBackground)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 2.dp, vertical = 2.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                imageVector = if (selected) selectedIcon else unselectedIcon,
+                contentDescription = label,
+                tint = contentTint,
+                modifier = Modifier.size(23.dp)
+            )
+
+            Spacer(Modifier.height(2.dp))
+
+            Text(
+                text = label,
+                fontSize = 10.5.sp,
+                lineHeight = 11.sp,
+                maxLines = 1,
+                color = contentTint,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+
+private fun NavHostController.safeNavigate(route: String) {
+    if (currentDestination?.route == route) return
+
+    navigate(route) {
+        launchSingleTop = true
+        restoreState = true
+        popUpTo(graph.findStartDestination().id) { saveState = true }
+    }
+}
+
+@SuppressLint("Range")
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
+@Composable
+fun FoodEntryScreen(
+    showForm: Boolean,
+    onShowFormChange: (Boolean) -> Unit,
+    onSelectionModeChange: (Boolean) -> Unit,
+    onOverlayVisibilityChange: (Boolean) -> Unit
+) {
+    var foodName by remember { mutableStateOf("") }
+    var expiryDate by remember { mutableStateOf("") }
+
+    var showCustomCategoryDialog by remember { mutableStateOf(false) }
+    var tempCustomCategory by remember { mutableStateOf("") }
+    var customCategoryExistsError by remember { mutableStateOf(false) }
+
+    val context = LocalContext.current
+    val density = LocalDensity.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+    val sharedPrefs = remember { context.getSharedPreferences(FOOD_PREFS, Context.MODE_PRIVATE) }
+    val gson = remember { Gson() }
+    val homeSearchFocus = remember { FocusRequester() }
+
+    val initialCategories = emptyList<String>()
+
+    val categories = remember {
+        mutableStateListOf<String>().apply {
+            addAll(loadStringList(sharedPrefs, gson, CATEGORIES_LIST_KEY).ifEmpty { initialCategories })
+        }
+    }
+
+
+    var selectedCategory by rememberSaveable { mutableStateOf<String?>(null) }
+    var isCustomCategory by rememberSaveable { mutableStateOf(false) }
+    var customCategory by rememberSaveable { mutableStateOf("") }
+
+    var showBulkCategorySheet by remember { mutableStateOf(false) }
+
+    var showBulkCustomCategoryDialog by remember { mutableStateOf(false) }
+    var bulkCustomCategoryName by remember { mutableStateOf("") }
+    var bulkCustomCategoryExistsError by remember { mutableStateOf(false) }
+
+    fun commitCustomCategory() {
+        val cleaned = customCategory.trim()
+        if (cleaned.isBlank()) return
+
+        val exists = categories.any { it.equals(cleaned, ignoreCase = true) }
+        if (!exists) categories.add(cleaned)
+
+        selectedCategory = categories.first { it.equals(cleaned, ignoreCase = true) }
+        isCustomCategory = false
+        customCategory = ""
+    }
+
+    fun finalCategoryOrNull(): String? {
+        return if (isCustomCategory) customCategory.trim().takeIf { it.isNotBlank() }
+        else selectedCategory?.trim()?.takeIf { it.isNotBlank() }
+    }
+
+    fun deleteCategory(cat: String) {
+
+        if (initialCategories.any { it.equals(cat, ignoreCase = true) }) return
+
+        val match = categories.firstOrNull { it.equals(cat, ignoreCase = true) } ?: return
+        categories.remove(match)
+
+
+        if (selectedCategory?.equals(cat, ignoreCase = true) == true) {
+            selectedCategory = categories.firstOrNull()
+            isCustomCategory = false
+            customCategory = ""
+        }
+    }
+
+    var showEditCategoriesSheet by remember { mutableStateOf(false) }
+    var editCategoriesBackdropVisible by remember { mutableStateOf(false) }
+    var showAddCategorySheetDialog by remember { mutableStateOf(false) }
+    var newCategoryName by remember { mutableStateOf("") }
+    var addCategoryExistsError by remember { mutableStateOf(false)}
+
+    var showQuickAddCategoryDialog by remember { mutableStateOf(false) }
+    var quickCategoryName by remember { mutableStateOf("") }
+
+    fun isDuplicateCategoryName(input: String): Boolean {
+        val cleaned = input.trim()
+        if (cleaned.isBlank()) return false
+
+        return categories.any { it.equals(cleaned, ignoreCase = true) }
+    }
+
+    fun addCategoryOnly(name: String): String? {
+        val cleaned = name.trim()
+        if (cleaned.isBlank()) return null
+        if (isDuplicateCategoryName(cleaned)) return null
+
+        categories.add(cleaned)
+        return cleaned
+    }
+
+    var showError by remember { mutableStateOf(false) }
+    var nameExistsError by remember { mutableStateOf(false) }
+
+    var editingItem by remember { mutableStateOf<FoodItem?>(null) }
+    var pendingDelete by remember { mutableStateOf<FoodItem?>(null) }
+    var pendingDeleteSelected by remember { mutableStateOf(false) }
+    var pendingDeleteCategory by remember { mutableStateOf<String?>(null) }
+    val shouldBlurBackground =
+        editCategoriesBackdropVisible ||
+                showBulkCategorySheet ||
+                showAddCategorySheetDialog ||
+                showBulkCustomCategoryDialog ||
+                showCustomCategoryDialog ||
+                showQuickAddCategoryDialog ||
+                pendingDelete != null ||
+                pendingDeleteSelected ||
+                pendingDeleteCategory != null
+
+    val nameFocus = remember { FocusRequester() }
+
+    val formScope = rememberCoroutineScope()
+
+    var isLookingUpBarcode by remember { mutableStateOf(false) }
+    var barcodeLookupMessage by remember { mutableStateOf<String?>(null) }
+    var lastScannedBarcode by rememberSaveable { mutableStateOf<String?>(null) }
+
+    var isSelecting by remember { mutableStateOf(false) }
+    LaunchedEffect(isSelecting) {
+        onSelectionModeChange(isSelecting)
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            onSelectionModeChange(false)
+            onOverlayVisibilityChange(false)
+        }
+    }
+
+    SideEffect {
+        onOverlayVisibilityChange(shouldBlurBackground)
+    }
+
+    val selectedItems = remember { mutableStateListOf<FoodItem>() }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    var showPantrySearchBar by rememberSaveable { mutableStateOf(false) }
+    val isHomeSearchKeyboardVisible = WindowInsets.ime.getBottom(density) > 0
+    var homeSearchKeyboardWasVisible by remember { mutableStateOf(false) }
+    var selectedFilterCategory by rememberSaveable { mutableStateOf("All") }
+    var savedListIndex by rememberSaveable { mutableIntStateOf(0) }
+    var savedListOffset by rememberSaveable { mutableIntStateOf(0) }
+    var filterChangeJob by remember { mutableStateOf<Job?>(null) }
+
+    fun closePantrySearch() {
+        focusManager.clearFocus(force = true)
+        keyboard?.hide()
+        searchQuery = ""
+        showPantrySearchBar = false
+        homeSearchKeyboardWasVisible = false
+    }
+
+    val listState = rememberLazyListState(
+        initialFirstVisibleItemIndex = savedListIndex,
+        initialFirstVisibleItemScrollOffset = savedListOffset
+    )
+    val slowTopScrollFallbackPx = with(density) { 112.dp.toPx() }
+
+    fun updatePantryFilter(newFilter: String, animateScroll: Boolean = true) {
+        val wantsJumpToTop = newFilter.equals("All", ignoreCase = true)
+        if (selectedFilterCategory.equals(newFilter, ignoreCase = true)) {
+            if (
+                wantsJumpToTop &&
+                animateScroll &&
+                (listState.firstVisibleItemIndex != 0 || listState.firstVisibleItemScrollOffset != 0)
+            ) {
+                filterChangeJob?.cancel()
+                filterChangeJob = formScope.launch {
+                    listState.animateScrollToTopSlowly(slowTopScrollFallbackPx)
+                }
+            }
+            return
+        }
+
+        filterChangeJob?.cancel()
+        filterChangeJob = formScope.launch {
+            if (
+                animateScroll &&
+                !wantsJumpToTop &&
+                (listState.firstVisibleItemIndex != 0 || listState.firstVisibleItemScrollOffset != 0)
+            ) {
+                listState.animateScrollToItem(0)
+            }
+            selectedFilterCategory = newFilter
+
+            if (wantsJumpToTop) {
+                withFrameNanos { }
+                if (animateScroll) {
+                    if (
+                        listState.firstVisibleItemIndex != 0 ||
+                        listState.firstVisibleItemScrollOffset != 0
+                    ) {
+                        listState.animateScrollToTopSlowly(slowTopScrollFallbackPx)
+                    }
+                } else {
+                    listState.scrollToItem(0)
+                }
+            }
+        }
+    }
+    LaunchedEffect(searchQuery) {
+        if (
+            searchQuery.isNotBlank() &&
+            (listState.firstVisibleItemIndex != 0 || listState.firstVisibleItemScrollOffset != 0)
+        ) {
+            listState.scrollToItem(0)
+        }
+    }
+    OverlayBackHandler(enabled = showPantrySearchBar && !isSelecting) {
+        closePantrySearch()
+    }
+
+    BackHandler(
+        enabled = showPantrySearchBar &&
+                !isSelecting &&
+                Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU &&
+                !isHomeSearchKeyboardVisible
+    ) {
+        closePantrySearch()
+    }
+
+    LaunchedEffect(showPantrySearchBar, isSelecting) {
+        if (showPantrySearchBar && !isSelecting) {
+            homeSearchFocus.requestFocus()
+            keyboard?.show()
+        } else {
+            homeSearchKeyboardWasVisible = false
+        }
+    }
+
+    LaunchedEffect(showPantrySearchBar, isHomeSearchKeyboardVisible, isSelecting) {
+        if (!showPantrySearchBar || isSelecting) return@LaunchedEffect
+
+        if (isHomeSearchKeyboardVisible) {
+            homeSearchKeyboardWasVisible = true
+            return@LaunchedEffect
+        }
+
+        if (homeSearchKeyboardWasVisible) {
+            closePantrySearch()
+        }
+    }
+    var fabVisible by rememberSaveable { mutableStateOf(true) }
+
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.isScrollInProgress }
+            .collect { isScrolling ->
+                if (!isScrolling) {
+                    val index = listState.firstVisibleItemIndex
+                    val offset = listState.firstVisibleItemScrollOffset
+
+                    if (savedListIndex != index) savedListIndex = index
+                    if (savedListOffset != offset) savedListOffset = offset
+                }
+            }
+    }
+
+    DisposableEffect(listState) {
+        onDispose {
+            savedListIndex = listState.firstVisibleItemIndex
+            savedListOffset = listState.firstVisibleItemScrollOffset
+        }
+    }
+
+    LaunchedEffect(listState) {
+        var prevIndex = listState.firstVisibleItemIndex
+        var prevOffset = listState.firstVisibleItemScrollOffset
+        var currentFabVisible = fabVisible
+
+        snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
+            .collect { (index, offset) ->
+                val scrollingUp = if (index != prevIndex) index < prevIndex else offset < prevOffset
+                val newFabVisible = scrollingUp || (index == 0 && offset == 0)
+
+                if (currentFabVisible != newFabVisible) {
+                    currentFabVisible = newFabVisible
+                    fabVisible = newFabVisible
+                }
+
+                prevIndex = index
+                prevOffset = offset
+            }
+    }
+
+    BackHandler(enabled = isSelecting) {
+        isSelecting = false
+        selectedItems.clear()
+    }
+
+    LaunchedEffect(showForm) {
+        if (showForm) nameFocus.requestFocus()
+    }
+
+    val foodList = remember {
+        mutableStateListOf<FoodItem>().apply {
+            addAll(loadFoodList(sharedPrefs, gson))
+        }
+    }
+
+    DisposableEffect(sharedPrefs, gson) {
+        val listener =
+            android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+                when (key) {
+                    FOOD_LIST_KEY -> replaceListContentsIfChanged(foodList, loadFoodList(sharedPrefs, gson))
+                    CATEGORIES_LIST_KEY -> replaceListContentsIfChanged(
+                        categories,
+                        loadStringList(sharedPrefs, gson, CATEGORIES_LIST_KEY).ifEmpty { initialCategories }
+                    )
+                }
+            }
+
+        sharedPrefs.registerOnSharedPreferenceChangeListener(listener)
+        onDispose { sharedPrefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+
+    fun applyCategoryToSelected(newCategory: String?) {
+        val chosen = newCategory?.trim()?.takeIf { it.isNotBlank() }
+
+        val toUpdate = selectedItems.toList()
+
+        toUpdate.forEach { old ->
+            val idx = foodList.indexOf(old)
+            if (idx != -1) {
+                foodList[idx] = old.copy(category = chosen)
+            }
+        }
+
+        selectedItems.clear()
+        isSelecting = false
+    }
+
+    fun isDuplicateName(input: String): Boolean {
+        val cleaned = input.trim()
+        if (cleaned.isBlank()) return false
+
+        return foodList.any { item ->
+            item != editingItem && item.name.trim().equals(cleaned, ignoreCase = true)
+        }
+    }
+
+    fun clearBarcodeLookupUi() {
+        isLookingUpBarcode = false
+        barcodeLookupMessage = null
+        lastScannedBarcode = null
+    }
+
+    fun closeFoodForm() {
+        onShowFormChange(false)
+        editingItem = null
+        foodName = ""
+        expiryDate = ""
+
+        selectedCategory = null
+        isCustomCategory = false
+        customCategory = ""
+
+        showError = false
+        nameExistsError = false
+        clearBarcodeLookupUi()
+    }
+
+    fun openEditFoodForm(food: FoodItem) {
+        editingItem = food
+        foodName = food.name
+        expiryDate = food.expiry
+
+        val cat = food.category?.trim().orEmpty()
+        when {
+            cat.isBlank() -> {
+                isCustomCategory = false
+                selectedCategory = null
+                customCategory = ""
+            }
+
+            categories.any { it.equals(cat, ignoreCase = true) } -> {
+                isCustomCategory = false
+                selectedCategory = categories.first { it.equals(cat, ignoreCase = true) }
+                customCategory = ""
+            }
+
+            else -> {
+                isCustomCategory = true
+                selectedCategory = null
+                customCategory = cat
+            }
+        }
+
+        showError = false
+        clearBarcodeLookupUi()
+        onShowFormChange(true)
+    }
+
+    fun deleteFoodItem(food: FoodItem) {
+        foodList.remove(food)
+        selectedItems.remove(food)
+
+        if (editingItem == food) {
+            closeFoodForm()
+        }
+    }
+
+    fun saveCurrentFoodFromForm(): Boolean {
+        val missing = foodName.isBlank() || expiryDate.isBlank()
+        val invalidDate = expiryDate.isNotBlank() && !isValidFutureExpiryDate(expiryDate)
+
+        showError = missing || invalidDate
+        nameExistsError = !missing && !invalidDate && isDuplicateName(foodName)
+
+        if (missing || invalidDate || nameExistsError) return false
+
+        if (isCustomCategory) commitCustomCategory()
+        val updated = FoodItem(foodName.trim(), expiryDate, finalCategoryOrNull())
+
+        val old = editingItem
+        if (old == null) {
+            foodList.add(updated)
+        } else {
+            val idx = foodList.indexOf(old)
+            if (idx != -1) foodList[idx] = updated else foodList.add(updated)
+            if (selectedItems.remove(old)) selectedItems.add(updated)
+        }
+
+        addFoodNameToHistory(sharedPrefs, gson, updated.name)
+
+        lastScannedBarcode?.let { scannedBarcode ->
+            saveBarcodeNameToCache(
+                context = context,
+                barcode = scannedBarcode,
+                productName = updated.name,
+                source = "User confirmed"
+            )
+        }
+
+        closeFoodForm()
+        return true
+    }
+
+    val barcodeScannerLauncher =
+        rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.StartActivityForResult()
+        ) { result ->
+            val scannedBarcode =
+                result.data?.getStringExtra(EXTRA_SCANNED_BARCODE)?.trim().orEmpty()
+            val scanMessage =
+                result.data?.getStringExtra(EXTRA_BARCODE_SCAN_MESSAGE)?.trim().orEmpty()
+
+            if (result.resultCode == Activity.RESULT_OK && scannedBarcode.isNotBlank()) {
+                lastScannedBarcode = scannedBarcode
+                isLookingUpBarcode = true
+                barcodeLookupMessage = "Looking up product..."
+
+                formScope.launch {
+                    val lookup = lookupBarcodeName(context, scannedBarcode)
+
+                    isLookingUpBarcode = false
+
+                    if (lookup != null) {
+                        foodName = lookup.productName.take(50)
+                        barcodeLookupMessage = "Found product"
+                    } else {
+                        barcodeLookupMessage = "No product found for this barcode."
+                    }
+
+                    showError = false
+                    nameExistsError = isDuplicateName(foodName)
+                }
+            } else if (scanMessage.isNotBlank()) {
+                isLookingUpBarcode = false
+                barcodeLookupMessage = scanMessage
+            }
+        }
+
+    val sortedFoodList by remember {
+        derivedStateOf {
+            foodList
+                .map { item ->
+                    val daysLeft = daysUntil(item.expiry)
+                    SortedFoodSnapshot(
+                        item = item,
+                        expiryBucket = when {
+                            daysLeft == null -> 2
+                            daysLeft < 0 -> 0
+                            else -> 1
+                        },
+                        expiryDistance = when {
+                            daysLeft == null -> Int.MAX_VALUE
+                            daysLeft < 0 -> abs(daysLeft)
+                            else -> daysLeft
+                        },
+                        nameKey = item.name.lowercase()
+                    )
+                }
+                .sortedWith(
+                    compareBy(
+                        SortedFoodSnapshot::expiryBucket,
+                        SortedFoodSnapshot::expiryDistance,
+                        SortedFoodSnapshot::nameKey
+                    )
+                )
+                .map(SortedFoodSnapshot::item)
+        }
+    }
+
+    val filteredFoodList by remember(sortedFoodList, searchQuery, selectedFilterCategory) {
+        derivedStateOf {
+            val q = searchQuery.trim()
+
+            val effectiveFilter =
+                if (selectedFilterCategory == "All" || categories.any { it.equals(selectedFilterCategory, true) })
+                    selectedFilterCategory
+                else
+                    "All"
+
+            val byCategory =
+                if (effectiveFilter == "All") {
+                    sortedFoodList
+                } else {
+                    sortedFoodList.filter {
+                        (it.category ?: "").equals(effectiveFilter, ignoreCase = true)
+                    }
+                }
+
+            if (q.isEmpty()) byCategory
+            else byCategory.filter { it.name.contains(q, ignoreCase = true) }
+        }
+    }
+    val allVisibleItemsSelected by remember(filteredFoodList) {
+        derivedStateOf {
+            filteredFoodList.isNotEmpty() && filteredFoodList.all { selectedItems.contains(it) }
+        }
+    }
+    val pantryScrollRunway = shortListScrollRunway(filteredFoodList.size)
+
+    LaunchedEffect(Unit) {
+        snapshotFlow { foodList.toList() }
+            .drop(1)
+            .collectLatest { list ->
+                saveFoodListAsync(sharedPrefs, gson, list)
+            }
+    }
+
+    LaunchedEffect(Unit) {
+        snapshotFlow { categories.toList() }
+            .drop(1)
+            .collectLatest { list ->
+                saveStringListAsync(sharedPrefs, gson, CATEGORIES_LIST_KEY, list)
+            }
+    }
+
+    val overlayDensity = LocalDensity.current
+    val defaultTopBarHeightPx = with(overlayDensity) { 170.dp.roundToPx() }
+    var pantryTopBarHeightPx by remember { mutableIntStateOf(defaultTopBarHeightPx) }
+    val pantryContentTopPadding = with(overlayDensity) { pantryTopBarHeightPx.toDp() } + 8.dp
+    var shouldWarmSelectionControls by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        withFrameNanos { }
+        shouldWarmSelectionControls = true
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        if (shouldWarmSelectionControls) {
+            SelectionControlsWarmup()
+        }
+
+        Scaffold(
+            containerColor = Color.Transparent,
+            contentWindowInsets = WindowInsets.ime,
+            floatingActionButtonPosition = FabPosition.End,
+            floatingActionButton = {
+                    if (!isSelecting) {
+                        HomeAddFloatingActionButton(
+                            visible = fabVisible && !showForm,
+                            onClick = {
+                                if (!showForm) {
+                                    editingItem = null
+                                    foodName = ""
+                                    expiryDate = ""
+
+                                    selectedCategory = null
+                                    isCustomCategory = false
+                                    customCategory = ""
+
+                                    showError = false
+                                    nameExistsError = false
+                                    clearBarcodeLookupUi()
+                                    onShowFormChange(true)
+                                }
+                            }
+                        )
+
+                    } else if (selectedItems.isNotEmpty()) {
+                        val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
+                        val deleteFabRed = if (isDarkTheme) Color(0xFFFF6257) else Color(0xFFD32F2F)
+                        val deleteFabOverlay = if (isDarkTheme) Color(0xFF9F1F1F) else Color(0xFFB71C1C)
+
+                        EditCategoriesStyledFab(
+                            onClick = { pendingDeleteSelected = true },
+                            icon = Icons.Default.Delete,
+                            contentDescription = "Delete Selected",
+                            backgroundTint = deleteFabOverlay,
+                            iconTint = deleteFabRed,
+                            tintAlpha = if (isDarkTheme) 0.78f else 0.64f,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(start = 30.dp, bottom = 10.dp)
+                        )
+                    }
+                }
+        ) { innerPadding ->
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(innerPadding)
+                ) {
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 16.dp)
+                    ) {
+
+                        if (filteredFoodList.isEmpty() && searchQuery.isNotBlank()) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(top = pantryContentTopPadding),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("No food found")
+                            }
+                        } else {
+                            Box(modifier = Modifier.fillMaxSize()) {
+                                LazyColumn(
+                                    state = listState,
+                                    modifier = Modifier.fillMaxSize(),
+                                    overscrollEffect = null,
+                                    contentPadding = PaddingValues(
+                                        top = pantryContentTopPadding,
+                                        bottom = 45.dp + pantryScrollRunway
+                                    )
+                                ) {
+                                    items(
+                                        items = filteredFoodList,
+                                        key = { "${it.name}|${it.expiry}|${it.category ?: ""}" },
+                                        contentType = { "pantry_food_item" }
+                                    ) { food ->
+                                        PantryFoodCard(
+                                            modifier = Modifier.animateItem(
+                                                fadeInSpec = null,
+                                                fadeOutSpec = null,
+                                                placementSpec = tween(
+                                                    durationMillis = SWIPE_ITEM_PLACEMENT_DURATION_MS,
+                                                    easing = FastOutSlowInEasing
+                                                )
+                                            ),
+                                            food = food,
+                                            isSelecting = isSelecting,
+                                            isSelected = selectedItems.contains(food),
+                                            onSelectionChange = { checked ->
+                                                if (checked) {
+                                                    if (!selectedItems.contains(food)) {
+                                                        selectedItems.add(food)
+                                                    }
+                                                } else {
+                                                    selectedItems.remove(food)
+                                                }
+                                            },
+                                            onEdit = { openEditFoodForm(food) },
+                                            onDelete = { deleteFoodItem(food) }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    MyPantryTopBar(
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .onSizeChanged { pantryTopBarHeightPx = it.height },
+                        isSelecting = isSelecting,
+                        selectedItemsCount = selectedItems.size,
+                        hasVisibleItems = filteredFoodList.isNotEmpty(),
+                        allVisibleItemsSelected = allVisibleItemsSelected,
+
+                        showSearchBar = showPantrySearchBar,
+                        searchQuery = searchQuery,
+                        onSearchQueryChange = { searchQuery = it },
+                        onShowSearchBar = {
+                            showPantrySearchBar = true
+                            homeSearchFocus.requestFocus()
+                            keyboard?.show()
+                        },
+                        searchTextFieldModifier = Modifier.focusRequester(homeSearchFocus),
+                        onSearchBarTap = {
+                            homeSearchFocus.requestFocus()
+                            keyboard?.show()
+                        },
+
+                        categories = categories,
+                        selectedFilterCategory = selectedFilterCategory,
+                        onFilterChange = { updatePantryFilter(it) },
+
+                        onEnterSelectionMode = {
+                            closePantrySearch()
+                            isSelecting = true
+                            selectedItems.clear()
+                        },
+                        onToggleSelectAll = {
+                            if (filteredFoodList.isNotEmpty()) {
+                                if (allVisibleItemsSelected) {
+                                    selectedItems.removeAll(filteredFoodList.toSet())
+                                } else {
+                                    filteredFoodList.forEach { item ->
+                                        if (!selectedItems.contains(item)) {
+                                            selectedItems.add(item)
+                                        }
+                                    }
+                                }
+                            }
+                        },
+
+                        onBulkAddToCategoryClick = {
+                            showBulkCategorySheet = true
+                        },
+
+                        onBulkCustomCategoryClick = {
+                            bulkCustomCategoryName = ""
+                            bulkCustomCategoryExistsError = false
+                            showBulkCustomCategoryDialog = true
+                        },
+
+                        onAddCategoryClick = {
+                            editCategoriesBackdropVisible = true
+                            showEditCategoriesSheet = true
+                        }
+                    )
+                }
+            }
+
+            EditCategoriesBottomSheet(
+                show = showEditCategoriesSheet,
+                categories = categories,
+                initialCategories = initialCategories,
+                onBeginDismiss = {
+                    editCategoriesBackdropVisible = false
+                },
+                onDismiss = {
+                    editCategoriesBackdropVisible = false
+                    showEditCategoriesSheet = false
+                },
+                onAddClick = {
+                    newCategoryName = ""
+                    addCategoryExistsError = false
+                    showAddCategorySheetDialog = true
+                },
+                onDeleteClick = { cat ->
+                    pendingDeleteCategory = cat
+                }
+            )
+
+            BulkCategorySelectionSheet(
+                show = showBulkCategorySheet,
+                categories = categories,
+                onBeginDismiss = {},
+                onDismiss = {
+                    showBulkCategorySheet = false
+                },
+                onCategorySelected = { selectedCategoryName ->
+                    applyCategoryToSelected(selectedCategoryName)
+                }
+            )
+        }
+
+
+        pendingDelete?.let { item ->
+            GlassAlertDialog(
+                onDismissRequest = { pendingDelete = null },
+                title = { Text("Delete item?") },
+                text = { Text("Are you sure you want to delete \"${item.name}\"?") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        foodList.remove(item)
+                        selectedItems.remove(item)
+
+                        if (editingItem == item) {
+                            editingItem = null
+                            onShowFormChange(true)
+                            foodName = ""
+                            expiryDate = ""
+                            showError = false
+                        }
+
+                        pendingDelete = null
+                    }) {
+                        Text("Delete")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingDelete = null }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+
+        pendingDeleteCategory?.let { cat ->
+            GlassAlertDialog(
+                onDismissRequest = { pendingDeleteCategory = null },
+                title = { Text("Delete category?") },
+                text = { Text("Are you sure you want to delete \"$cat\"? (Items in this category won't be deleted.)") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        if (selectedFilterCategory.equals(cat, ignoreCase = true)) {
+                            updatePantryFilter("All")
+                        }
+
+                        for (i in foodList.indices) {
+                            val item = foodList[i]
+                            if ((item.category ?: "").equals(cat, ignoreCase = true)) {
+                                foodList[i] = item.copy(category = null)
+                            }
+                        }
+                        for (i in selectedItems.indices) {
+                            val item = selectedItems[i]
+                            if ((item.category ?: "").equals(cat, ignoreCase = true)) {
+                                selectedItems[i] = item.copy(category = null)
+                            }
+                        }
+
+                        deleteCategory(cat)
+                        pendingDeleteCategory = null
+                    }) { Text("Delete") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingDeleteCategory = null }) { Text("Cancel") }
+                }
+            )
+        }
+
+        if (showAddCategorySheetDialog) {
+            val addCategoryFocus = remember { FocusRequester() }
+            val keyboard = LocalSoftwareKeyboardController.current
+
+            LaunchedEffect(Unit) {
+                delay(150)
+                addCategoryFocus.requestFocus()
+                keyboard?.show()
+            }
+
+            GlassAlertDialog(
+                onDismissRequest = {
+                    showAddCategorySheetDialog = false
+                    addCategoryExistsError = false
+                },
+                title = { Text("Add Category", style = MaterialTheme.typography.titleLarge) },
+                text = {
+                    Column {
+                        OutlinedTextField(
+                            value = newCategoryName,
+                            onValueChange = {
+                                newCategoryName = it
+                                if (addCategoryExistsError) addCategoryExistsError = false
+                            },
+                            singleLine = true,
+                            label = { Text("Category name") },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .focusRequester(addCategoryFocus),
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                            keyboardActions = KeyboardActions(
+                                onDone = {
+                                    val cleaned = newCategoryName.trim()
+                                    if (cleaned.isBlank()) return@KeyboardActions
+
+                                    if (isDuplicateCategoryName(cleaned)) {
+                                        addCategoryExistsError = true
+                                        return@KeyboardActions
+                                    }
+
+                                    val added = addCategoryOnly(cleaned)
+                                    if (added != null) {
+                                        addCategoryExistsError = false
+                                        showAddCategorySheetDialog = false
+                                        newCategoryName = ""
+                                    }
+                                }
+                            )
+                        )
+
+                        if (addCategoryExistsError) {
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                text = "Category already exists!",
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        val cleaned = newCategoryName.trim()
+                        if (cleaned.isBlank()) return@TextButton
+
+                        if (isDuplicateCategoryName(cleaned)) {
+                            addCategoryExistsError = true
+                            return@TextButton
+                        }
+
+                        val added = addCategoryOnly(cleaned)
+                        if (added != null) {
+                            addCategoryExistsError = false
+                            showAddCategorySheetDialog = false
+                            newCategoryName = ""
+                        }
+                    }) { Text("Add") }
+                },
+                dismissButton = {
+                    TextButton(onClick = {
+                        showAddCategorySheetDialog = false
+                        addCategoryExistsError = false
+                    }) { Text("Cancel") }
+                }
+            )
+        }
+
+        if (showBulkCustomCategoryDialog) {
+            val bulkCustomFocus = remember { FocusRequester() }
+            val keyboard = LocalSoftwareKeyboardController.current
+
+            LaunchedEffect(Unit) {
+                delay(150)
+                bulkCustomFocus.requestFocus()
+                keyboard?.show()
+            }
+
+            GlassAlertDialog(
+                onDismissRequest = {
+                    showBulkCustomCategoryDialog = false
+                    bulkCustomCategoryExistsError = false
+                },
+                title = { Text("Custom Category") },
+                text = {
+                    Column {
+                        OutlinedTextField(
+                            value = bulkCustomCategoryName,
+                            onValueChange = {
+                                bulkCustomCategoryName = it
+                                if (bulkCustomCategoryExistsError) bulkCustomCategoryExistsError = false
+                            },
+                            singleLine = true,
+                            label = { Text("Category name") },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .focusRequester(bulkCustomFocus),
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                            keyboardActions = KeyboardActions(
+                                onDone = {
+                                    val cleaned = bulkCustomCategoryName.trim()
+                                    if (cleaned.isBlank()) return@KeyboardActions
+
+                                    if (isDuplicateCategoryName(cleaned)) {
+                                        bulkCustomCategoryExistsError = true
+                                        return@KeyboardActions
+                                    }
+
+                                    val added = addCategoryOnly(cleaned)
+                                    if (added != null) {
+                                        bulkCustomCategoryExistsError = false
+                                        applyCategoryToSelected(added)
+                                        showBulkCustomCategoryDialog = false
+                                    }
+                                }
+                            )
+                        )
+
+                        if (bulkCustomCategoryExistsError) {
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                text = "Category already exists!",
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        val cleaned = bulkCustomCategoryName.trim()
+                        if (cleaned.isBlank()) return@TextButton
+
+                        if (isDuplicateCategoryName(cleaned)) {
+                            bulkCustomCategoryExistsError = true
+                            return@TextButton
+                        }
+
+                        val added = addCategoryOnly(cleaned)
+                        if (added != null) {
+                            bulkCustomCategoryExistsError = false
+                            applyCategoryToSelected(added)
+                            showBulkCustomCategoryDialog = false
+                        }
+                    }) { Text("Done") }
+                },
+                dismissButton = {
+                    TextButton(onClick = {
+                        showBulkCustomCategoryDialog = false
+                        bulkCustomCategoryExistsError = false
+                    }) { Text("Cancel") }
+                }
+            )
+        }
+
+        if (pendingDeleteSelected) {
+            GlassAlertDialog(
+                onDismissRequest = { pendingDeleteSelected = false },
+                title = { Text("Delete selected items?") },
+                text = {
+                    Text("Are you sure you want to delete ${selectedItems.size} items.")
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        val toDelete = selectedItems.toList()
+                        foodList.removeAll(toDelete)
+
+                        selectedItems.clear()
+                        isSelecting = false
+                        pendingDeleteSelected = false
+                    }) {
+                        Text("Delete")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingDeleteSelected = false }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+
+        if (showCustomCategoryDialog) {
+
+            if (showQuickAddCategoryDialog) {
+                GlassAlertDialog(
+                    onDismissRequest = { showQuickAddCategoryDialog = false },
+                    title = { Text("Add Category", style = MaterialTheme.typography.titleLarge) },
+                    text = {
+                        OutlinedTextField(
+                            value = quickCategoryName,
+                            onValueChange = { quickCategoryName = it },
+                            singleLine = true,
+                            label = { Text("Category name") },
+                            modifier = Modifier.fillMaxWidth(),
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                            keyboardActions = KeyboardActions(
+                                onDone = {
+                                    val added = addCategoryOnly(quickCategoryName)
+                                    if (added != null) {
+                                        updatePantryFilter(added)
+                                        showQuickAddCategoryDialog = false
+                                    }
+                                }
+                            )
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            val added = addCategoryOnly(quickCategoryName)
+                            if (added != null) {
+                                updatePantryFilter(added)
+                                showQuickAddCategoryDialog = false
+                            }
+                        }) {
+                            Text("Add")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showQuickAddCategoryDialog = false }) {
+                            Text("Cancel")
+                        }
+                    }
+                )
+            }
+
+            val customFocus = remember { FocusRequester() }
+
+            val keyboard = LocalSoftwareKeyboardController.current
+
+            LaunchedEffect(showCustomCategoryDialog) {
+                if (showCustomCategoryDialog) {
+                    delay(150)
+                    customFocus.requestFocus()
+                    keyboard?.show()
+                }
+            }
+
+            GlassAlertDialog(
+                onDismissRequest = {
+                    showCustomCategoryDialog = false
+                    customCategoryExistsError = false
+                },
+                title = { Text("Custom Category") },
+                text = {
+                    Column {
+                        OutlinedTextField(
+                            value = tempCustomCategory,
+                            onValueChange = {
+                                tempCustomCategory = it
+                                if (customCategoryExistsError) customCategoryExistsError = false
+                            },
+                            singleLine = true,
+                            label = { Text("Category name") },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .focusRequester(customFocus),
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                            keyboardActions = KeyboardActions(
+                                onDone = {
+                                    val cleaned = tempCustomCategory.trim()
+                                    if (cleaned.isBlank()) return@KeyboardActions
+
+                                    if (isDuplicateCategoryName(cleaned)) {
+                                        customCategoryExistsError = true
+                                        return@KeyboardActions
+                                    }
+
+                                    customCategory = cleaned
+                                    isCustomCategory = true
+                                    commitCustomCategory()
+                                    customCategoryExistsError = false
+                                    showCustomCategoryDialog = false
+                                }
+                            )
+                        )
+
+                        if (customCategoryExistsError) {
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                text = "Category already exists!",
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        val cleaned = tempCustomCategory.trim()
+                        if (cleaned.isBlank()) return@TextButton
+
+                        if (isDuplicateCategoryName(cleaned)) {
+                            customCategoryExistsError = true
+                            return@TextButton
+                        }
+
+                        customCategory = cleaned
+                        isCustomCategory = true
+                        commitCustomCategory()
+                        customCategoryExistsError = false
+                        showCustomCategoryDialog = false
+                    }) { Text("Done") }
+                },
+                dismissButton = {
+                    TextButton(onClick = {
+                        showCustomCategoryDialog = false
+                        customCategoryExistsError = false
+                    }) { Text("Cancel") }
+                }
+            )
+        }
+
+        if (showForm) {
+            val animatedImeShiftPx = rememberAnimatedImeShiftPx(label = "addFoodImeShift")
+
+            Dialog(
+                onDismissRequest = { closeFoodForm() },
+                properties = DialogProperties(
+                    dismissOnBackPress = true,
+                    dismissOnClickOutside = false,
+                    usePlatformDefaultWidth = false
+                )
+            ) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    ExactFrostedPillCard(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .graphicsLayer { translationY = -animatedImeShiftPx }
+                            .padding(16.dp),
+                        shape = RoundedCornerShape(28.dp),
+                        shadowElevation = 14.dp
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            verticalArrangement = Arrangement.Center,
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 8.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    if (editingItem == null) "Add Food" else "Edit Food",
+                                    style = MaterialTheme.typography.titleLarge
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(2.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                OutlinedTextField(
+                                    value = foodName,
+                                    onValueChange = {
+                                        if (it.length <= 50) {
+                                            foodName = it
+                                            if (showError) showError = false
+                                            nameExistsError = isDuplicateName(foodName)
+                                        }
+                                    },
+                                    label = { Text("Food Name") },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .focusRequester(nameFocus),
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                                    keyboardActions = KeyboardActions(
+                                        onDone = { saveCurrentFoodFromForm() }
+                                    )
+                                )
+
+                                Spacer(modifier = Modifier.width(8.dp))
+
+                                IconButton(
+                                    onClick = {
+                                        barcodeLookupMessage = null
+                                        isLookingUpBarcode = false
+                                        barcodeScannerLauncher.launch(
+                                            Intent(context, BarcodeScannerActivity::class.java)
+                                        )
+                                    },
+                                    enabled = !isLookingUpBarcode,
+                                    modifier = Modifier.size(56.dp)
+                                ) {
+                                    Icon(
+                                        painter = painterResource(id = R.drawable.outline_barcode_scanner_24),
+                                        contentDescription = "Scan barcode",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+                            }
+
+                            if (isLookingUpBarcode || !barcodeLookupMessage.isNullOrBlank()) {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = if (isLookingUpBarcode) {
+                                        "Looking up product..."
+                                    } else {
+                                        barcodeLookupMessage.orEmpty()
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(6.dp))
+
+                            ExpiryDateInputField(
+                                value = expiryDate,
+                                onValueChange = {
+                                    expiryDate = it
+                                    if (showError) showError = false
+                                },
+                                onCalendarClick = {
+                                    openExpiryDatePicker(context) { pickedDate ->
+                                        expiryDate = pickedDate
+                                        if (showError) showError = false
+                                    }
+                                }
+                            )
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            CategoryDropdown(
+                                categories = categories,
+                                initialCategories = initialCategories,
+                                selectedCategory = selectedCategory,
+                                isCustom = isCustomCategory,
+                                onPickCategory = {
+                                    isCustomCategory = false
+                                    selectedCategory = it
+                                    customCategory = ""
+                                    if (showError) showError = false
+                                },
+                                onPickCustom = {
+                                    showCustomCategoryDialog = true
+                                    tempCustomCategory = ""
+                                    customCategoryExistsError = false
+                                },
+                                onDeleteCategory = { cat ->
+                                    pendingDeleteCategory = cat
+                                }
+                            )
+
+                            Spacer(modifier = Modifier.height(2.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End
+                            ) {
+                                TextButton(onClick = { closeFoodForm() }) {
+                                    Text("Cancel")
+                                }
+
+                                Spacer(modifier = Modifier.width(8.dp))
+
+                                Button(
+                                    onClick = {
+
+                                        saveCurrentFoodFromForm()
+                                    }
+                                ) {
+                                    Text("Done")
+                                }
+                            }
+
+                            if(nameExistsError) {
+                                Text(
+                                    "Food already exists!",
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                            }else if (showError) {
+                                when {
+                                    foodName.isEmpty() && expiryDate.isEmpty() ->
+                                        Text(
+                                            "Please enter food name and expiry date!",
+                                            color = MaterialTheme.colorScheme.error
+                                        )
+
+                                    foodName.isEmpty() ->
+                                        Text(
+                                            "Please enter food name!",
+                                            color = MaterialTheme.colorScheme.error
+                                        )
+
+                                    expiryDate.isEmpty() ->
+                                        Text(
+                                            "Please enter expiry date!",
+                                            color = MaterialTheme.colorScheme.error
+                                        )
+
+                                    !isValidFutureExpiryDate(expiryDate) ->
+                                        Text(
+                                            "Please enter a valid future date!",
+                                            color = MaterialTheme.colorScheme.error
+                                        )
+                                }
+                            }
+                    }
+                }
+            }
+        }
+    }
+}
+
+class BarcodeScannerActivity : ComponentActivity() {
+
+    private val cameraPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (granted) {
+                showScannerContent()
+            } else {
+                val permissionMessage =
+                    if (ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.CAMERA)) {
+                        "Camera permission is needed to scan barcodes."
+                    } else {
+                        "Enable camera access in Settings to scan barcodes."
+                    }
+
+                setResult(
+                    Activity.RESULT_CANCELED,
+                    Intent().putExtra(EXTRA_BARCODE_SCAN_MESSAGE, permissionMessage)
+                )
+                Toast.makeText(
+                    this,
+                    permissionMessage,
+                    Toast.LENGTH_SHORT
+                ).show()
+                finish()
+            }
+        }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
+            == PackageManager.PERMISSION_GRANTED
+        ) {
+            showScannerContent()
+        } else {
+            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+    }
+
+    @androidx.annotation.OptIn(ExperimentalGetImage::class)
+    private fun showScannerContent() {
+        setContent {
+            val appCtx = applicationContext
+            AppTheme(mode = loadThemeMode(appCtx)) {
+                BarcodeScannerScreen(
+                    onClose = { finish() },
+                    onBarcodeScanned = { barcode ->
+                        setResult(
+                            Activity.RESULT_OK,
+                            Intent().putExtra(EXTRA_SCANNED_BARCODE, barcode)
+                        )
+                        finish()
+                    }
+                )
+            }
+        }
+    }
+}
+
+@androidx.camera.core.ExperimentalGetImage
+@Composable
+private fun BarcodeGuideCorners(modifier: Modifier = Modifier) {
+    val guideColor = Color(0xFF79C9FF)
+
+    Canvas(modifier = modifier) {
+        val frameWidth = size.width * 0.78f
+        val frameHeight = size.height * 0.22f
+        val centerX = size.width / 2f
+        val centerY = size.height * 0.46f
+
+        val left = centerX - frameWidth / 2f
+        val top = centerY - frameHeight / 2f
+        val right = centerX + frameWidth / 2f
+        val bottom = centerY + frameHeight / 2f
+
+        val stroke = 4.dp.toPx()
+        val cornerLength = min(frameWidth, frameHeight) * 0.30f
+
+        drawLine(
+            color = guideColor,
+            start = Offset(left, top),
+            end = Offset(left + cornerLength, top),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round
+        )
+        drawLine(
+            color = guideColor,
+            start = Offset(left, top),
+            end = Offset(left, top + cornerLength),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round
+        )
+
+        drawLine(
+            color = guideColor,
+            start = Offset(right - cornerLength, top),
+            end = Offset(right, top),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round
+        )
+        drawLine(
+            color = guideColor,
+            start = Offset(right, top),
+            end = Offset(right, top + cornerLength),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round
+        )
+
+        drawLine(
+            color = guideColor,
+            start = Offset(left, bottom - cornerLength),
+            end = Offset(left, bottom),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round
+        )
+        drawLine(
+            color = guideColor,
+            start = Offset(left, bottom),
+            end = Offset(left + cornerLength, bottom),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round
+        )
+
+        drawLine(
+            color = guideColor,
+            start = Offset(right - cornerLength, bottom),
+            end = Offset(right, bottom),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round
+        )
+        drawLine(
+            color = guideColor,
+            start = Offset(right, bottom - cornerLength),
+            end = Offset(right, bottom),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round
+        )
+    }
+}
+
+@androidx.camera.core.ExperimentalGetImage
+@Composable
+private fun BarcodeScannerScreen(
+    onClose: () -> Unit,
+    onBarcodeScanned: (String) -> Unit
+) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    val previewView = remember {
+        PreviewView(context).apply {
+            scaleType = PreviewView.ScaleType.FILL_CENTER
+        }
+    }
+
+    val scanner = remember {
+        val options = BarcodeScannerOptions.Builder()
+            .setBarcodeFormats(
+                Barcode.FORMAT_EAN_13,
+                Barcode.FORMAT_EAN_8,
+                Barcode.FORMAT_UPC_A,
+                Barcode.FORMAT_UPC_E,
+                Barcode.FORMAT_CODE_128,
+                Barcode.FORMAT_CODE_39,
+                Barcode.FORMAT_ITF
+            )
+            .build()
+
+        BarcodeScanning.getClient(options)
+    }
+
+    val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
+    val hasReturnedResult = remember { AtomicBoolean(false) }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            scanner.close()
+            cameraExecutor.shutdown()
+        }
+    }
+
+    LaunchedEffect(previewView) {
+        val cameraProvider = context.getCameraProvider()
+
+        val preview = Preview.Builder().build().also {
+            it.surfaceProvider = previewView.surfaceProvider
+        }
+
+        val analysis = ImageAnalysis.Builder()
+            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+            .build()
+
+        analysis.setAnalyzer(cameraExecutor) { imageProxy ->
+            val mediaImage = imageProxy.image
+
+            if (mediaImage == null || hasReturnedResult.get()) {
+                imageProxy.close()
+                return@setAnalyzer
+            }
+
+            val inputImage = InputImage.fromMediaImage(
+                mediaImage,
+                imageProxy.imageInfo.rotationDegrees
+            )
+
+            scanner.process(inputImage)
+                .addOnSuccessListener { barcodes ->
+                    val value = barcodes
+                        .firstNotNullOfOrNull { it.rawValue?.trim()?.takeIf(String::isNotBlank) }
+
+                    if (value != null && hasReturnedResult.compareAndSet(false, true)) {
+                        onBarcodeScanned(value)
+                    }
+                }
+                .addOnCompleteListener {
+                    imageProxy.close()
+                }
+        }
+
+        try {
+            cameraProvider.unbindAll()
+            cameraProvider.bindToLifecycle(
+                lifecycleOwner,
+                CameraSelector.DEFAULT_BACK_CAMERA,
+                preview,
+                analysis
+            )
+        } catch (_: Exception) {
+        }
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        AndroidView(
+            factory = { previewView },
+            modifier = Modifier.fillMaxSize()
+        )
+
+        BarcodeGuideCorners(
+            modifier = Modifier.matchParentSize()
+        )
+
+        Surface(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(16.dp),
+            shape = RoundedCornerShape(18.dp),
+            color = Color.Black.copy(alpha = 0.55f)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+            ) {
+                Text(
+                    text = "Scan barcode",
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleLarge
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "Hold the food barcode inside the camera view.",
+                    color = Color.White.copy(alpha = 0.9f),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+        }
+
+        Button(
+            onClick = onClose,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(24.dp)
+        ) {
+            Text("Close")
+        }
+    }
+}

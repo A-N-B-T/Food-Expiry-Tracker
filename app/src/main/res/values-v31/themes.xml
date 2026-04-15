@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <style name="Theme.MyApplication.Launch" parent="Theme.SplashScreen">
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
+        <item name="windowSplashScreenBackground">@color/launch_background</item>
+        <item name="android:forceDarkAllowed">false</item>
+        <item name="postSplashScreenTheme">@style/Theme.MyApplication</item>
+    </style>
+
+    <style name="Theme.MyApplication.Launch.Light" parent="Theme.MyApplication.Launch">
+        <item name="windowSplashScreenBackground">@color/launch_background_light</item>
+    </style>
+
+    <style name="Theme.MyApplication.Launch.Dark" parent="Theme.MyApplication.Launch">
+        <item name="windowSplashScreenBackground">@color/launch_background_dark</item>
+    </style>
+</resources>
