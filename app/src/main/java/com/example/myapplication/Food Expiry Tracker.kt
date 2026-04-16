@@ -3598,7 +3598,9 @@ fun HistoryScreen(
     var quickAddCategory by remember { mutableStateOf<String?>(null) }
     var quickAddError by remember { mutableStateOf<String?>(null) }
     var historyNoticeMessage by remember { mutableStateOf<String?>(null) }
-    val shouldBlurBackground = quickAddName != null || historyNoticeMessage != null
+    var pendingDeleteHistoryEntry by remember { mutableStateOf<HistoryEntry?>(null) }
+    val shouldBlurBackground =
+        quickAddName != null || historyNoticeMessage != null || pendingDeleteHistoryEntry != null
 
     SideEffect {
         onOverlayVisibilityChange(shouldBlurBackground)
@@ -3811,13 +3813,7 @@ fun HistoryScreen(
                                         }
                                     },
                                     onDelete = {
-                                        if (quickAddName == entry.name) {
-                                            quickAddName = null
-                                            quickAddExpiry = ""
-                                            quickAddCategory = null
-                                            quickAddError = null
-                                        }
-                                        removeFoodNameFromHistory(prefs, gson, history, entry.name)
+                                        pendingDeleteHistoryEntry = entry
                                     }
                                 )
                             }
@@ -3836,6 +3832,33 @@ fun HistoryScreen(
             confirmButton = {
                 TextButton(onClick = { historyNoticeMessage = null }) {
                     Text("OK")
+                }
+            }
+        )
+    }
+
+    pendingDeleteHistoryEntry?.let { entry ->
+        GlassAlertDialog(
+            onDismissRequest = { pendingDeleteHistoryEntry = null },
+            title = { Text("Delete item?") },
+            text = { Text("Are you sure you want to delete \"${entry.name}\" from history?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (quickAddName == entry.name) {
+                        quickAddName = null
+                        quickAddExpiry = ""
+                        quickAddCategory = null
+                        quickAddError = null
+                    }
+                    removeFoodNameFromHistory(prefs, gson, history, entry.name)
+                    pendingDeleteHistoryEntry = null
+                }) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeleteHistoryEntry = null }) {
+                    Text("Cancel")
                 }
             }
         )
@@ -4125,7 +4148,6 @@ private fun PantryFoodCard(
                         onDragStopped = {
                             val current = offsetX.value
                             val farEnough = abs(current) >= thresholdPx
-                            var deleteTriggered = false
 
                             if (!isSelecting && farEnough) {
                                 val isEdit = if (!isRtl) current > 0f else current < 0f
@@ -4133,12 +4155,7 @@ private fun PantryFoodCard(
                                 if (isEdit) {
                                     onEdit()
                                 } else {
-                                    deleteTriggered = true
-                                    scope.launch {
-                                        itemVisible = false
-                                        delay(SWIPE_DELETE_REMOVE_DELAY_MS)
-                                        onDelete()
-                                    }
+                                    onDelete()
                                 }
                             }
 
@@ -4146,11 +4163,7 @@ private fun PantryFoodCard(
                                 offsetX.animateTo(
                                     targetValue = 0f,
                                     animationSpec = tween(
-                                        durationMillis = if (deleteTriggered) {
-                                            SWIPE_DELETE_EXIT_DURATION_MS
-                                        } else {
-                                            SWIPE_RESET_DURATION_MS
-                                        },
+                                        durationMillis = SWIPE_RESET_DURATION_MS,
                                         easing = FastOutSlowInEasing
                                     )
                                 )
@@ -4330,25 +4343,16 @@ private fun HistoryFoodCard(
                             val current = offsetX.value
                             val farEnough = abs(current) >= thresholdPx
                             val isDelete = current < 0f
-                            val deleteTriggered = farEnough && isDelete
 
-                            if (deleteTriggered) {
-                                scope.launch {
-                                    itemVisible = false
-                                    delay(SWIPE_DELETE_REMOVE_DELAY_MS)
-                                    onDelete()
-                                }
+                            if (farEnough && isDelete) {
+                                onDelete()
                             }
 
                             scope.launch {
                                 offsetX.animateTo(
                                     targetValue = 0f,
                                     animationSpec = tween(
-                                        durationMillis = if (deleteTriggered) {
-                                            SWIPE_DELETE_EXIT_DURATION_MS
-                                        } else {
-                                            SWIPE_RESET_DURATION_MS
-                                        },
+                                        durationMillis = SWIPE_RESET_DURATION_MS,
                                         easing = FastOutSlowInEasing
                                     )
                                 )
@@ -5526,7 +5530,7 @@ fun FoodEntryScreen(
                                                 }
                                             },
                                             onEdit = { openEditFoodForm(food) },
-                                            onDelete = { deleteFoodItem(food) }
+                                            onDelete = { pendingDelete = food }
                                         )
                                     }
                                 }
