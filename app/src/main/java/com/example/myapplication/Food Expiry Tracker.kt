@@ -2590,6 +2590,17 @@ private fun EditCategoriesBottomSheet(
                             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
+                            item {
+                                Button(
+                                    onClick = onAddClick,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(bottom = 12.dp)
+                                ) {
+                                    Text("+ Add Category")
+                                }
+                            }
+
                             items(categories, key = { it }) { cat ->
                                 val isDefault =
                                     initialCategories.any { it.equals(cat, ignoreCase = true) }
@@ -2629,17 +2640,6 @@ private fun EditCategoriesBottomSheet(
                                 }
                             }
 
-                            item {
-                                Spacer(Modifier.height(8.dp))
-                                Button(
-                                    onClick = onAddClick,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(bottom = 20.dp)
-                                ) {
-                                    Text("+ Add Category")
-                                }
-                            }
                         }
                 }
             }
@@ -5720,9 +5720,10 @@ fun FoodEntryScreen(
                             value = newCategoryName,
                             onValueChange = {
                                 newCategoryName = it
-                                if (addCategoryExistsError) addCategoryExistsError = false
+                                addCategoryExistsError = isDuplicateCategoryName(it)
                             },
                             singleLine = true,
+                            isError = addCategoryExistsError,
                             label = { Text("Category name") },
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -5806,9 +5807,10 @@ fun FoodEntryScreen(
                             value = bulkCustomCategoryName,
                             onValueChange = {
                                 bulkCustomCategoryName = it
-                                if (bulkCustomCategoryExistsError) bulkCustomCategoryExistsError = false
+                                bulkCustomCategoryExistsError = isDuplicateCategoryName(it)
                             },
                             singleLine = true,
+                            isError = bulkCustomCategoryExistsError,
                             label = { Text("Category name") },
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -5965,9 +5967,10 @@ fun FoodEntryScreen(
                             value = tempCustomCategory,
                             onValueChange = {
                                 tempCustomCategory = it
-                                if (customCategoryExistsError) customCategoryExistsError = false
+                                customCategoryExistsError = isDuplicateCategoryName(it)
                             },
                             singleLine = true,
+                            isError = customCategoryExistsError,
                             label = { Text("Category name") },
                             modifier = Modifier
                                 .fillMaxWidth()
