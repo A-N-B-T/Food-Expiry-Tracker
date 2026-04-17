@@ -4,24 +4,36 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.SharedPreferences
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.background
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -36,11 +48,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.core.content.edit
 import androidx.credentials.ClearCredentialStateRequest
@@ -91,6 +107,9 @@ private const val ACCOUNT_DAILY_ENABLED_KEY = "daily_enabled"
 private const val CLOUD_SYNC_VERSION = 1
 
 private val accountGson = Gson()
+private val accountAuthPillShape = RoundedCornerShape(30.dp)
+private val accountAuthMaxWidth = 520.dp
+private val accountAuthControlHeight = 56.dp
 
 enum class AccountProvider { EMAIL, GOOGLE }
 
@@ -689,8 +708,10 @@ private suspend fun launchGoogleSignIn(context: Context): AccountSession {
         }
     } catch (_: GoogleIdTokenParsingException) {
         throw IllegalStateException("Google sign-in returned an unreadable ID token.")
-    } catch (_: GetCredentialException) {
-        throw IllegalStateException("Google sign-in was cancelled or could not start.")
+    } catch (error: GetCredentialException) {
+        throw IllegalStateException(
+            "Google sign-in failed: ${error.javaClass.simpleName} - ${error.message ?: "no message"}"
+        )
     }
 }
 
@@ -814,333 +835,168 @@ fun AccountSyncScreen(navController: NavHostController) {
                 isCloudAccountConfigured()
     val canUseGoogle = busyAction == null && isGoogleAccountConfigured()
 
+    fun createAccount() {
+        statusMessage = null
+        busyAction = "create"
+        scope.launch {
+            runCatching {
+                val signedIn = signUpWithEmailPassword(email.trim(), password)
+                val result = bootstrapSignedInAccount(appContext, signedIn)
+                saveAccountSession(appContext, result.session)
+                statusMessage = when (result.action) {
+                    ResumeAction.RESTORED_REMOTE ->
+                        "Account created and your cloud pantry was restored."
+
+                    ResumeAction.PUSHED_LOCAL,
+                    ResumeAction.NONE ->
+                        "Account created and this device was connected to cloud sync."
+                }
+            }.onFailure { failure ->
+                statusMessage = failure.message
+            }
+            busyAction = null
+        }
+    }
+
+    fun signIn() {
+        statusMessage = null
+        busyAction = "signin"
+        scope.launch {
+            runCatching {
+                val signedIn = signInWithEmailPassword(email.trim(), password)
+                val result = bootstrapSignedInAccount(appContext, signedIn)
+                saveAccountSession(appContext, result.session)
+                statusMessage = when (result.action) {
+                    ResumeAction.RESTORED_REMOTE ->
+                        "Signed in and your cloud pantry was restored."
+
+                    ResumeAction.PUSHED_LOCAL,
+                    ResumeAction.NONE ->
+                        "Signed in and cloud sync is ready."
+                }
+            }.onFailure { failure ->
+                statusMessage = failure.message
+            }
+            busyAction = null
+        }
+    }
+
+    fun continueWithGoogle() {
+        statusMessage = null
+        busyAction = "google"
+        scope.launch {
+            runCatching {
+                val signedIn = launchGoogleSignIn(context)
+                val result = bootstrapSignedInAccount(appContext, signedIn)
+                saveAccountSession(appContext, result.session)
+                statusMessage = when (result.action) {
+                    ResumeAction.RESTORED_REMOTE ->
+                        "Google account connected and your cloud pantry was restored."
+
+                    ResumeAction.PUSHED_LOCAL,
+                    ResumeAction.NONE ->
+                        "Google account connected and cloud sync is ready."
+                }
+            }.onFailure { failure ->
+                statusMessage = failure.message
+            }
+            busyAction = null
+        }
+    }
+
+    fun syncNow() {
+        statusMessage = null
+        busyAction = "sync"
+        scope.launch {
+            runCatching {
+                val currentSession = session ?: return@runCatching
+                val synced = pushSnapshotToCloud(appContext, currentSession)
+                saveAccountSession(appContext, synced)
+                statusMessage = "Your latest pantry changes were saved to the cloud."
+            }.onFailure { failure ->
+                statusMessage = failure.message
+            }
+            busyAction = null
+        }
+    }
+
+    fun restoreCloud() {
+        statusMessage = null
+        busyAction = "restore"
+        scope.launch {
+            runCatching {
+                val currentSession = session ?: return@runCatching
+                val refreshed = restoreCloudDataNow(appContext, currentSession)
+                saveAccountSession(appContext, refreshed)
+                statusMessage = "Cloud pantry data was restored to this device."
+            }.onFailure { failure ->
+                statusMessage = failure.message
+            }
+            busyAction = null
+        }
+    }
+
     ScaffoldWithTopBar(title = "Account", navController = navController) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .imePadding()
+                .navigationBarsPadding()
                 .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+                .padding(horizontal = 20.dp, vertical = 18.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            if (session == null) {
-                AccountIntroCard()
-
-                if (!isCloudAccountConfigured()) {
-                    AccountSetupCard()
+            Column(
+                modifier = Modifier
+                    .widthIn(max = accountAuthMaxWidth)
+                    .fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                if (session == null) {
+                    SignedOutAccountContent(
+                        email = email,
+                        onEmailChange = { email = it },
+                        password = password,
+                        onPasswordChange = { password = it },
+                        canUseEmailPassword = canUseEmailPassword,
+                        canUseGoogle = canUseGoogle,
+                        showSetupHint = !isCloudAccountConfigured(),
+                        busyAction = busyAction,
+                        onContinueWithGoogle = ::continueWithGoogle,
+                        onLogIn = ::signIn,
+                        onSignUp = ::createAccount
+                    )
+                } else {
+                    SignedInAccountContent(
+                        session = session,
+                        lastSyncedAt = syncMeta.lastSyncedAt,
+                        busyAction = busyAction,
+                        onSyncNow = ::syncNow,
+                        onRestoreCloud = ::restoreCloud,
+                        onLogOut = { showLogoutDialog = true }
+                    )
                 }
 
-                MatchingPillCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    shadowElevation = 6.dp
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(18.dp)
-                    ) {
-                        Text(
-                            text = "Email + password",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            text = "Create an account or sign in so your pantry and settings can follow you to another device.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(Modifier.height(14.dp))
-                        OutlinedTextField(
-                            value = email,
-                            onValueChange = { email = it },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true,
-                            label = { Text("Email") },
-                            keyboardOptions = KeyboardOptions(
-                                keyboardType = KeyboardType.Email,
-                                imeAction = ImeAction.Next
-                            )
-                        )
-                        Spacer(Modifier.height(10.dp))
-                        OutlinedTextField(
-                            value = password,
-                            onValueChange = { password = it },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true,
-                            label = { Text("Password") },
-                            visualTransformation = PasswordVisualTransformation(),
-                            keyboardOptions = KeyboardOptions(
-                                keyboardType = KeyboardType.Password,
-                                imeAction = ImeAction.Done
-                            )
-                        )
-                        Spacer(Modifier.height(14.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Button(
-                                onClick = {
-                                    statusMessage = null
-                                    busyAction = "create"
-                                    scope.launch {
-                                        runCatching {
-                                            val signedIn = signUpWithEmailPassword(email.trim(), password)
-                                            val result = bootstrapSignedInAccount(appContext, signedIn)
-                                            saveAccountSession(appContext, result.session)
-                                            statusMessage = when (result.action) {
-                                                ResumeAction.RESTORED_REMOTE ->
-                                                    "Account created and your cloud pantry was restored."
-                                                ResumeAction.PUSHED_LOCAL,
-                                                ResumeAction.NONE ->
-                                                    "Account created and this device was connected to cloud sync."
-                                            }
-                                        }.onFailure { failure ->
-                                            statusMessage = failure.message
-                                        }
-                                        busyAction = null
-                                    }
-                                },
-                                enabled = canUseEmailPassword,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                ActionLabel(text = "Create", busy = busyAction == "create")
-                            }
-                            OutlinedButton(
-                                onClick = {
-                                    statusMessage = null
-                                    busyAction = "signin"
-                                    scope.launch {
-                                        runCatching {
-                                            val signedIn = signInWithEmailPassword(email.trim(), password)
-                                            val result = bootstrapSignedInAccount(appContext, signedIn)
-                                            saveAccountSession(appContext, result.session)
-                                            statusMessage = when (result.action) {
-                                                ResumeAction.RESTORED_REMOTE ->
-                                                    "Signed in and your cloud pantry was restored."
-                                                ResumeAction.PUSHED_LOCAL,
-                                                ResumeAction.NONE ->
-                                                    "Signed in and cloud sync is ready."
-                                            }
-                                        }.onFailure { failure ->
-                                            statusMessage = failure.message
-                                        }
-                                        busyAction = null
-                                    }
-                                },
-                                enabled = canUseEmailPassword,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                ActionLabel(text = "Sign in", busy = busyAction == "signin")
-                            }
-                        }
-                    }
-                }
-
-                MatchingPillCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    shadowElevation = 6.dp
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(18.dp)
-                    ) {
-                        Text(
-                            text = "Google sign-in",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            text = "Use your Google account instead of typing a password.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(Modifier.height(14.dp))
-                        OutlinedButton(
-                            onClick = {
-                                statusMessage = null
-                                busyAction = "google"
-                                scope.launch {
-                                    runCatching {
-                                        val signedIn = launchGoogleSignIn(context)
-                                        val result = bootstrapSignedInAccount(appContext, signedIn)
-                                        saveAccountSession(appContext, result.session)
-                                        statusMessage = when (result.action) {
-                                            ResumeAction.RESTORED_REMOTE ->
-                                                "Google account connected and your cloud pantry was restored."
-                                            ResumeAction.PUSHED_LOCAL,
-                                            ResumeAction.NONE ->
-                                                "Google account connected and cloud sync is ready."
-                                        }
-                                    }.onFailure { failure ->
-                                        statusMessage = failure.message
-                                    }
-                                    busyAction = null
-                                }
-                            },
-                            enabled = canUseGoogle,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            ActionLabel(text = "Continue with Google", busy = busyAction == "google")
-                        }
-                    }
-                }
-            } else {
-                MatchingPillCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    shadowElevation = 7.dp
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(18.dp)
-                    ) {
-                        Text(
-                            text = session.displayName?.takeIf { it.isNotBlank() } ?: "Signed in",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            text = session.email,
-                            style = MaterialTheme.typography.bodyLarge
-                        )
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            text = when (session.provider) {
-                                AccountProvider.EMAIL -> "Email + password account"
-                                AccountProvider.GOOGLE -> "Google account"
-                            },
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(Modifier.height(14.dp))
-                        Text(
-                            text = "This account syncs your pantry, history, categories, theme, countdown format, and notification settings.",
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                        syncMeta.lastSyncedAt.takeIf { it > 0L }?.let {
-                            Spacer(Modifier.height(12.dp))
-                            Text(
-                                text = "Last synced ${formatSyncTime(it)}",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-
-                MatchingPillCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    shadowElevation = 6.dp
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(18.dp)
-                    ) {
-                        Text(
-                            text = "Account actions",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Spacer(Modifier.height(14.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Button(
-                                onClick = {
-                                    statusMessage = null
-                                    busyAction = "sync"
-                                    scope.launch {
-                                        runCatching {
-                                            val synced = pushSnapshotToCloud(appContext, session)
-                                            saveAccountSession(appContext, synced)
-                                            statusMessage = "Your latest pantry changes were saved to the cloud."
-                                        }.onFailure { failure ->
-                                            statusMessage = failure.message
-                                        }
-                                        busyAction = null
-                                    }
-                                },
-                                enabled = busyAction == null,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                ActionLabel(text = "Sync now", busy = busyAction == "sync")
-                            }
-                            OutlinedButton(
-                                onClick = {
-                                    statusMessage = null
-                                    busyAction = "restore"
-                                    scope.launch {
-                                        runCatching {
-                                            val refreshed = restoreCloudDataNow(appContext, session)
-                                            saveAccountSession(appContext, refreshed)
-                                            statusMessage = "Cloud pantry data was restored to this device."
-                                        }.onFailure { failure ->
-                                            statusMessage = failure.message
-                                        }
-                                        busyAction = null
-                                    }
-                                },
-                                enabled = busyAction == null,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                ActionLabel(text = "Restore cloud", busy = busyAction == "restore")
-                            }
-                        }
-                        Spacer(Modifier.height(10.dp))
-                        TextButton(
-                            onClick = { showLogoutDialog = true },
-                            enabled = busyAction == null,
-                            modifier = Modifier.align(Alignment.End)
-                        ) {
-                            Text("Log out")
-                        }
-                    }
-                }
-            }
-
-            statusMessage?.takeIf { it.isNotBlank() }?.let { message ->
-                MatchingPillCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    shadowElevation = 5.dp
-                ) {
-                    Text(
-                        text = message,
-                        modifier = Modifier.padding(16.dp),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = if (
+                statusMessage?.takeIf { it.isNotBlank() }?.let { message ->
+                    AccountStatusPill(
+                        message = message,
+                        isError =
                             message.contains("failed", ignoreCase = true) ||
-                            message.contains("couldn't", ignoreCase = true) ||
-                            message.contains("not configured", ignoreCase = true)
-                        ) {
-                            MaterialTheme.colorScheme.error
-                        } else {
-                            MaterialTheme.colorScheme.onSurface
-                        }
+                                    message.contains("couldn't", ignoreCase = true) ||
+                                    message.contains("not configured", ignoreCase = true)
+                    )
+                }
+
+                syncMeta.lastError?.takeIf { it.isNotBlank() }?.let { error ->
+                    AccountStatusPill(
+                        message = error,
+                        isError = true
                     )
                 }
             }
 
-            syncMeta.lastError?.takeIf { it.isNotBlank() }?.let { error ->
-                MatchingPillCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    shadowElevation = 5.dp
-                ) {
-                    Text(
-                        text = error,
-                        modifier = Modifier.padding(16.dp),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.error
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(110.dp))
+            Spacer(Modifier.height(120.dp))
         }
     }
 
@@ -1177,58 +1033,389 @@ fun AccountSyncScreen(navController: NavHostController) {
 }
 
 @Composable
-private fun AccountIntroCard() {
-    MatchingPillCard(
+private fun SignedOutAccountContent(
+    email: String,
+    onEmailChange: (String) -> Unit,
+    password: String,
+    onPasswordChange: (String) -> Unit,
+    canUseEmailPassword: Boolean,
+    canUseGoogle: Boolean,
+    showSetupHint: Boolean,
+    busyAction: String?,
+    onContinueWithGoogle: () -> Unit,
+    onLogIn: () -> Unit,
+    onSignUp: () -> Unit
+) {
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        shadowElevation = 7.dp
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(18.dp)
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
-                text = "Sync across devices",
-                style = MaterialTheme.typography.titleLarge,
+                text = "Sync your pantry",
+                style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.SemiBold
             )
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(6.dp))
             Text(
-                text = "Sign in once and keep your pantry, history, categories, and settings together when you move to another phone.",
-                style = MaterialTheme.typography.bodyLarge
+                text = "Sign in to keep your pantry and settings together.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
+            )
+        }
+
+        if (showSetupHint) {
+            AccountSetupHint()
+        }
+
+        AccountPillTextField(
+            value = email,
+            onValueChange = onEmailChange,
+            placeholder = "Email",
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Email,
+                imeAction = ImeAction.Next
+            )
+        )
+
+        AccountPillTextField(
+            value = password,
+            onValueChange = onPasswordChange,
+            placeholder = "Password",
+            visualTransformation = PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Password,
+                imeAction = ImeAction.Done
+            )
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            PrimaryPillButton(
+                text = "Log in",
+                busy = busyAction == "signin",
+                enabled = canUseEmailPassword,
+                onClick = onLogIn,
+                modifier = Modifier.weight(1f)
+            )
+            SecondaryPillButton(
+                text = "Sign up",
+                busy = busyAction == "create",
+                enabled = canUseEmailPassword,
+                onClick = onSignUp,
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        AccountSectionDivider()
+
+        GooglePillButton(
+            text = "Continue with Google",
+            busy = busyAction == "google",
+            enabled = canUseGoogle,
+            onClick = onContinueWithGoogle,
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
+@Composable
+private fun SignedInAccountContent(
+    session: AccountSession,
+    lastSyncedAt: Long,
+    busyAction: String?,
+    onSyncNow: () -> Unit,
+    onRestoreCloud: () -> Unit,
+    onLogOut: () -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        MatchingPillCard(
+            modifier = Modifier.fillMaxWidth(),
+            shape = accountAuthPillShape,
+            shadowElevation = 3.dp
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 18.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = session.displayName?.takeIf { it.isNotBlank() } ?: "Signed in",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = session.email,
+                    style = MaterialTheme.typography.bodyLarge
+                )
+                Text(
+                    text = when (session.provider) {
+                        AccountProvider.EMAIL -> "Email + password account"
+                        AccountProvider.GOOGLE -> "Google account"
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                lastSyncedAt.takeIf { it > 0L }?.let {
+                    Text(
+                        text = "Last synced ${formatSyncTime(it)}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            PrimaryPillButton(
+                text = "Sync now",
+                busy = busyAction == "sync",
+                enabled = busyAction == null,
+                onClick = onSyncNow,
+                modifier = Modifier.weight(1f)
+            )
+            SecondaryPillButton(
+                text = "Restore cloud",
+                busy = busyAction == "restore",
+                enabled = busyAction == null,
+                onClick = onRestoreCloud,
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        TextButton(
+            onClick = onLogOut,
+            enabled = busyAction == null
+        ) {
+            Text("Log out")
+        }
+    }
+}
+
+@Composable
+private fun AccountSetupHint() {
+    MatchingPillCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = accountAuthPillShape,
+        shadowElevation = 2.dp
+    ) {
+        Text(
+            text = "This build still needs Firebase account setup in local.properties and Firebase Authentication.",
+            modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center
+        )
+    }
+}
+
+@Composable
+private fun AccountStatusPill(
+    message: String,
+    isError: Boolean
+) {
+    MatchingPillCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = accountAuthPillShape,
+        shadowElevation = 2.dp
+    ) {
+        Text(
+            text = message,
+            modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (isError) {
+                MaterialTheme.colorScheme.error
+            } else {
+                MaterialTheme.colorScheme.onSurface
+            }
+        )
+    }
+}
+
+@Composable
+private fun AccountPillTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    keyboardOptions: KeyboardOptions,
+    visualTransformation: VisualTransformation = VisualTransformation.None
+) {
+    val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val fieldContainerColor =
+        MaterialTheme.colorScheme.surface.copy(alpha = if (isDarkTheme) 0.42f else 0.86f)
+    val fieldBorderColor =
+        MaterialTheme.colorScheme.outline.copy(alpha = if (isDarkTheme) 0.34f else 0.2f)
+
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = Modifier.fillMaxWidth(),
+        singleLine = true,
+        placeholder = { Text(placeholder) },
+        shape = accountAuthPillShape,
+        visualTransformation = visualTransformation,
+        keyboardOptions = keyboardOptions,
+        textStyle = MaterialTheme.typography.bodyLarge,
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedContainerColor = fieldContainerColor,
+            unfocusedContainerColor = fieldContainerColor,
+            disabledContainerColor = fieldContainerColor.copy(alpha = 0.72f),
+            focusedBorderColor = fieldBorderColor,
+            unfocusedBorderColor = fieldBorderColor.copy(alpha = 0.9f),
+            disabledBorderColor = fieldBorderColor.copy(alpha = 0.6f),
+            cursorColor = MaterialTheme.colorScheme.primary
+        )
+    )
+}
+
+@Composable
+private fun SoftPillButton(
+    text: String,
+    busy: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
+
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier.height(accountAuthControlHeight),
+        shape = accountAuthPillShape,
+        colors = ButtonDefaults.buttonColors(
+            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = if (isDarkTheme) 0.5f else 0.94f),
+            contentColor = MaterialTheme.colorScheme.onSurface
+        )
+    ) {
+        ActionLabel(text = text, busy = busy)
+    }
+}
+
+@Composable
+private fun GooglePillButton(
+    text: String,
+    busy: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val googleContainerColor =
+        if (isDarkTheme) {
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f)
+        } else {
+            MaterialTheme.colorScheme.surface.copy(alpha = 0.94f)
+        }
+    val googleBorder =
+        if (isDarkTheme) {
+            BorderStroke(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.42f)
+            )
+        } else {
+            null
+        }
+
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier.height(accountAuthControlHeight),
+        shape = accountAuthPillShape,
+        border = googleBorder,
+        contentPadding = PaddingValues(horizontal = 18.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = googleContainerColor,
+            contentColor = MaterialTheme.colorScheme.onSurface
+        )
+    ) {
+        Box(
+            modifier = Modifier.fillMaxWidth(),
+            contentAlignment = Alignment.Center
+        ) {
+            if (busy) {
+                CircularProgressIndicator(
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                        .size(18.dp),
+                    strokeWidth = 2.dp
+                )
+            } else {
+                Icon(
+                    painter = painterResource(id = R.drawable.ic_google_logo),
+                    contentDescription = null,
+                    tint = Color.Unspecified,
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                        .size(20.dp)
+                )
+            }
+            Text(
+                text = text,
+                textAlign = TextAlign.Center
             )
         }
     }
 }
 
 @Composable
-private fun AccountSetupCard() {
-    MatchingPillCard(
-        modifier = Modifier.fillMaxWidth(),
-        shadowElevation = 6.dp
+private fun AccountSectionDivider() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(1.dp)
+            .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.18f))
+    )
+}
+
+@Composable
+private fun PrimaryPillButton(
+    text: String,
+    busy: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier.height(accountAuthControlHeight),
+        shape = accountAuthPillShape
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(18.dp)
-        ) {
-            Text(
-                text = "Cloud setup still needed",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold
-            )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = "This build still needs Firebase values in local.properties to turn accounts on: FIREBASE_API_KEY, FIREBASE_PROJECT_ID, and GOOGLE_WEB_CLIENT_ID.",
-                style = MaterialTheme.typography.bodyMedium
-            )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = "You’ll also need Email/Password and Google enabled in Firebase Authentication, plus Firestore rules for users/{uid}.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
+        ActionLabel(text = text, busy = busy)
+    }
+}
+
+@Composable
+private fun SecondaryPillButton(
+    text: String,
+    busy: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    OutlinedButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier.height(accountAuthControlHeight),
+        shape = accountAuthPillShape
+    ) {
+        ActionLabel(text = text, busy = busy)
     }
 }
 
@@ -1248,7 +1435,9 @@ private fun ActionLabel(
                     .height(16.dp),
                 strokeWidth = 2.dp
             )
-            Text(text)
+            Text(
+                text
+            )
         }
     } else {
         Text(text)

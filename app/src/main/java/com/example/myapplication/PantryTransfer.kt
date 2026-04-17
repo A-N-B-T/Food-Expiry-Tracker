@@ -45,6 +45,9 @@ import java.util.Locale
 private const val TRANSFER_FOOD_PREFS = "food_prefs"
 private const val TRANSFER_FOOD_LIST_KEY = "food_list"
 private const val TRANSFER_CATEGORIES_LIST_KEY = "categories_list"
+private const val TRANSFER_HISTORY_LIST_KEY = "history_list"
+private const val TRANSFER_HISTORY_RETENTION_DAYS = 30L
+private const val TRANSFER_DAY_IN_MILLIS = 86_400_000L
 
 private val pantryTransferGson = Gson()
 private val pantryTransferExpiryFormatter: DateTimeFormatter =
@@ -57,6 +60,11 @@ private data class PantryExportFile(
     val categories: List<String> = emptyList()
 )
 
+private data class PantryTransferHistoryEntry(
+    val name: String,
+    val lastUsedAt: Long = System.currentTimeMillis()
+)
+
 @Composable
 fun PantryTransferCard() {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -67,9 +75,7 @@ fun PantryTransferCard() {
 
     val exportLauncher =
         rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
-            if (uri == null) {
-                statusMessage = "Export was cancelled."
-            } else {
+            if (uri != null) {
                 busyAction = "export"
                 scope.launch {
                     statusMessage = runCatching {
@@ -84,9 +90,7 @@ fun PantryTransferCard() {
 
     val importLauncher =
         rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-            if (uri == null) {
-                statusMessage = "Import was cancelled."
-            } else {
+            if (uri != null) {
                 busyAction = "import"
                 scope.launch {
                     statusMessage = runCatching {
@@ -249,6 +253,8 @@ private suspend fun importPantryFromUri(
         saveTransferCategories(prefs, mergedCategories)
     }
 
+    addImportedFoodsToTransferHistory(prefs, newFoods)
+
     val skipped = importedFoods.size - newFoods.size
     buildString {
         append("Imported ${newFoods.size} pantry item")
@@ -344,6 +350,118 @@ private fun saveTransferCategories(
 private fun transferFoodKey(item: FoodItem): String {
     val categoryKey = item.category?.trim()?.lowercase(Locale.ROOT).orEmpty()
     return "${normalizeTransferName(item.name)}|${item.expiry.trim()}|$categoryKey"
+}
+
+private fun addImportedFoodsToTransferHistory(
+    prefs: android.content.SharedPreferences,
+    foods: List<FoodItem>,
+    now: Long = System.currentTimeMillis()
+): Int {
+    if (foods.isEmpty()) return 0
+
+    val history = loadTransferHistoryEntries(prefs, now)
+    val existingKeys = history.mapTo(mutableSetOf()) { normalizeTransferHistoryName(it.name) }
+    val newEntries = buildList {
+        foods.forEachIndexed { index, item ->
+            val cleanedName = cleanTransferHistoryName(item.name)
+            val key = normalizeTransferHistoryName(cleanedName)
+            if (key.isNotBlank() && existingKeys.add(key)) {
+                add(
+                    PantryTransferHistoryEntry(
+                        name = cleanedName,
+                        lastUsedAt = now - index.toLong()
+                    )
+                )
+            }
+        }
+    }
+
+    if (newEntries.isEmpty()) return 0
+
+    saveTransferHistoryEntries(
+        prefs,
+        normalizeTransferHistoryEntries(newEntries + history, now)
+    )
+    return newEntries.size
+}
+
+private fun loadTransferHistoryEntries(
+    prefs: android.content.SharedPreferences,
+    now: Long = System.currentTimeMillis()
+): MutableList<PantryTransferHistoryEntry> {
+    val json = prefs.getString(TRANSFER_HISTORY_LIST_KEY, null) ?: return mutableListOf()
+
+    val historyType = object : TypeToken<MutableList<PantryTransferHistoryEntry>>() {}.type
+    val savedEntries = runCatching {
+        pantryTransferGson.fromJson<MutableList<PantryTransferHistoryEntry>>(json, historyType)
+    }.getOrNull()
+
+    if (savedEntries != null) {
+        return normalizeTransferHistoryEntries(savedEntries, now)
+    }
+
+    val legacyType = object : TypeToken<MutableList<String>>() {}.type
+    val legacyEntries = runCatching {
+        pantryTransferGson.fromJson<MutableList<String>>(json, legacyType)
+    }.getOrElse { mutableListOf() } ?: mutableListOf()
+
+    val migratedEntries = legacyEntries.mapIndexed { index, name ->
+        PantryTransferHistoryEntry(
+            name = name,
+            lastUsedAt = now - index.toLong()
+        )
+    }
+
+    return normalizeTransferHistoryEntries(migratedEntries, now)
+}
+
+private fun saveTransferHistoryEntries(
+    prefs: android.content.SharedPreferences,
+    entries: List<PantryTransferHistoryEntry>
+) {
+    prefs.edit {
+        putString(TRANSFER_HISTORY_LIST_KEY, pantryTransferGson.toJson(entries))
+    }
+}
+
+private fun normalizeTransferHistoryEntries(
+    entries: List<PantryTransferHistoryEntry>,
+    now: Long = System.currentTimeMillis()
+): MutableList<PantryTransferHistoryEntry> {
+    val cutoff = now - (TRANSFER_HISTORY_RETENTION_DAYS * TRANSFER_DAY_IN_MILLIS)
+    val deduped = LinkedHashMap<String, PantryTransferHistoryEntry>()
+
+    entries.forEach { entry ->
+        val cleanedName = cleanTransferHistoryName(entry.name)
+        val key = normalizeTransferHistoryName(cleanedName)
+        if (key.isBlank()) return@forEach
+
+        val sanitized = PantryTransferHistoryEntry(
+            name = cleanedName,
+            lastUsedAt = entry.lastUsedAt.takeIf { it > 0L } ?: now
+        )
+
+        if (sanitized.lastUsedAt < cutoff) return@forEach
+
+        val existing = deduped[key]
+        if (existing == null || sanitized.lastUsedAt > existing.lastUsedAt) {
+            deduped[key] = sanitized
+        }
+    }
+
+    return deduped.values
+        .sortedByDescending { it.lastUsedAt }
+        .toMutableList()
+}
+
+private fun cleanTransferHistoryName(raw: String): String {
+    return raw.trim().replace(Regex("\\s+"), " ")
+}
+
+private fun normalizeTransferHistoryName(raw: String): String {
+    return cleanTransferHistoryName(raw)
+        .lowercase(Locale.ROOT)
+        .replace(Regex("[^\\p{L}\\p{N} ]"), "")
 }
 
 private fun normalizeTransferName(raw: String): String {

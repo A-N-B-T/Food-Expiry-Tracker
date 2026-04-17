@@ -1790,6 +1790,16 @@ private fun removeFoodNameFromHistory(
     }
 }
 
+private fun clearHistoryEntries(
+    prefs: android.content.SharedPreferences,
+    gson: Gson,
+    history: MutableList<HistoryEntry>
+) {
+    if (history.isEmpty() && !prefs.contains(HISTORY_LIST_KEY)) return
+    history.clear()
+    saveHistoryEntries(prefs, gson, emptyList())
+}
+
 private val EXPIRY_FORMATTER: DateTimeFormatter =
     DateTimeFormatter.ofPattern("d/M/yyyy", Locale.US)
 
@@ -3794,8 +3804,12 @@ fun HistoryScreen(
     var quickAddError by remember { mutableStateOf<String?>(null) }
     var historyNoticeMessage by remember { mutableStateOf<String?>(null) }
     var pendingDeleteHistoryEntry by remember { mutableStateOf<HistoryEntry?>(null) }
+    var pendingClearHistory by remember { mutableStateOf(false) }
     val shouldBlurBackground =
-        quickAddName != null || historyNoticeMessage != null || pendingDeleteHistoryEntry != null
+        quickAddName != null ||
+                historyNoticeMessage != null ||
+                pendingDeleteHistoryEntry != null ||
+                pendingClearHistory
 
     SideEffect {
         onOverlayVisibilityChange(shouldBlurBackground)
@@ -3976,6 +3990,18 @@ fun HistoryScreen(
                     }
                 }
 
+                if (history.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        TextButton(onClick = { pendingClearHistory = true }) {
+                            Text("Clear history")
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                }
+
                 if (filtered.isEmpty()) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(if (search.isNotBlank()) "No history found" else "No history yet")
@@ -4064,6 +4090,35 @@ fun HistoryScreen(
             },
             dismissButton = {
                 TextButton(onClick = { pendingDeleteHistoryEntry = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (pendingClearHistory) {
+        GlassAlertDialog(
+            onDismissRequest = { pendingClearHistory = false },
+            title = { Text("Clear history?") },
+            text = { Text("Are you sure you want to delete all history items?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (quickAddName != null) {
+                        quickAddName = null
+                        quickAddExpiry = ""
+                        quickAddCategory = null
+                        quickAddError = null
+                    }
+                    pendingDeleteHistoryEntry = null
+                    historyNoticeMessage = null
+                    clearHistoryEntries(prefs, gson, history)
+                    pendingClearHistory = false
+                }) {
+                    Text("Clear")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingClearHistory = false }) {
                     Text("Cancel")
                 }
             }
@@ -5287,7 +5342,7 @@ private fun RecipeScreen(
                 ) +
                 RecipeChatMessage(
                     role = RecipeChatRole.ASSISTANT,
-                    text = "Food AI only answers recipe, ingredient, meal, and expiring-food questions.",
+                    text = "Can you give me some more ingredients?",
                     isError = true
                 )
             persistMessages(invalidMessages)
