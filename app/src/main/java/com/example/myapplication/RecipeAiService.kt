@@ -13,6 +13,9 @@ import java.util.Locale
 private const val GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 private const val GEMINI_MODEL = "gemini-2.5-flash-lite"
 private const val GEMINI_TIMEOUT_MS = 9000
+private const val DEFAULT_RECIPE_LIMIT = 3
+private const val MAX_RECIPE_LIMIT = 3
+private const val MAX_RECIPE_STEPS = 5
 
 internal data class RecipeSuggestion(
     val title: String,
@@ -36,7 +39,7 @@ internal object RecipeAiService {
         pantryIngredients: List<String>,
         previousIngredients: List<String>,
         contextId: String,
-        limit: Int = 5
+        limit: Int = DEFAULT_RECIPE_LIMIT
     ): RecipeSuggestionBatch = withContext(Dispatchers.IO) {
         val trimmedRequest = request.trim()
         if (trimmedRequest.isBlank()) {
@@ -62,7 +65,7 @@ internal object RecipeAiService {
                 previousIngredients = effectivePreviousIngredients,
                 explicitRequestIngredients = explicitRequestIngredients,
                 contextId = contextId,
-                limit = limit.coerceIn(1, 6)
+                limit = limit.coerceIn(1, MAX_RECIPE_LIMIT)
             ),
             responseMimeType = "application/json"
         )
@@ -77,7 +80,7 @@ internal object RecipeAiService {
 
     suspend fun findRecipesByIngredients(
         ingredients: List<String>,
-        limit: Int = 5
+        limit: Int = DEFAULT_RECIPE_LIMIT
     ): List<RecipeSuggestion> = withContext(Dispatchers.IO) {
         val cleanedIngredients = ingredients
             .map { it.trim() }
@@ -90,7 +93,7 @@ internal object RecipeAiService {
         val responseBody = generateContent(
             prompt = buildRecipeIdeasPrompt(
                 ingredients = cleanedIngredients,
-                limit = limit.coerceIn(1, 6)
+                limit = limit.coerceIn(1, MAX_RECIPE_LIMIT)
             ),
             responseMimeType = "application/json"
         )
@@ -210,9 +213,13 @@ internal object RecipeAiService {
             - If the user gives only a meal style like dinner, breakfast, snack, quick, or easy and the current request ingredients are "none", combine that preference with the previous recipe ingredients when available.
             - If no ingredients are named in the request and there are no previous recipe ingredients, use the pantry ingredients.
             - Keep resolvedIngredients to 8 or fewer unique items.
-            - Return between 3 and $limit recipes when possible.
+            - Prefer exactly $limit recipe ideas when possible.
+            - Recipes should be easy, quick, simple, and practical, usually about 30 minutes or less.
+            - Prefer low-effort meals with common pantry-style prep, fewer steps, and minimal extra ingredients.
+            - Avoid complicated cooking methods, fancy techniques, or long cooking unless absolutely necessary.
             - Each recipe should use the resolved ingredients as much as possible.
             - missedIngredients must be short pantry staples only, with at most 3 items.
+            - If perfect matches are limited, still return up to $limit of the easiest closest recipe ideas.
             - Return only valid JSON and nothing else.
 
             Current request ingredients:
@@ -237,15 +244,16 @@ internal object RecipeAiService {
 	              ]
 	            }
 
-	            quickGuide rules:
-	            - Include 2 to 4 short steps for every recipe.
-	            - Keep every step simple, direct, and easy to understand.
-	            - Focus only on how to make the recipe.
-	            - Keep each step to one short sentence.
+            quickGuide rules:
+            - Include 3 to 5 short steps when possible.
+            - Never exceed 5 short steps.
+            - Keep every step simple, direct, and easy to understand.
+            - Focus only on practical home cooking steps.
+            - Keep each step to one short sentence.
 
-	            User request:
-	            $request
-	        """.trimIndent()
+            User request:
+            $request
+        """.trimIndent()
     }
 
     private fun extractExplicitRequestIngredients(request: String): List<String> {
@@ -313,28 +321,32 @@ internal object RecipeAiService {
             Use these pantry ingredients that are expiring soon:
             $ingredientList
             
-	            Return only valid JSON with this exact shape:
-	            {
-	              "recipes": [
-	                {
-	                  "title": "Recipe name",
-	                  "usedIngredients": ["ingredient 1", "ingredient 2"],
-	                  "missedIngredients": ["optional extra 1", "optional extra 2"],
-	                  "quickGuide": ["Short step 1", "Short step 2", "Short step 3"]
-	                }
-	              ]
-	            }
-	            
-	            Rules:
-            - Return up to $limit recipe ideas.
-	            - Use the listed ingredients as much as possible.
-	            - Keep recipe titles short and natural.
-	            - `missedIngredients` can only include a few simple extras or pantry staples, with a maximum of 3 items.
-	            - Include a `quickGuide` with 2 to 4 short, simple steps for each recipe.
-	            - Do not include instructions, notes, markdown, or any text outside the JSON.
-	            - If there are no good recipe ideas, return {"recipes":[]}.
-	        """.trimIndent()
-	    }
+            Return only valid JSON with this exact shape:
+            {
+              "recipes": [
+                {
+                  "title": "Recipe name",
+                  "usedIngredients": ["ingredient 1", "ingredient 2"],
+                  "missedIngredients": ["optional extra 1", "optional extra 2"],
+                  "quickGuide": ["Short step 1", "Short step 2", "Short step 3"]
+                }
+              ]
+            }
+            
+            Rules:
+            - Prefer exactly $limit recipe ideas when possible.
+            - Recipes should be quick, easy, simple, and low effort, usually about 30 minutes or less.
+            - Prefer the easiest closest matches instead of fancy or time-consuming ideas.
+            - Use the listed ingredients as much as possible.
+            - Keep recipe titles short and natural.
+            - `missedIngredients` can only include a few simple extras or pantry staples, with a maximum of 3 items.
+            - Keep prep practical and minimal, with no complicated cooking unless necessary.
+            - Include a `quickGuide` with 3 to 5 short, simple steps when possible, and never more than 5.
+            - Do not include instructions, notes, markdown, or any text outside the JSON.
+            - If there are not enough strong matches, return up to $limit of the easiest closest ideas.
+            - If there are no good recipe ideas, return {"recipes":[]}.
+        """.trimIndent()
+    }
 
     private fun extractTextResponse(responseBody: String): String {
         val response = runCatching {
@@ -388,51 +400,53 @@ internal object RecipeAiService {
             "I couldn't understand the recipe ideas right now. Please try again."
         )
 
-        return parsed.recipes.orEmpty().mapNotNull { recipe ->
-            val title = recipe.title?.trim().orEmpty()
-            if (title.isBlank()) return@mapNotNull null
+        return parsed.recipes.orEmpty()
+            .mapNotNull { recipe ->
+                val title = recipe.title?.trim().orEmpty()
+                if (title.isBlank()) return@mapNotNull null
 
-	            val usedIngredients = sanitizeIngredients(recipe.usedIngredients)
-	            val missedIngredients = sanitizeIngredients(recipe.missedIngredients)
-	            val quickGuide = sanitizeQuickGuide(recipe.quickGuide)
+                val usedIngredients = sanitizeIngredients(recipe.usedIngredients)
+                val missedIngredients = sanitizeIngredients(recipe.missedIngredients)
+                val quickGuide = sanitizeQuickGuide(recipe.quickGuide)
 
-	            RecipeSuggestion(
-	                title = title,
-	                usedIngredientCount = usedIngredients.size,
-	                missedIngredientCount = missedIngredients.size,
-	                usedIngredients = usedIngredients,
-	                missedIngredients = missedIngredients,
-	                quickGuide = quickGuide
-	            )
-	        }
-	    }
+                RecipeSuggestion(
+                    title = title,
+                    usedIngredientCount = usedIngredients.size,
+                    missedIngredientCount = missedIngredients.size,
+                    usedIngredients = usedIngredients,
+                    missedIngredients = missedIngredients,
+                    quickGuide = quickGuide
+                )
+            }
+            .take(MAX_RECIPE_LIMIT)
+    }
 
-	    private fun sanitizeIngredients(items: List<String>?): List<String> {
-	        return items
-	            .orEmpty()
+    private fun sanitizeIngredients(items: List<String>?): List<String> {
+        return items
+            .orEmpty()
             .map { it.trim() }
-	            .filter { it.isNotBlank() }
-	            .distinctBy { it.lowercase(Locale.US) }
-	    }
+            .filter { it.isNotBlank() }
+            .distinctBy { it.lowercase(Locale.US) }
+    }
 
-	    private fun sanitizeQuickGuide(steps: List<String>?): List<String> {
-	        return steps
-	            .orEmpty()
-	            .map { step ->
-	                step.trim()
-	                    .replace(Regex("\\s+"), " ")
-	                    .trim('-', '*', '•', ' ')
-	            }
-	            .filter { it.isNotBlank() }
-	            .map { step ->
-	                if (step.length <= 120) {
-	                    step
-	                } else {
-	                    step.take(117).trimEnd() + "..."
-	                }
-	            }
-	            .take(4)
-	    }
+    private fun sanitizeQuickGuide(steps: List<String>?): List<String> {
+        return steps
+            .orEmpty()
+            .map { step ->
+                step.trim()
+                    .replace(Regex("\\s+"), " ")
+                    .trim('-', '*', '•', ' ')
+            }
+            .filter { it.isNotBlank() }
+            .map { step ->
+                if (step.length <= 120) {
+                    step
+                } else {
+                    step.take(117).trimEnd() + "..."
+                }
+            }
+            .take(MAX_RECIPE_STEPS)
+    }
 
     private fun cleanJsonResponse(text: String): String {
         return text

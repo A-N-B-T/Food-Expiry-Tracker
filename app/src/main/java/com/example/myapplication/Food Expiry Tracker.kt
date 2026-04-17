@@ -64,6 +64,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -77,12 +78,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
@@ -121,6 +124,7 @@ import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
@@ -130,8 +134,10 @@ import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FabPosition
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -139,6 +145,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
@@ -961,14 +968,30 @@ private fun GlassAlertDialog(
                         .padding(22.dp)
                 ) {
                     title?.let {
-                        it()
+                        CompositionLocalProvider(
+                            LocalContentColor provides MaterialTheme.colorScheme.onSurface
+                        ) {
+                            ProvideTextStyle(
+                                MaterialTheme.typography.titleLarge.copy(
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            ) {
+                                it()
+                            }
+                        }
                     }
 
                     if (text != null) {
                         if (title != null) {
                             Spacer(Modifier.height(12.dp))
                         }
-                        text()
+                        CompositionLocalProvider(
+                            LocalContentColor provides MaterialTheme.colorScheme.onSurfaceVariant
+                        ) {
+                            ProvideTextStyle(MaterialTheme.typography.bodyMedium) {
+                                text()
+                            }
+                        }
                     }
 
                     Spacer(Modifier.height(20.dp))
@@ -1003,6 +1026,117 @@ private fun GlassAlertDialog(
                     content = dialogContent
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun DialogTitleText(
+    text: String,
+    modifier: Modifier = Modifier,
+    color: Color = Color.Unspecified
+) {
+    Text(
+        text = text,
+        modifier = modifier,
+        style = MaterialTheme.typography.titleLarge,
+        fontWeight = FontWeight.SemiBold,
+        color = if (color == Color.Unspecified) {
+            MaterialTheme.colorScheme.onSurface
+        } else {
+            color
+        }
+    )
+}
+
+@Composable
+private fun DialogBodyText(
+    text: String,
+    modifier: Modifier = Modifier,
+    color: Color = Color.Unspecified
+) {
+    Text(
+        text = text,
+        modifier = modifier,
+        style = MaterialTheme.typography.bodyMedium,
+        color = if (color == Color.Unspecified) {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        } else {
+            color
+        }
+    )
+}
+
+@Composable
+private fun DialogDestructiveText(
+    text: String,
+    modifier: Modifier = Modifier
+) {
+    Text(
+        text = text,
+        modifier = modifier,
+        style = MaterialTheme.typography.labelLarge,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.error
+    )
+}
+
+@Composable
+private fun DelayedDestructiveConfirmButton(
+    itemCount: Int,
+    finalButtonText: String,
+    onConfirm: () -> Unit,
+    modifier: Modifier = Modifier,
+    threshold: Int = 10,
+    cooldownMillis: Long = 3000L
+) {
+    val countdownSeconds = remember(cooldownMillis) {
+        max(1, ((cooldownMillis + 999L) / 1000L).toInt())
+    }
+    val requiresCooldown = itemCount >= threshold
+    var secondsRemaining by remember(
+        itemCount,
+        finalButtonText,
+        threshold,
+        cooldownMillis
+    ) {
+        mutableIntStateOf(if (requiresCooldown) countdownSeconds else 0)
+    }
+
+    LaunchedEffect(
+        itemCount,
+        finalButtonText,
+        threshold,
+        cooldownMillis
+    ) {
+        if (!requiresCooldown) {
+            secondsRemaining = 0
+            return@LaunchedEffect
+        }
+
+        for (second in countdownSeconds downTo 1) {
+            secondsRemaining = second
+            delay(1000)
+        }
+        secondsRemaining = 0
+    }
+
+    val isCoolingDown = requiresCooldown && secondsRemaining > 0
+
+    TextButton(
+        onClick = onConfirm,
+        enabled = !isCoolingDown,
+        modifier = modifier
+    ) {
+        if (isCoolingDown) {
+            Text(
+                text = "$finalButtonText in ${secondsRemaining}s",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.error.copy(alpha = 0.64f)
+            )
+        } else {
+            DialogDestructiveText(finalButtonText)
         }
     }
 }
@@ -1282,12 +1416,12 @@ private const val EXTRA_BARCODE_SCAN_MESSAGE = "extra_barcode_scan_message"
 
 private fun shortListScrollRunway(itemCount: Int): Dp =
     when {
-        itemCount >= 20 -> 0.dp
-        itemCount >= 12 -> 36.dp
-        itemCount >= 8 -> 84.dp
-        itemCount >= 5 -> 140.dp
-        itemCount >= 3 -> 220.dp
-        itemCount > 0 -> 280.dp
+        itemCount >= 18 -> 0.dp
+        itemCount >= 12 -> 12.dp
+        itemCount >= 8 -> 28.dp
+        itemCount >= 5 -> 44.dp
+        itemCount >= 3 -> 64.dp
+        itemCount > 0 -> 84.dp
         else -> 0.dp
     }
 
@@ -2007,6 +2141,11 @@ private fun ExpiryWheelPickerDialog(
     val monthValues = remember {
         (1..12).map { String.format(Locale.US, "%02d", it) }
     }
+    val today = remember { LocalDate.now() }
+    val selectedDate = remember(selectedDay, selectedMonth, selectedYear) {
+        LocalDate.of(selectedYear, selectedMonth, selectedDay)
+    }
+    val isInvalidSelectedDate = !selectedDate.isAfter(today)
 
     var animateIn by remember { mutableStateOf(false) }
 
@@ -2085,6 +2224,21 @@ private fun ExpiryWheelPickerDialog(
                         )
                     }
 
+                    AnimatedVisibility(
+                        visible = isInvalidSelectedDate,
+                        enter = fadeIn(tween(180)) + expandVertically(tween(180)),
+                        exit = fadeOut(tween(140)) + shrinkVertically(tween(140))
+                    ) {
+                        Column {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                text = "Please choose a future date.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
+
                     Spacer(modifier = Modifier.height(16.dp))
 
                     Row(
@@ -2096,13 +2250,8 @@ private fun ExpiryWheelPickerDialog(
                         }
 
                         TextButton(
+                            enabled = !isInvalidSelectedDate,
                             onClick = {
-                                val selectedDate = LocalDate.of(selectedYear, selectedMonth, selectedDay)
-
-                                if (!selectedDate.isAfter(LocalDate.now())) {
-                                    return@TextButton
-                                }
-
                                 val pickedDate = String.format(
                                     Locale.US,
                                     "%02d/%02d/%04d",
@@ -2635,6 +2784,48 @@ private fun SelectionActionChip(
                 fontSize = 12.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
+private fun HistoryClearActionButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val palette = rememberGlassPalette()
+    val scheme = MaterialTheme.colorScheme
+    val isDarkTheme = scheme.background.luminance() < 0.5f
+    val shape = RoundedCornerShape(18.dp)
+    val background =
+        if (isDarkTheme) {
+            palette.card.copy(alpha = 0.52f)
+        } else {
+            Color.White.copy(alpha = 0.78f)
+        }
+    val borderColor = palette.border.copy(alpha = if (isDarkTheme) 0.78f else 0.68f)
+    val iconTint = scheme.error.copy(alpha = if (isDarkTheme) 0.76f else 0.70f)
+
+    EditCategoriesBackgroundSurface(
+        modifier = modifier.size(40.dp),
+        shape = shape,
+        shadowElevation = 8.dp
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clip(shape)
+                .border(1.dp, borderColor, shape)
+                .background(background)
+                .clickable(onClick = onClick),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.Delete,
+                contentDescription = "Clear history",
+                tint = iconTint,
+                modifier = Modifier.size(18.dp)
             )
         }
     }
@@ -3677,7 +3868,7 @@ fun AppNav(
                     end = padding.calculateEndPadding(layoutDir)
                 )
                 .statusBarsPadding()
-                .padding(top = 12.dp),
+                .padding(top = 10.dp),
 
             enterTransition = { bottomTabEnterTransition() },
 
@@ -3793,10 +3984,15 @@ fun HistoryScreen(
         }
     }
     val listState = rememberLazyListState()
+    var searchFabVisible by rememberSaveable { mutableStateOf(true) }
     val historyScrollRunway = shortListScrollRunway(filtered.size)
+    val isHistoryFabVisible = searchFabVisible && !showSearchBar
+    val historyBottomSafePadding =
+        with(density) {
+            WindowInsets.navigationBars.getBottom(this).toDp()
+        } + if (isHistoryFabVisible) 110.dp else 26.dp + historyScrollRunway
     val isHistorySearchKeyboardVisible = WindowInsets.ime.getBottom(density) > 0
     var historySearchKeyboardWasVisible by remember { mutableStateOf(false) }
-    var searchFabVisible by rememberSaveable { mutableStateOf(true) }
 
     var quickAddName by remember { mutableStateOf<String?>(null) }
     var quickAddExpiry by remember { mutableStateOf("") }
@@ -3923,96 +4119,163 @@ fun HistoryScreen(
                     .padding(innerPadding)
                     .padding(horizontal = 16.dp)
             ) {
-                AnimatedVisibility(
-                    visible = showSearchBar,
-                    enter =
-                        fadeIn(
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .animateContentSize(
                             animationSpec = tween(
-                                durationMillis = 320,
-                                easing = LinearOutSlowInEasing
+                                durationMillis = 280,
+                                easing = FastOutSlowInEasing
                             )
-                        ) +
-                                slideInVertically(
-                                    initialOffsetY = { -it / 3 },
-                                    animationSpec = tween(
-                                        durationMillis = 320,
-                                        easing = LinearOutSlowInEasing
-                                    )
-                                ) +
-                                expandVertically(
-                                    expandFrom = Alignment.Top,
-                                    animationSpec = tween(
-                                        durationMillis = 320,
-                                        easing = LinearOutSlowInEasing
-                                    )
-                                ),
-                    exit =
-                        fadeOut(
-                            animationSpec = tween(
-                                durationMillis = 220,
-                                easing = FastOutLinearInEasing
-                            )
-                        ) +
-                                slideOutVertically(
-                                    targetOffsetY = { -it / 4 },
-                                    animationSpec = tween(
-                                        durationMillis = 220,
-                                        easing = FastOutLinearInEasing
-                                    )
-                                ) +
-                                shrinkVertically(
-                                    shrinkTowards = Alignment.Top,
-                                    animationSpec = tween(
-                                        durationMillis = 220,
-                                        easing = FastOutLinearInEasing
-                                    )
-                                )
+                        )
                 ) {
-                    Column {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            CompactSearchBar(
-                                value = search,
-                                onValueChange = { search = it },
-                                modifier = Modifier.fillMaxWidth(),
-                                textFieldModifier = Modifier.focusRequester(historySearchFocus),
-                                showClearButton = false,
-                                onTap = {
-                                    historySearchFocus.requestFocus()
-                                    keyboard?.show()
-                                }
-                            )
-                        }
-
-                        Spacer(Modifier.height(12.dp))
-                    }
-                }
-
-                if (history.isNotEmpty()) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End
+                    AnimatedVisibility(
+                        visible = showSearchBar,
+                        enter =
+                            fadeIn(
+                                animationSpec = tween(
+                                    durationMillis = 320,
+                                    easing = LinearOutSlowInEasing
+                                )
+                            ) +
+                                    slideInVertically(
+                                        initialOffsetY = { -it / 3 },
+                                        animationSpec = tween(
+                                            durationMillis = 320,
+                                            easing = LinearOutSlowInEasing
+                                        )
+                                    ) +
+                                    expandVertically(
+                                        expandFrom = Alignment.Top,
+                                        animationSpec = tween(
+                                            durationMillis = 320,
+                                            easing = LinearOutSlowInEasing
+                                        )
+                                    ),
+                        exit =
+                            fadeOut(
+                                animationSpec = tween(
+                                    durationMillis = 220,
+                                    easing = FastOutLinearInEasing
+                                )
+                            ) +
+                                    slideOutVertically(
+                                        targetOffsetY = { -it / 4 },
+                                        animationSpec = tween(
+                                            durationMillis = 220,
+                                            easing = FastOutLinearInEasing
+                                        )
+                                    ) +
+                                    shrinkVertically(
+                                        shrinkTowards = Alignment.Top,
+                                        animationSpec = tween(
+                                            durationMillis = 220,
+                                            easing = FastOutLinearInEasing
+                                        )
+                                    )
                     ) {
-                        TextButton(onClick = { pendingClearHistory = true }) {
-                            Text("Clear history")
+                        Column {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                CompactSearchBar(
+                                    value = search,
+                                    onValueChange = { search = it },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    textFieldModifier = Modifier.focusRequester(historySearchFocus),
+                                    showClearButton = false,
+                                    onTap = {
+                                        historySearchFocus.requestFocus()
+                                        keyboard?.show()
+                                    }
+                                )
+                            }
+
+                            Spacer(Modifier.height(8.dp))
                         }
                     }
-                    Spacer(Modifier.height(8.dp))
+
+                    AnimatedVisibility(
+                        visible = history.isNotEmpty() && !showSearchBar,
+                        enter =
+                            fadeIn(
+                                animationSpec = tween(
+                                    durationMillis = 260,
+                                    easing = LinearOutSlowInEasing
+                                )
+                            ) +
+                                    slideInVertically(
+                                        initialOffsetY = { -it / 4 },
+                                        animationSpec = tween(
+                                            durationMillis = 260,
+                                            easing = LinearOutSlowInEasing
+                                        )
+                                    ) +
+                                    expandVertically(
+                                        expandFrom = Alignment.Top,
+                                        animationSpec = tween(
+                                            durationMillis = 260,
+                                            easing = LinearOutSlowInEasing
+                                        )
+                                    ),
+                        exit =
+                            fadeOut(
+                                animationSpec = tween(
+                                    durationMillis = 180,
+                                    easing = FastOutLinearInEasing
+                                )
+                            ) +
+                                    slideOutVertically(
+                                        targetOffsetY = { -it / 5 },
+                                        animationSpec = tween(
+                                            durationMillis = 180,
+                                            easing = FastOutLinearInEasing
+                                        )
+                                    ) +
+                                    shrinkVertically(
+                                        shrinkTowards = Alignment.Top,
+                                        animationSpec = tween(
+                                            durationMillis = 180,
+                                            easing = FastOutLinearInEasing
+                                        )
+                                    )
+                    ) {
+                        Column {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End
+                            ) {
+                                HistoryClearActionButton(
+                                    onClick = { pendingClearHistory = true },
+                                    modifier = Modifier.padding(end = 2.dp)
+                                )
+                            }
+                            Spacer(Modifier.height(6.dp))
+                        }
+                    }
                 }
 
                 if (filtered.isEmpty()) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f, fill = true)
+                            .fillMaxWidth(),
+                        contentAlignment = Alignment.Center
+                    ) {
                         Text(if (search.isNotBlank()) "No history found" else "No history yet")
                     }
                 } else {
-                    Box(modifier = Modifier.fillMaxSize()) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f, fill = true)
+                            .fillMaxWidth()
+                    ) {
                         LazyColumn(
                             state = listState,
                             modifier = Modifier.fillMaxSize(),
                             overscrollEffect = null,
-                            contentPadding = PaddingValues(bottom = 45.dp + historyScrollRunway)
+                            contentPadding = PaddingValues(bottom = historyBottomSafePadding)
                         ) {
                             items(
                                 items = filtered,
@@ -4085,7 +4348,7 @@ fun HistoryScreen(
                     removeFoodNameFromHistory(prefs, gson, history, entry.name)
                     pendingDeleteHistoryEntry = null
                 }) {
-                    Text("Delete")
+                    DialogDestructiveText("Delete")
                 }
             },
             dismissButton = {
@@ -4102,20 +4365,22 @@ fun HistoryScreen(
             title = { Text("Clear history?") },
             text = { Text("Are you sure you want to delete all history items?") },
             confirmButton = {
-                TextButton(onClick = {
-                    if (quickAddName != null) {
-                        quickAddName = null
-                        quickAddExpiry = ""
-                        quickAddCategory = null
-                        quickAddError = null
+                DelayedDestructiveConfirmButton(
+                    itemCount = history.size,
+                    finalButtonText = "Clear",
+                    onConfirm = {
+                        if (quickAddName != null) {
+                            quickAddName = null
+                            quickAddExpiry = ""
+                            quickAddCategory = null
+                            quickAddError = null
                     }
-                    pendingDeleteHistoryEntry = null
-                    historyNoticeMessage = null
-                    clearHistoryEntries(prefs, gson, history)
-                    pendingClearHistory = false
-                }) {
-                    Text("Clear")
-                }
+                        pendingDeleteHistoryEntry = null
+                        historyNoticeMessage = null
+                        clearHistoryEntries(prefs, gson, history)
+                        pendingClearHistory = false
+                    }
+                )
             },
             dismissButton = {
                 TextButton(onClick = { pendingClearHistory = false }) {
@@ -4811,14 +5076,25 @@ private fun ExpiringFoodsPromptCard(
     isLoading: Boolean,
     onUseExpiringFoods: () -> Unit
 ) {
-    MatchingPillCard(
-        modifier = Modifier.fillMaxWidth(),
-        shadowElevation = 4.dp
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
+    val scheme = MaterialTheme.colorScheme
+    val isDarkTheme = scheme.background.luminance() < 0.5f
+    val expiringFoodsButtonContainerColor =
+        if (isDarkTheme) {
+            scheme.primary.copy(alpha = 0.84f)
+        } else {
+            scheme.primary
+        }
+    val expiringFoodsButtonBorderColor =
+        if (isDarkTheme) {
+            scheme.primary.copy(alpha = 0.28f)
+        } else {
+            scheme.primary.copy(alpha = 0.18f)
+        }
+
+    RecipeChatMessageRow(isUser = false) { bubbleModifier ->
+        RecipeChatBubble(
+            modifier = bubbleModifier,
+            isUser = false
         ) {
             Text(
                 text = "Foods expiring soon",
@@ -4835,9 +5111,27 @@ private fun ExpiringFoodsPromptCard(
             Button(
                 onClick = onUseExpiringFoods,
                 enabled = !isLoading,
-                shape = RoundedCornerShape(24.dp)
+                shape = RoundedCornerShape(22.dp),
+                modifier = Modifier.align(Alignment.Start),
+                border = BorderStroke(1.dp, expiringFoodsButtonBorderColor),
+                elevation = ButtonDefaults.buttonElevation(
+                    defaultElevation = if (isDarkTheme) 2.dp else 4.dp,
+                    pressedElevation = if (isDarkTheme) 3.dp else 5.dp,
+                    disabledElevation = 0.dp
+                ),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = expiringFoodsButtonContainerColor,
+                    contentColor = scheme.onPrimary,
+                    disabledContainerColor =
+                        scheme.surfaceVariant.copy(alpha = if (isDarkTheme) 0.56f else 0.82f),
+                    disabledContentColor =
+                        scheme.onSurfaceVariant.copy(alpha = if (isDarkTheme) 0.78f else 0.88f)
+                )
             ) {
-                Text("Use Expiring Foods")
+                Text(
+                    text = "Use Expiring Foods",
+                    fontWeight = FontWeight.SemiBold
+                )
             }
         }
     }
@@ -4845,14 +5139,10 @@ private fun ExpiringFoodsPromptCard(
 
 @Composable
 private fun RecipeIntroCard(hasPantryFoods: Boolean) {
-    MatchingPillCard(
-        modifier = Modifier.fillMaxWidth(),
-        shadowElevation = 4.dp
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
+    RecipeChatMessageRow(isUser = false) { bubbleModifier ->
+        RecipeChatBubble(
+            modifier = bubbleModifier,
+            isUser = false
         ) {
             Text(
                 text = "Food AI",
@@ -4875,27 +5165,94 @@ private fun RecipeIntroCard(hasPantryFoods: Boolean) {
 
 @Composable
 private fun RecipeUserMessageCard(text: String) {
-    MatchingPillCard(
-        modifier = Modifier.fillMaxWidth(),
-        shadowElevation = 3.dp
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
+    RecipeChatMessageRow(isUser = true) { bubbleModifier ->
+        RecipeChatBubble(
+            modifier = bubbleModifier,
+            isUser = true
         ) {
-            Text(
-                text = "You",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.SemiBold
-            )
-            Spacer(Modifier.height(6.dp))
             Text(
                 text = text,
                 style = MaterialTheme.typography.bodyLarge
             )
         }
+    }
+}
+
+private fun recipeChatBubbleShape(isUser: Boolean): RoundedCornerShape {
+    return if (isUser) {
+        RoundedCornerShape(
+            topStart = 24.dp,
+            topEnd = 24.dp,
+            bottomStart = 24.dp,
+            bottomEnd = 8.dp
+        )
+    } else {
+        RoundedCornerShape(
+            topStart = 24.dp,
+            topEnd = 24.dp,
+            bottomStart = 8.dp,
+            bottomEnd = 24.dp
+        )
+    }
+}
+
+@Composable
+private fun RecipeChatMessageRow(
+    isUser: Boolean,
+    content: @Composable (Modifier) -> Unit
+) {
+    Box(modifier = Modifier.fillMaxWidth()) {
+        content(
+            Modifier
+                .align(if (isUser) Alignment.CenterEnd else Alignment.CenterStart)
+                .fillMaxWidth(0.86f)
+                .widthIn(max = 360.dp)
+        )
+    }
+}
+
+@Composable
+private fun RecipeChatBubble(
+    modifier: Modifier = Modifier,
+    isUser: Boolean,
+    isError: Boolean = false,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    val scheme = MaterialTheme.colorScheme
+    val isDarkTheme = scheme.background.luminance() < 0.5f
+    val containerColor =
+        when {
+            isError -> scheme.errorContainer.copy(alpha = if (isDarkTheme) 0.84f else 0.94f)
+            isUser -> scheme.primaryContainer.copy(alpha = if (isDarkTheme) 0.92f else 0.97f)
+            else -> scheme.surfaceContainerHigh.copy(alpha = if (isDarkTheme) 0.9f else 0.96f)
+        }
+    val contentColor =
+        when {
+            isError -> scheme.onErrorContainer
+            isUser -> scheme.onPrimaryContainer
+            else -> scheme.onSurface
+        }
+    val borderColor =
+        when {
+            isError -> scheme.error.copy(alpha = if (isDarkTheme) 0.32f else 0.18f)
+            isUser -> scheme.primary.copy(alpha = if (isDarkTheme) 0.24f else 0.12f)
+            else -> scheme.outlineVariant.copy(alpha = if (isDarkTheme) 0.32f else 0.18f)
+        }
+
+    Surface(
+        modifier = modifier.animateContentSize(),
+        shape = recipeChatBubbleShape(isUser),
+        color = containerColor,
+        contentColor = contentColor,
+        border = BorderStroke(1.dp, borderColor),
+        shadowElevation = 0.dp,
+        tonalElevation = 0.dp
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            content = content
+        )
     }
 }
 
@@ -4962,45 +5319,38 @@ private fun RecipeSuggestionCard(recipe: RecipeSuggestion) {
 
 @Composable
 private fun RecipeAssistantMessageCard(message: RecipeChatMessage) {
-    MatchingPillCard(
-        modifier = Modifier
-            .fillMaxWidth()
-            .animateContentSize(),
-        shadowElevation = 4.dp
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
-        ) {
-            Text(
-                text = "Food AI",
-                style = MaterialTheme.typography.labelLarge,
-                color = if (message.isError) {
-                    MaterialTheme.colorScheme.error
-                } else {
-                    MaterialTheme.colorScheme.primary
-                },
-                fontWeight = FontWeight.SemiBold
-            )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = message.text,
-                style = MaterialTheme.typography.bodyLarge,
-                color = if (message.isError) {
-                    MaterialTheme.colorScheme.error
-                } else {
-                    MaterialTheme.colorScheme.onSurface
+    RecipeChatMessageRow(isUser = false) { bubbleModifier ->
+        if (message.recipes.isNotEmpty()) {
+            Column(
+                modifier = bubbleModifier.animateContentSize(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                RecipeChatBubble(
+                    modifier = Modifier.fillMaxWidth(),
+                    isUser = false,
+                    isError = message.isError
+                ) {
+                    Text(
+                        text = message.text,
+                        style = MaterialTheme.typography.bodyLarge
+                    )
                 }
-            )
-
-            if (message.recipes.isNotEmpty()) {
-                Spacer(Modifier.height(12.dp))
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     message.recipes.forEach { recipe ->
                         RecipeSuggestionCard(recipe)
                     }
                 }
+            }
+        } else {
+            RecipeChatBubble(
+                modifier = bubbleModifier,
+                isUser = false,
+                isError = message.isError
+            ) {
+                Text(
+                    text = message.text,
+                    style = MaterialTheme.typography.bodyLarge
+                )
             }
         }
     }
@@ -5008,25 +5358,24 @@ private fun RecipeAssistantMessageCard(message: RecipeChatMessage) {
 
 @Composable
 private fun RecipeLoadingCard() {
-    MatchingPillCard(
-        modifier = Modifier.fillMaxWidth(),
-        shadowElevation = 3.dp
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
+    RecipeChatMessageRow(isUser = false) { bubbleModifier ->
+        RecipeChatBubble(
+            modifier = bubbleModifier,
+            isUser = false
         ) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(18.dp),
-                strokeWidth = 2.dp
-            )
-            Spacer(Modifier.width(12.dp))
-            Text(
-                text = "Food AI is building recipe cards...",
-                style = MaterialTheme.typography.bodyLarge
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    strokeWidth = 2.dp
+                )
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    text = "Food AI is building recipe cards...",
+                    style = MaterialTheme.typography.bodyLarge
+                )
+            }
         }
     }
 }
@@ -5385,7 +5734,7 @@ private fun RecipeScreen(
                 if (useExpiringFoods) {
                     val recipes = RecipeAiService.findRecipesByIngredients(
                         ingredients = frozenExpiringFoods.map { it.name },
-                        limit = 6
+                        limit = 3
                     )
                     RecipeSuggestionBatch(
                         resolvedIngredients = frozenExpiringFoods.map { it.name },
@@ -5397,7 +5746,7 @@ private fun RecipeScreen(
                         pantryIngredients = frozenPantryIngredients,
                         previousIngredients = previousIngredients,
                         contextId = conversationId,
-                        limit = 6
+                        limit = 3
                     )
                 }
             }
@@ -6837,6 +7186,12 @@ fun FoodEntryScreen(
         }
     }
     val pantryScrollRunway = shortListScrollRunway(filteredFoodList.size)
+    val isHomeFabVisible =
+        (!isSelecting && fabVisible && !showForm) || (isSelecting && selectedItems.isNotEmpty())
+    val pantryBottomSafePadding =
+        with(density) {
+            WindowInsets.navigationBars.getBottom(this).toDp()
+        } + if (isHomeFabVisible) 114.dp else 30.dp + pantryScrollRunway
 
     LaunchedEffect(Unit) {
         snapshotFlow { foodList.toList() }
@@ -6945,7 +7300,7 @@ fun FoodEntryScreen(
                                     overscrollEffect = null,
                                     contentPadding = PaddingValues(
                                         top = pantryContentTopPadding,
-                                        bottom = 45.dp + pantryScrollRunway
+                                        bottom = pantryBottomSafePadding
                                     )
                                 ) {
                                     items(
@@ -7103,7 +7458,7 @@ fun FoodEntryScreen(
 
                         pendingDelete = null
                     }) {
-                        Text("Delete")
+                        DialogDestructiveText("Delete")
                     }
                 },
                 dismissButton = {
@@ -7140,7 +7495,7 @@ fun FoodEntryScreen(
 
                         deleteCategory(cat)
                         pendingDeleteCategory = null
-                    }) { Text("Delete") }
+                    }) { DialogDestructiveText("Delete") }
                 },
                 dismissButton = {
                     TextButton(onClick = { pendingDeleteCategory = null }) { Text("Cancel") }
@@ -7330,16 +7685,18 @@ fun FoodEntryScreen(
                     Text("Are you sure you want to delete ${selectedItems.size} items.")
                 },
                 confirmButton = {
-                    TextButton(onClick = {
+                    DelayedDestructiveConfirmButton(
+                        itemCount = selectedItems.size,
+                        finalButtonText = "Delete",
+                        onConfirm = {
                         val toDelete = selectedItems.toList()
                         foodList.removeAll(toDelete)
 
                         selectedItems.clear()
                         isSelecting = false
                         pendingDeleteSelected = false
-                    }) {
-                        Text("Delete")
-                    }
+                        }
+                    )
                 },
                 dismissButton = {
                     TextButton(onClick = { pendingDeleteSelected = false }) {
