@@ -1417,13 +1417,28 @@ private const val EXTRA_BARCODE_SCAN_MESSAGE = "extra_barcode_scan_message"
 private fun shortListScrollRunway(itemCount: Int): Dp =
     when {
         itemCount >= 18 -> 0.dp
-        itemCount >= 12 -> 12.dp
-        itemCount >= 8 -> 28.dp
-        itemCount >= 5 -> 44.dp
-        itemCount >= 3 -> 64.dp
-        itemCount > 0 -> 84.dp
+        itemCount >= 12 -> 6.dp
+        itemCount >= 8 -> 14.dp
+        itemCount >= 5 -> 24.dp
+        itemCount >= 3 -> 36.dp
+        itemCount > 0 -> 48.dp
         else -> 0.dp
     }
+
+@Composable
+private fun listBottomSafePadding(
+    itemCount: Int,
+    hasFab: Boolean
+): Dp {
+    val density = LocalDensity.current
+    val navigationBottomInset =
+        with(density) {
+            WindowInsets.navigationBars.getBottom(this).toDp()
+        }
+    val overlayClearance = if (hasFab) 92.dp else 16.dp
+
+    return navigationBottomInset + overlayClearance + shortListScrollRunway(itemCount)
+}
 
 private fun Modifier.blurWhen(radius: Dp): Modifier =
     if (radius > 0.dp) blur(radius) else this
@@ -2790,45 +2805,23 @@ private fun SelectionActionChip(
 }
 
 @Composable
-private fun HistoryClearActionButton(
+private fun HistoryClearFloatingActionButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val palette = rememberGlassPalette()
-    val scheme = MaterialTheme.colorScheme
-    val isDarkTheme = scheme.background.luminance() < 0.5f
-    val shape = RoundedCornerShape(18.dp)
-    val background =
-        if (isDarkTheme) {
-            palette.card.copy(alpha = 0.52f)
-        } else {
-            Color.White.copy(alpha = 0.78f)
-        }
-    val borderColor = palette.border.copy(alpha = if (isDarkTheme) 0.78f else 0.68f)
-    val iconTint = scheme.error.copy(alpha = if (isDarkTheme) 0.76f else 0.70f)
+    val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val deleteFabRed = if (isDarkTheme) Color(0xFFFF6257) else Color(0xFFD32F2F)
+    val deleteFabOverlay = if (isDarkTheme) Color(0xFF9F1F1F) else Color(0xFFB71C1C)
 
-    EditCategoriesBackgroundSurface(
-        modifier = modifier.size(40.dp),
-        shape = shape,
-        shadowElevation = 8.dp
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .clip(shape)
-                .border(1.dp, borderColor, shape)
-                .background(background)
-                .clickable(onClick = onClick),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.Default.Delete,
-                contentDescription = "Clear history",
-                tint = iconTint,
-                modifier = Modifier.size(18.dp)
-            )
-        }
-    }
+    EditCategoriesStyledFab(
+        onClick = onClick,
+        icon = Icons.Default.Delete,
+        contentDescription = "Clear history",
+        backgroundTint = deleteFabOverlay,
+        iconTint = deleteFabRed,
+        tintAlpha = if (isDarkTheme) 0.78f else 0.64f,
+        modifier = modifier
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -3985,12 +3978,11 @@ fun HistoryScreen(
     }
     val listState = rememberLazyListState()
     var searchFabVisible by rememberSaveable { mutableStateOf(true) }
-    val historyScrollRunway = shortListScrollRunway(filtered.size)
     val isHistoryFabVisible = searchFabVisible && !showSearchBar
-    val historyBottomSafePadding =
-        with(density) {
-            WindowInsets.navigationBars.getBottom(this).toDp()
-        } + if (isHistoryFabVisible) 110.dp else 26.dp + historyScrollRunway
+    val historyBottomSafePadding = listBottomSafePadding(
+        itemCount = filtered.size,
+        hasFab = isHistoryFabVisible
+    )
     val isHistorySearchKeyboardVisible = WindowInsets.ime.getBottom(density) > 0
     var historySearchKeyboardWasVisible by remember { mutableStateOf(false) }
 
@@ -4094,22 +4086,37 @@ fun HistoryScreen(
             contentWindowInsets = WindowInsets.ime,
             floatingActionButtonPosition = FabPosition.End,
             floatingActionButton = {
-                AnimatedVisibility(
-                    visible = searchFabVisible && !showSearchBar,
-                    enter = fadeIn(tween(350)) + slideInVertically(tween(350)) { it / 2 },
-                    exit = fadeOut(tween(350)) + slideOutVertically(tween(350)) { it / 2 }
+                Column(
+                    modifier = Modifier.padding(bottom = 90.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    horizontalAlignment = Alignment.End
                 ) {
-                    val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
+                    AnimatedVisibility(
+                        visible = history.isNotEmpty() && searchFabVisible && !showSearchBar,
+                        enter = fadeIn(tween(350)) + slideInVertically(tween(350)) { it / 2 },
+                        exit = fadeOut(tween(350)) + slideOutVertically(tween(350)) { it / 2 }
+                    ) {
+                        HistoryClearFloatingActionButton(
+                            onClick = { pendingClearHistory = true }
+                        )
+                    }
 
-                    EditCategoriesStyledFab(
-                        onClick = { showSearchBar = true },
-                        icon = Icons.Default.Search,
-                        contentDescription = "Search history",
-                        backgroundTint = MaterialTheme.colorScheme.primary,
-                        iconTint = MaterialTheme.colorScheme.onPrimary,
-                        tintAlpha = if (isDarkTheme) 0.76f else 0.62f,
-                        modifier = Modifier.padding(bottom = 90.dp)
-                    )
+                    AnimatedVisibility(
+                        visible = searchFabVisible && !showSearchBar,
+                        enter = fadeIn(tween(350)) + slideInVertically(tween(350)) { it / 2 },
+                        exit = fadeOut(tween(350)) + slideOutVertically(tween(350)) { it / 2 }
+                    ) {
+                        val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
+
+                        EditCategoriesStyledFab(
+                            onClick = { showSearchBar = true },
+                            icon = Icons.Default.Search,
+                            contentDescription = "Search history",
+                            backgroundTint = MaterialTheme.colorScheme.primary,
+                            iconTint = MaterialTheme.colorScheme.onPrimary,
+                            tintAlpha = if (isDarkTheme) 0.76f else 0.62f
+                        )
+                    }
                 }
             }
         ) { innerPadding ->
@@ -4196,64 +4203,6 @@ fun HistoryScreen(
                         }
                     }
 
-                    AnimatedVisibility(
-                        visible = history.isNotEmpty() && !showSearchBar,
-                        enter =
-                            fadeIn(
-                                animationSpec = tween(
-                                    durationMillis = 260,
-                                    easing = LinearOutSlowInEasing
-                                )
-                            ) +
-                                    slideInVertically(
-                                        initialOffsetY = { -it / 4 },
-                                        animationSpec = tween(
-                                            durationMillis = 260,
-                                            easing = LinearOutSlowInEasing
-                                        )
-                                    ) +
-                                    expandVertically(
-                                        expandFrom = Alignment.Top,
-                                        animationSpec = tween(
-                                            durationMillis = 260,
-                                            easing = LinearOutSlowInEasing
-                                        )
-                                    ),
-                        exit =
-                            fadeOut(
-                                animationSpec = tween(
-                                    durationMillis = 180,
-                                    easing = FastOutLinearInEasing
-                                )
-                            ) +
-                                    slideOutVertically(
-                                        targetOffsetY = { -it / 5 },
-                                        animationSpec = tween(
-                                            durationMillis = 180,
-                                            easing = FastOutLinearInEasing
-                                        )
-                                    ) +
-                                    shrinkVertically(
-                                        shrinkTowards = Alignment.Top,
-                                        animationSpec = tween(
-                                            durationMillis = 180,
-                                            easing = FastOutLinearInEasing
-                                        )
-                                    )
-                    ) {
-                        Column {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.End
-                            ) {
-                                HistoryClearActionButton(
-                                    onClick = { pendingClearHistory = true },
-                                    modifier = Modifier.padding(end = 2.dp)
-                                )
-                            }
-                            Spacer(Modifier.height(6.dp))
-                        }
-                    }
                 }
 
                 if (filtered.isEmpty()) {
@@ -4275,7 +4224,7 @@ fun HistoryScreen(
                             state = listState,
                             modifier = Modifier.fillMaxSize(),
                             overscrollEffect = null,
-                            contentPadding = PaddingValues(bottom = historyBottomSafePadding)
+                            contentPadding = PaddingValues(bottom = 75.dp)
                         ) {
                             items(
                                 items = filtered,
@@ -5218,13 +5167,33 @@ private fun RecipeChatBubble(
     isError: Boolean = false,
     content: @Composable ColumnScope.() -> Unit
 ) {
+    if (!isUser && !isError) {
+        PantryListGlassCard(
+            modifier = modifier.animateContentSize(),
+            shape = RoundedCornerShape(25.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+                content = content
+            )
+        }
+        return
+    }
+
     val scheme = MaterialTheme.colorScheme
     val isDarkTheme = scheme.background.luminance() < 0.5f
     val containerColor =
         when {
             isError -> scheme.errorContainer.copy(alpha = if (isDarkTheme) 0.84f else 0.94f)
             isUser -> scheme.primaryContainer.copy(alpha = if (isDarkTheme) 0.92f else 0.97f)
-            else -> scheme.surfaceContainerHigh.copy(alpha = if (isDarkTheme) 0.9f else 0.96f)
+            else -> {
+                if (isDarkTheme) {
+                    scheme.surfaceContainerHigh.copy(alpha = 0.9f)
+                } else {
+                    scheme.surfaceContainerHighest.copy(alpha = 0.985f)
+                }
+            }
         }
     val contentColor =
         when {
@@ -5234,9 +5203,15 @@ private fun RecipeChatBubble(
         }
     val borderColor =
         when {
-            isError -> scheme.error.copy(alpha = if (isDarkTheme) 0.32f else 0.18f)
+            isError -> scheme.error.copy(alpha = if (isDarkTheme) 0.32f else 0.22f)
             isUser -> scheme.primary.copy(alpha = if (isDarkTheme) 0.24f else 0.12f)
-            else -> scheme.outlineVariant.copy(alpha = if (isDarkTheme) 0.32f else 0.18f)
+            else -> scheme.outlineVariant.copy(alpha = if (isDarkTheme) 0.32f else 0.36f)
+        }
+    val bubbleShadowElevation =
+        when {
+            isDarkTheme -> 0.dp
+            isUser -> 0.dp
+            else -> 3.dp
         }
 
     Surface(
@@ -5245,7 +5220,7 @@ private fun RecipeChatBubble(
         color = containerColor,
         contentColor = contentColor,
         border = BorderStroke(1.dp, borderColor),
-        shadowElevation = 0.dp,
+        shadowElevation = bubbleShadowElevation,
         tonalElevation = 0.dp
     ) {
         Column(
@@ -5258,58 +5233,89 @@ private fun RecipeChatBubble(
 
 @Composable
 private fun RecipeSuggestionCard(recipe: RecipeSuggestion) {
+    val scheme = MaterialTheme.colorScheme
+    val isDarkTheme = scheme.background.luminance() < 0.5f
+    val cardShape = RoundedCornerShape(22.dp)
+    val recipeCardOverlay =
+        if (isDarkTheme) {
+            Color.Transparent
+        } else {
+            scheme.surface.copy(alpha = 0.24f)
+        }
+    val recipeCardBorder =
+        if (isDarkTheme) {
+            Color.Transparent
+        } else {
+            scheme.outlineVariant.copy(alpha = 0.26f)
+        }
+
     ExactFrostedPillCard(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(22.dp),
+        shape = cardShape,
         shadowElevation = 2.dp
     ) {
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(14.dp)
         ) {
-            Text(
-                text = recipe.title,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold
-            )
-
-            val usesLine = compactIngredientSummary(recipe.usedIngredients, maxVisible = 5)
-            if (usesLine.isNotBlank()) {
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    text = "Uses: $usesLine",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface
+            if (!isDarkTheme) {
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .clip(cardShape)
+                        .background(recipeCardOverlay)
+                        .border(1.dp, recipeCardBorder, cardShape)
                 )
             }
 
-            val addLine = compactIngredientSummary(recipe.missedIngredients, maxVisible = 3)
-            if (addLine.isNotBlank()) {
-                Spacer(Modifier.height(4.dp))
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(14.dp)
+            ) {
                 Text(
-                    text = "Add: $addLine",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
-            if (recipe.quickGuide.isNotEmpty()) {
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    text = "How:",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    text = recipe.title,
+                    style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold
                 )
-                Spacer(Modifier.height(4.dp))
-                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    recipe.quickGuide.forEachIndexed { index, step ->
-                        Text(
-                            text = "${index + 1}. $step",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+
+                val usesLine = compactIngredientSummary(recipe.usedIngredients, maxVisible = 5)
+                if (usesLine.isNotBlank()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = "Uses: $usesLine",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+
+                val addLine = compactIngredientSummary(recipe.missedIngredients, maxVisible = 3)
+                if (addLine.isNotBlank()) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = "Add: $addLine",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                if (recipe.quickGuide.isNotEmpty()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = "How:",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        recipe.quickGuide.forEachIndexed { index, step ->
+                            Text(
+                                text = "${index + 1}. $step",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
             }
@@ -7185,13 +7191,12 @@ fun FoodEntryScreen(
             filteredFoodList.isNotEmpty() && filteredFoodList.all { selectedItems.contains(it) }
         }
     }
-    val pantryScrollRunway = shortListScrollRunway(filteredFoodList.size)
     val isHomeFabVisible =
         (!isSelecting && fabVisible && !showForm) || (isSelecting && selectedItems.isNotEmpty())
-    val pantryBottomSafePadding =
-        with(density) {
-            WindowInsets.navigationBars.getBottom(this).toDp()
-        } + if (isHomeFabVisible) 114.dp else 30.dp + pantryScrollRunway
+    val pantryBottomSafePadding = listBottomSafePadding(
+        itemCount = filteredFoodList.size,
+        hasFab = isHomeFabVisible
+    )
 
     LaunchedEffect(Unit) {
         snapshotFlow { foodList.toList() }
@@ -7300,7 +7305,7 @@ fun FoodEntryScreen(
                                     overscrollEffect = null,
                                     contentPadding = PaddingValues(
                                         top = pantryContentTopPadding,
-                                        bottom = pantryBottomSafePadding
+                                        bottom = 75.dp
                                     )
                                 ) {
                                     items(
