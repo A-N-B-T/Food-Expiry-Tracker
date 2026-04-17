@@ -190,6 +190,8 @@ import androidx.core.content.edit
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -231,8 +233,10 @@ import kotlin.math.roundToInt
 
 private const val THEME_PREFS = "app_settings"
 private const val THEME_KEY = "theme_mode"
+private const val COUNTDOWN_FORMAT_KEY = "countdown_format"
 
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
+enum class CountdownFormat { DAYS_ONLY, MONTHS_AND_DAYS, YEARS_MONTHS_DAYS }
 
 enum class SelectionPurpose { DELETE, CATEGORY }
 
@@ -294,6 +298,65 @@ fun saveThemeMode(context: Context, mode: ThemeMode) {
     val prefs = context.applicationContext.getSharedPreferences(THEME_PREFS,
         Context.MODE_PRIVATE)
     prefs.edit().putString(THEME_KEY, mode.name).apply()
+}
+
+fun loadCountdownFormat(context: Context): CountdownFormat {
+    val prefs = context.applicationContext.getSharedPreferences(THEME_PREFS, Context.MODE_PRIVATE)
+    val raw = prefs.getString(COUNTDOWN_FORMAT_KEY, CountdownFormat.DAYS_ONLY.name)
+        ?: CountdownFormat.DAYS_ONLY.name
+
+    return when (raw.lowercase(Locale.ROOT)) {
+        "days_only" -> CountdownFormat.DAYS_ONLY
+        "months_and_days" -> CountdownFormat.MONTHS_AND_DAYS
+        "years_months_days" -> CountdownFormat.YEARS_MONTHS_DAYS
+        else -> runCatching { CountdownFormat.valueOf(raw) }
+            .getOrDefault(CountdownFormat.DAYS_ONLY)
+    }
+}
+
+fun saveCountdownFormat(context: Context, format: CountdownFormat) {
+    val prefs = context.applicationContext.getSharedPreferences(THEME_PREFS, Context.MODE_PRIVATE)
+    prefs.edit().putString(COUNTDOWN_FORMAT_KEY, format.name).apply()
+}
+
+private fun countdownFormatLabel(format: CountdownFormat): String {
+    return when (format) {
+        CountdownFormat.DAYS_ONLY -> "Days only"
+        CountdownFormat.MONTHS_AND_DAYS -> "Months + days"
+        CountdownFormat.YEARS_MONTHS_DAYS -> "Years + months + days"
+    }
+}
+
+private fun countdownFormatDescription(format: CountdownFormat): String {
+    return when (format) {
+        CountdownFormat.DAYS_ONLY -> "Show the full day count, like 60 days left."
+        CountdownFormat.MONTHS_AND_DAYS -> "Show a shorter format like 2m or 2m 5d."
+        CountdownFormat.YEARS_MONTHS_DAYS -> "Show longer countdowns like 2y 3m 7d."
+    }
+}
+
+@Composable
+private fun rememberCountdownFormatPreference(): CountdownFormat {
+    val context = LocalContext.current
+    val appCtx = context.applicationContext
+    val prefs = remember(appCtx) {
+        appCtx.getSharedPreferences(THEME_PREFS, Context.MODE_PRIVATE)
+    }
+    var countdownFormat by remember { mutableStateOf(loadCountdownFormat(appCtx)) }
+
+    DisposableEffect(prefs, appCtx) {
+        val listener =
+            android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+                if (key == COUNTDOWN_FORMAT_KEY) {
+                    countdownFormat = loadCountdownFormat(appCtx)
+                }
+            }
+
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        onDispose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+
+    return countdownFormat
 }
 
 private enum class GlassTone { CHROME, CARD, SEARCH, ACCENT }
@@ -2064,6 +2127,54 @@ private fun countdownTextColor(background: Color): Color {
     return if (background.luminance() > 0.58f) Color.Black else Color.White
 }
 
+private fun compactCountdownText(
+    daysLeft: Int,
+    format: CountdownFormat
+): String {
+    if (daysLeft <= 0) return "0d"
+
+    fun compactParts(years: Int = 0, months: Int = 0, days: Int = 0): String {
+        val parts = buildList {
+            if (years > 0) add("${years}y")
+            if (months > 0) add("${months}m")
+            if (days > 0) add("${days}d")
+        }
+
+        return if (parts.isNotEmpty()) parts.joinToString(" ") else "0d"
+    }
+
+    return when (format) {
+        CountdownFormat.DAYS_ONLY ->
+            if (daysLeft == 1) "1 day left" else "$daysLeft days left"
+
+        CountdownFormat.MONTHS_AND_DAYS -> {
+            val months = daysLeft / 30
+            val days = daysLeft % 30
+            compactParts(months = months, days = days)
+        }
+
+        CountdownFormat.YEARS_MONTHS_DAYS -> {
+            val years = daysLeft / 365
+            val afterYears = daysLeft % 365
+            val months = afterYears / 30
+            val days = afterYears % 30
+            compactParts(years = years, months = months, days = days)
+        }
+    }
+}
+
+private fun countdownText(
+    daysLeft: Int?,
+    format: CountdownFormat
+): String {
+    return when {
+        daysLeft == null -> "--"
+        daysLeft < 0 -> "Expired"
+        daysLeft == 0 -> "Expires Today"
+        else -> compactCountdownText(daysLeft, format)
+    }
+}
+
 private fun countdownStyle(daysLeft: Int?): CountdownStyle {
     val bg = when {
         daysLeft == null -> Color(0xFF9CA8B7)
@@ -2083,16 +2194,15 @@ private fun countdownStyle(daysLeft: Int?): CountdownStyle {
 }
 
 @Composable
-private fun ExpiryCountdownBadge(expiry: String) {
+private fun ExpiryCountdownBadge(
+    expiry: String,
+    countdownFormat: CountdownFormat
+) {
     val daysLeft = remember(expiry) { daysUntil(expiry) }
     val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
 
-    val text = when {
-        daysLeft == null -> "--"
-        daysLeft < 0 -> "Expired"
-        daysLeft == 0 -> "Expires Today"
-        daysLeft == 1 -> "1 day left"
-        else -> "$daysLeft days left"
+    val text = remember(daysLeft, countdownFormat) {
+        countdownText(daysLeft, countdownFormat)
     }
 
     val style = remember(daysLeft) { countdownStyle(daysLeft) }
@@ -3523,6 +3633,10 @@ fun AppNav(
                 )
             }
 
+            composable(Route.CountdownFormat.r) {
+                CountdownFormatScreen(navController)
+            }
+
             composable(Route.Notifications.r) {
                 NotificationsScreen(navController)
             }
@@ -3536,6 +3650,7 @@ fun HistoryScreen(
     onOverlayVisibilityChange: (Boolean) -> Unit
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val prefs = remember { context.getSharedPreferences(FOOD_PREFS, Context.MODE_PRIVATE) }
     val gson = remember { Gson() }
     val density = LocalDensity.current
@@ -3604,6 +3719,17 @@ fun HistoryScreen(
 
     SideEffect {
         onOverlayVisibilityChange(shouldBlurBackground)
+    }
+
+    DisposableEffect(lifecycleOwner, showSearchBar) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME && !showSearchBar) {
+                searchFabVisible = true
+            }
+        }
+
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     DisposableEffect(Unit) {
@@ -3991,6 +4117,7 @@ fun HistoryScreen(
 private fun PantryFoodCard(
     modifier: Modifier = Modifier,
     food: FoodItem,
+    countdownFormat: CountdownFormat,
     isSelecting: Boolean,
     isSelected: Boolean,
     onSelectionChange: (Boolean) -> Unit,
@@ -4208,7 +4335,10 @@ private fun PantryFoodCard(
                         Spacer(modifier = Modifier.width(10.dp))
 
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            ExpiryCountdownBadge(food.expiry)
+                            ExpiryCountdownBadge(
+                                expiry = food.expiry,
+                                countdownFormat = countdownFormat
+                            )
 
                             Spacer(modifier = Modifier.width(checkboxGapWidth))
 
@@ -4460,6 +4590,8 @@ fun CategoryScreen() {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(navController: NavHostController) {
+    val countdownFormat = rememberCountdownFormatPreference()
+
     Scaffold(
         containerColor = Color.Transparent,
         topBar = {
@@ -4475,10 +4607,20 @@ fun SettingsScreen(navController: NavHostController) {
                 .padding(padding)
                 .padding(16.dp)
         ) {
-            SettingRow("Theme") {
+            SettingRow(
+                title = "Theme"
+            ) {
                 navController.navigate(Route.Theme.r)
             }
-            SettingRow("Notifications") {
+            SettingRow(
+                title = "Countdown format",
+                subtitle = countdownFormatLabel(countdownFormat)
+            ) {
+                navController.navigate(Route.CountdownFormat.r)
+            }
+            SettingRow(
+                title = "Notifications"
+            ) {
                 navController.navigate(Route.Notifications.r)
             }
         }
@@ -4486,7 +4628,11 @@ fun SettingsScreen(navController: NavHostController) {
 }
 
 @Composable
-private fun SettingRow(title: String, onClick: () -> Unit) {
+private fun SettingRow(
+    title: String,
+    subtitle: String? = null,
+    onClick: () -> Unit
+) {
     MatchingPillCard(
         modifier = Modifier
             .fillMaxWidth()
@@ -4494,8 +4640,18 @@ private fun SettingRow(title: String, onClick: () -> Unit) {
         shadowElevation = 6.dp,
         onClick = onClick
     ) {
-        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(
+            modifier = Modifier.padding(16.dp)
+        ) {
             Text(title, style = MaterialTheme.typography.bodyLarge)
+            subtitle?.let {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }
@@ -4533,6 +4689,40 @@ fun ThemeScreen(
             ThemeOption("Dark", "Always dark mode",
                 selected = currentMode == ThemeMode.DARK
             ) { onModeChange(ThemeMode.DARK) }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CountdownFormatScreen(navController: NavHostController) {
+    val context = LocalContext.current
+    val currentFormat = rememberCountdownFormatPreference()
+
+    Scaffold(
+        containerColor = Color.Transparent,
+        topBar = {
+            SlimTopBar(
+                title = "Countdown Format",
+                onBack = { navController.popBackStack() }
+            )
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(16.dp)
+        ) {
+            CountdownFormat.entries.forEach { option ->
+                ThemeOption(
+                    title = countdownFormatLabel(option),
+                    subtitle = countdownFormatDescription(option),
+                    selected = currentFormat == option
+                ) {
+                    saveCountdownFormat(context, option)
+                }
+            }
         }
     }
 }
@@ -4869,9 +5059,11 @@ fun FoodEntryScreen(
     var customCategoryExistsError by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val density = LocalDensity.current
     val keyboard = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
+    val countdownFormat = rememberCountdownFormatPreference()
     val sharedPrefs = remember { context.getSharedPreferences(FOOD_PREFS, Context.MODE_PRIVATE) }
     val gson = remember { Gson() }
     val homeSearchFocus = remember { FocusRequester() }
@@ -5103,6 +5295,17 @@ fun FoodEntryScreen(
         }
     }
     var fabVisible by rememberSaveable { mutableStateOf(true) }
+
+    DisposableEffect(lifecycleOwner, showPantrySearchBar, isSelecting) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME && !showPantrySearchBar && !isSelecting) {
+                fabVisible = true
+            }
+        }
+
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     LaunchedEffect(listState) {
         snapshotFlow { listState.isScrollInProgress }
@@ -5518,6 +5721,7 @@ fun FoodEntryScreen(
                                                 )
                                             ),
                                             food = food,
+                                            countdownFormat = countdownFormat,
                                             isSelecting = isSelecting,
                                             isSelected = selectedItems.contains(food),
                                             onSelectionChange = { checked ->
