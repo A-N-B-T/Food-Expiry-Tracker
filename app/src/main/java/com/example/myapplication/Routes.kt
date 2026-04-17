@@ -3,10 +3,16 @@ package com.example.myapplication
 sealed class Route(val r: String) {
     data object Home : Route("home")
     data object Category : Route("category")
-    data object Settings : Route("settings")
+    data object Profile : Route("profile")
+    data object Account : Route("profile/account")
+    data object Settings : Route("profile/settings")
+    data object About : Route("profile/about")
+    data object Help : Route("profile/help")
+    data object Privacy : Route("profile/privacy")
 
-    data object Theme : Route("settings/theme")
-    data object Notifications : Route("settings/notifications")
+    data object Theme : Route("profile/settings/theme")
+    data object CountdownFormat : Route("profile/settings/countdown-format")
+    data object Notifications : Route("profile/settings/notifications")
 
     object History : Route("history")
     object Recipe : Route("recipe")

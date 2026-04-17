@@ -23,7 +23,13 @@ android {
 
     defaultConfig {
         val geminiApiKey = localProperties.getProperty("GEMINI_API_KEY") ?: ""
+        val firebaseApiKey = localProperties.getProperty("FIREBASE_API_KEY") ?: ""
+        val firebaseProjectId = localProperties.getProperty("FIREBASE_PROJECT_ID") ?: ""
+        val googleWebClientId = localProperties.getProperty("GOOGLE_WEB_CLIENT_ID") ?: ""
         buildConfigField("String", "GEMINI_API_KEY", "\"$geminiApiKey\"")
+        buildConfigField("String", "FIREBASE_API_KEY", "\"$firebaseApiKey\"")
+        buildConfigField("String", "FIREBASE_PROJECT_ID", "\"$firebaseProjectId\"")
+        buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"$googleWebClientId\"")
 
         applicationId = "com.example.myapplication"
         minSdk = 27
@@ -58,6 +64,8 @@ android {
 
 dependencies {
     implementation("androidx.core:core-splashscreen:1.0.1")
+    implementation("androidx.credentials:credentials:1.6.0")
+    implementation("androidx.credentials:credentials-play-services-auth:1.6.0")
     implementation("androidx.camera:camera-core:1.4.2")
     implementation("androidx.camera:camera-camera2:1.4.2")
     implementation("androidx.camera:camera-lifecycle:1.4.2")
@@ -80,6 +88,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.5")
     implementation("androidx.navigation:navigation-runtime-ktx:2.8.3")
     implementation("androidx.compose.material3:material3-window-size-class")
+    implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
     implementation("com.google.code.gson:gson:2.11.0")
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")

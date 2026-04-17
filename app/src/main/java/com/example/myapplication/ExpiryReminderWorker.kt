@@ -29,8 +29,8 @@ import java.util.concurrent.TimeUnit
 const val NOTIF_PREFS = "notif_settings"
 const val DAYS_BEFORE_KEY = "days_before"
 const val DAILY_ENABLED_KEY = "daily_enabled"
-const val MIN_DAYS_BEFORE_REMINDER = 1
-const val MAX_DAYS_BEFORE_REMINDER = 7
+const val MIN_DAYS_BEFORE_REMINDER = 2
+const val MAX_DAYS_BEFORE_REMINDER = 14
 
 
 private const val WORK_NAME = "expiry_daily_work"

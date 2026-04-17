@@ -1,0 +1,1290 @@
+package com.example.myapplication
+
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.content.SharedPreferences
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import androidx.core.content.edit
+import androidx.credentials.ClearCredentialStateRequest
+import androidx.credentials.CredentialManager
+import androidx.credentials.CustomCredential
+import androidx.credentials.GetCredentialRequest
+import androidx.credentials.exceptions.ClearCredentialException
+import androidx.credentials.exceptions.GetCredentialException
+import androidx.navigation.NavHostController
+import com.google.android.libraries.identity.googleid.GetGoogleIdOption
+import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
+import com.google.android.libraries.identity.googleid.GoogleIdTokenParsingException
+import com.google.gson.Gson
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.IOException
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
+
+private const val ACCOUNT_PREFS = "account_sync"
+private const val ACCOUNT_SESSION_KEY = "account_session"
+private const val ACCOUNT_LAST_SYNCED_AT_KEY = "account_last_synced_at"
+private const val ACCOUNT_LOCAL_MUTATION_AT_KEY = "account_local_mutation_at"
+private const val ACCOUNT_LAST_SYNC_ERROR_KEY = "account_last_sync_error"
+
+private const val ACCOUNT_FOOD_PREFS = "food_prefs"
+private const val ACCOUNT_THEME_PREFS = "app_settings"
+private const val ACCOUNT_NOTIF_PREFS = "notif_settings"
+
+private const val ACCOUNT_FOOD_LIST_KEY = "food_list"
+private const val ACCOUNT_HISTORY_LIST_KEY = "history_list"
+private const val ACCOUNT_CATEGORIES_LIST_KEY = "categories_list"
+private const val ACCOUNT_BARCODE_CACHE_KEY = "barcode_cache"
+private const val ACCOUNT_THEME_KEY = "theme_mode"
+private const val ACCOUNT_COUNTDOWN_FORMAT_KEY = "countdown_format"
+private const val ACCOUNT_DAYS_BEFORE_KEY = "days_before"
+private const val ACCOUNT_DAILY_ENABLED_KEY = "daily_enabled"
+
+private const val CLOUD_SYNC_VERSION = 1
+
+private val accountGson = Gson()
+
+enum class AccountProvider { EMAIL, GOOGLE }
+
+data class AccountSession(
+    val provider: AccountProvider,
+    val uid: String,
+    val email: String,
+    val displayName: String? = null,
+    val photoUrl: String? = null,
+    val idToken: String,
+    val refreshToken: String
+)
+
+private data class CloudSyncSnapshot(
+    val foodListJson: String = "[]",
+    val historyJson: String = "[]",
+    val categoriesJson: String = "[]",
+    val barcodeCacheJson: String = "{}",
+    val themeMode: String = ThemeMode.SYSTEM.name,
+    val countdownFormat: String = CountdownFormat.DAYS_ONLY.name,
+    val daysBeforeReminder: Int = 3,
+    val dailyNotificationsEnabled: Boolean = false
+)
+
+private data class CloudSyncEnvelope(
+    val version: Int = CLOUD_SYNC_VERSION,
+    val updatedAtMs: Long = System.currentTimeMillis(),
+    val snapshot: CloudSyncSnapshot
+)
+
+private data class IdentityAuthResponse(
+    val localId: String? = null,
+    val email: String? = null,
+    val idToken: String? = null,
+    val refreshToken: String? = null,
+    val displayName: String? = null,
+    val photoUrl: String? = null
+)
+
+private data class IdentityRefreshResponse(
+    val user_id: String? = null,
+    val id_token: String? = null,
+    val refresh_token: String? = null
+)
+
+private data class ServiceErrorEnvelope(
+    val error: ServiceErrorBody? = null
+)
+
+private data class ServiceErrorBody(
+    val message: String? = null
+)
+
+private data class FirestoreDocumentResponse(
+    val fields: Map<String, FirestoreValue>? = null
+)
+
+private data class FirestoreValue(
+    val stringValue: String? = null,
+    val integerValue: String? = null
+)
+
+private enum class ResumeAction {
+    NONE,
+    RESTORED_REMOTE,
+    PUSHED_LOCAL
+}
+
+private data class ResumeResult(
+    val session: AccountSession,
+    val action: ResumeAction
+)
+
+private data class SyncMeta(
+    val lastSyncedAt: Long,
+    val lastError: String?
+)
+
+private fun accountPrefs(context: Context): SharedPreferences {
+    return context.applicationContext.getSharedPreferences(ACCOUNT_PREFS, Context.MODE_PRIVATE)
+}
+
+private fun loadAccountSession(context: Context): AccountSession? {
+    val json = accountPrefs(context).getString(ACCOUNT_SESSION_KEY, null) ?: return null
+    return runCatching { accountGson.fromJson(json, AccountSession::class.java) }.getOrNull()
+}
+
+private fun saveAccountSession(context: Context, session: AccountSession?) {
+    accountPrefs(context).edit {
+        if (session == null) {
+            remove(ACCOUNT_SESSION_KEY)
+        } else {
+            putString(ACCOUNT_SESSION_KEY, accountGson.toJson(session))
+        }
+    }
+}
+
+private fun clearAccountSession(context: Context) {
+    accountPrefs(context).edit {
+        remove(ACCOUNT_SESSION_KEY)
+        remove(ACCOUNT_LAST_SYNC_ERROR_KEY)
+        remove(ACCOUNT_LAST_SYNCED_AT_KEY)
+        remove(ACCOUNT_LOCAL_MUTATION_AT_KEY)
+    }
+}
+
+private fun loadSyncMeta(context: Context): SyncMeta {
+    val prefs = accountPrefs(context)
+    return SyncMeta(
+        lastSyncedAt = prefs.getLong(ACCOUNT_LAST_SYNCED_AT_KEY, 0L),
+        lastError = prefs.getString(ACCOUNT_LAST_SYNC_ERROR_KEY, null)
+    )
+}
+
+private fun saveLastSyncedAt(context: Context, timestampMs: Long) {
+    accountPrefs(context).edit {
+        putLong(ACCOUNT_LAST_SYNCED_AT_KEY, timestampMs)
+        putLong(ACCOUNT_LOCAL_MUTATION_AT_KEY, timestampMs)
+        remove(ACCOUNT_LAST_SYNC_ERROR_KEY)
+    }
+}
+
+private fun markLocalMutation(context: Context, timestampMs: Long = System.currentTimeMillis()) {
+    accountPrefs(context).edit {
+        putLong(ACCOUNT_LOCAL_MUTATION_AT_KEY, timestampMs)
+    }
+}
+
+private fun loadLocalMutationAt(context: Context): Long {
+    return accountPrefs(context).getLong(ACCOUNT_LOCAL_MUTATION_AT_KEY, 0L)
+}
+
+private fun saveLastSyncError(context: Context, message: String?) {
+    accountPrefs(context).edit {
+        if (message.isNullOrBlank()) {
+            remove(ACCOUNT_LAST_SYNC_ERROR_KEY)
+        } else {
+            putString(ACCOUNT_LAST_SYNC_ERROR_KEY, message)
+        }
+    }
+}
+
+fun isCloudAccountConfigured(): Boolean {
+    return BuildConfig.FIREBASE_API_KEY.isNotBlank() &&
+            BuildConfig.FIREBASE_PROJECT_ID.isNotBlank()
+}
+
+fun isGoogleAccountConfigured(): Boolean {
+    return isCloudAccountConfigured() &&
+            BuildConfig.GOOGLE_WEB_CLIENT_ID.isNotBlank()
+}
+
+@Composable
+fun rememberAccountSessionPreference(): AccountSession? {
+    val context = LocalContext.current
+    val prefs = remember(context) { accountPrefs(context) }
+    var session by remember { mutableStateOf(loadAccountSession(context)) }
+
+    DisposableEffect(prefs, context) {
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == ACCOUNT_SESSION_KEY) {
+                session = loadAccountSession(context)
+            }
+        }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        onDispose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+
+    return session
+}
+
+@Composable
+private fun rememberAccountSyncMeta(): SyncMeta {
+    val context = LocalContext.current
+    val prefs = remember(context) { accountPrefs(context) }
+    var meta by remember { mutableStateOf(loadSyncMeta(context)) }
+
+    DisposableEffect(prefs, context) {
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (
+                key == ACCOUNT_LAST_SYNCED_AT_KEY ||
+                key == ACCOUNT_LAST_SYNC_ERROR_KEY
+            ) {
+                meta = loadSyncMeta(context)
+            }
+        }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        onDispose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+
+    return meta
+}
+
+private fun requireCloudSetup() {
+    check(isCloudAccountConfigured()) {
+        "Cloud accounts are not configured yet. Add FIREBASE_API_KEY and FIREBASE_PROJECT_ID in local.properties first."
+    }
+}
+
+private fun cloudDocumentUrl(uid: String): String {
+    return "https://firestore.googleapis.com/v1/projects/${BuildConfig.FIREBASE_PROJECT_ID}/databases/(default)/documents/users/$uid"
+}
+
+private fun captureLocalSnapshot(context: Context): CloudSyncEnvelope {
+    val foodPrefs = context.applicationContext.getSharedPreferences(ACCOUNT_FOOD_PREFS, Context.MODE_PRIVATE)
+    val themePrefs = context.applicationContext.getSharedPreferences(ACCOUNT_THEME_PREFS, Context.MODE_PRIVATE)
+    val notifPrefs = context.applicationContext.getSharedPreferences(ACCOUNT_NOTIF_PREFS, Context.MODE_PRIVATE)
+
+    return CloudSyncEnvelope(
+        updatedAtMs = System.currentTimeMillis(),
+        snapshot = CloudSyncSnapshot(
+            foodListJson = foodPrefs.getString(ACCOUNT_FOOD_LIST_KEY, "[]") ?: "[]",
+            historyJson = foodPrefs.getString(ACCOUNT_HISTORY_LIST_KEY, "[]") ?: "[]",
+            categoriesJson = foodPrefs.getString(ACCOUNT_CATEGORIES_LIST_KEY, "[]") ?: "[]",
+            barcodeCacheJson = foodPrefs.getString(ACCOUNT_BARCODE_CACHE_KEY, "{}") ?: "{}",
+            themeMode = themePrefs.getString(ACCOUNT_THEME_KEY, ThemeMode.SYSTEM.name)
+                ?: ThemeMode.SYSTEM.name,
+            countdownFormat = themePrefs.getString(
+                ACCOUNT_COUNTDOWN_FORMAT_KEY,
+                CountdownFormat.DAYS_ONLY.name
+            ) ?: CountdownFormat.DAYS_ONLY.name,
+            daysBeforeReminder = notifPrefs.getInt(ACCOUNT_DAYS_BEFORE_KEY, 3),
+            dailyNotificationsEnabled = notifPrefs.getBoolean(ACCOUNT_DAILY_ENABLED_KEY, false)
+        )
+    )
+}
+
+private fun restoreLocalSnapshot(context: Context, envelope: CloudSyncEnvelope) {
+    val snapshot = envelope.snapshot
+    val foodPrefs = context.applicationContext.getSharedPreferences(ACCOUNT_FOOD_PREFS, Context.MODE_PRIVATE)
+    val themePrefs = context.applicationContext.getSharedPreferences(ACCOUNT_THEME_PREFS, Context.MODE_PRIVATE)
+    val notifPrefs = context.applicationContext.getSharedPreferences(ACCOUNT_NOTIF_PREFS, Context.MODE_PRIVATE)
+
+    foodPrefs.edit {
+        putString(ACCOUNT_FOOD_LIST_KEY, snapshot.foodListJson)
+        putString(ACCOUNT_HISTORY_LIST_KEY, snapshot.historyJson)
+        putString(ACCOUNT_CATEGORIES_LIST_KEY, snapshot.categoriesJson)
+        putString(ACCOUNT_BARCODE_CACHE_KEY, snapshot.barcodeCacheJson)
+    }
+
+    themePrefs.edit {
+        putString(ACCOUNT_THEME_KEY, snapshot.themeMode)
+        putString(ACCOUNT_COUNTDOWN_FORMAT_KEY, snapshot.countdownFormat)
+    }
+
+    notifPrefs.edit {
+        putInt(ACCOUNT_DAYS_BEFORE_KEY, snapshot.daysBeforeReminder)
+        putBoolean(ACCOUNT_DAILY_ENABLED_KEY, snapshot.dailyNotificationsEnabled)
+    }
+
+    if (snapshot.dailyNotificationsEnabled) {
+        scheduleDailyExpiryWork(context.applicationContext)
+    } else {
+        cancelDailyExpiryWork(context.applicationContext)
+    }
+
+    saveLastSyncedAt(context, envelope.updatedAtMs)
+}
+
+private fun friendlyIdentityError(body: String?): String {
+    val code = runCatching {
+        accountGson.fromJson(body, ServiceErrorEnvelope::class.java).error?.message
+    }.getOrNull().orEmpty()
+
+    return when (code) {
+        "EMAIL_EXISTS" -> "That email is already in use."
+        "INVALID_LOGIN_CREDENTIALS",
+        "INVALID_PASSWORD",
+        "EMAIL_NOT_FOUND" -> "That email or password doesn't match."
+        "USER_DISABLED" -> "That account is disabled."
+        "TOO_MANY_ATTEMPTS_TRY_LATER" -> "Too many attempts right now. Try again in a moment."
+        "OPERATION_NOT_ALLOWED" -> "Enable Email/Password in Firebase Authentication first."
+        "CONFIGURATION_NOT_FOUND" -> "Enable Google in Firebase Authentication and set the web client ID for this build."
+        "INVALID_IDP_RESPONSE" -> "Google sign-in did not return a usable account token."
+        else -> "Sign-in failed. Check the Firebase Authentication setup for this app."
+    }
+}
+
+private fun friendlyCloudSyncError(body: String?): String {
+    val code = runCatching {
+        accountGson.fromJson(body, ServiceErrorEnvelope::class.java).error?.message
+    }.getOrNull().orEmpty()
+
+    return when {
+        code.contains("PERMISSION_DENIED") ->
+            "Cloud sync needs Firestore rules that allow each signed-in user to read and write only their own document."
+        code.contains("UNAUTHENTICATED") ->
+            "Your account session expired. Please sign in again."
+        else ->
+            "Cloud sync couldn't reach your online pantry data."
+    }
+}
+
+private suspend fun executeJsonRequest(
+    url: String,
+    method: String,
+    bodyJson: String? = null,
+    bearerToken: String? = null,
+    contentType: String = "application/json"
+): String = withContext(Dispatchers.IO) {
+    val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+        requestMethod = method
+        connectTimeout = 15_000
+        readTimeout = 15_000
+        doInput = true
+        setRequestProperty("Accept", "application/json")
+        bearerToken?.let { setRequestProperty("Authorization", "Bearer $it") }
+        if (bodyJson != null) {
+            doOutput = true
+            setRequestProperty("Content-Type", contentType)
+        }
+    }
+
+    bodyJson?.let { json ->
+        connection.outputStream.bufferedWriter().use { writer ->
+            writer.write(json)
+        }
+    }
+
+    val stream = if (connection.responseCode in 200..299) {
+        connection.inputStream
+    } else {
+        connection.errorStream
+    }
+
+    val responseText = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+    if (connection.responseCode !in 200..299) {
+        throw IOException(responseText.ifBlank { "HTTP ${connection.responseCode}" })
+    }
+
+    responseText
+}
+
+private fun IdentityAuthResponse.toAccountSession(provider: AccountProvider): AccountSession {
+    return AccountSession(
+        provider = provider,
+        uid = localId.orEmpty(),
+        email = email.orEmpty(),
+        displayName = displayName,
+        photoUrl = photoUrl,
+        idToken = idToken.orEmpty(),
+        refreshToken = refreshToken.orEmpty()
+    )
+}
+
+private suspend fun signUpWithEmailPassword(
+    email: String,
+    password: String
+): AccountSession {
+    requireCloudSetup()
+    val url = "https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${BuildConfig.FIREBASE_API_KEY}"
+    val body = accountGson.toJson(
+        mapOf(
+            "email" to email,
+            "password" to password,
+            "returnSecureToken" to true
+        )
+    )
+
+    return try {
+        val responseText = executeJsonRequest(url = url, method = "POST", bodyJson = body)
+        accountGson.fromJson(responseText, IdentityAuthResponse::class.java)
+            .toAccountSession(AccountProvider.EMAIL)
+    } catch (error: IOException) {
+        throw IllegalStateException(friendlyIdentityError(error.message))
+    }
+}
+
+private suspend fun signInWithEmailPassword(
+    email: String,
+    password: String
+): AccountSession {
+    requireCloudSetup()
+    val url =
+        "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${BuildConfig.FIREBASE_API_KEY}"
+    val body = accountGson.toJson(
+        mapOf(
+            "email" to email,
+            "password" to password,
+            "returnSecureToken" to true
+        )
+    )
+
+    return try {
+        val responseText = executeJsonRequest(url = url, method = "POST", bodyJson = body)
+        accountGson.fromJson(responseText, IdentityAuthResponse::class.java)
+            .toAccountSession(AccountProvider.EMAIL)
+    } catch (error: IOException) {
+        throw IllegalStateException(friendlyIdentityError(error.message))
+    }
+}
+
+private suspend fun exchangeGoogleIdToken(googleIdToken: String): AccountSession {
+    requireCloudSetup()
+    val encodedToken =
+        URLEncoder.encode(googleIdToken, StandardCharsets.UTF_8.toString())
+    val postBody = "id_token=$encodedToken&providerId=google.com"
+    val url =
+        "https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp?key=${BuildConfig.FIREBASE_API_KEY}"
+    val body = accountGson.toJson(
+        mapOf(
+            "postBody" to postBody,
+            "requestUri" to "http://localhost",
+            "returnIdpCredential" to true,
+            "returnSecureToken" to true
+        )
+    )
+
+    return try {
+        val responseText = executeJsonRequest(url = url, method = "POST", bodyJson = body)
+        accountGson.fromJson(responseText, IdentityAuthResponse::class.java)
+            .toAccountSession(AccountProvider.GOOGLE)
+    } catch (error: IOException) {
+        throw IllegalStateException(friendlyIdentityError(error.message))
+    }
+}
+
+private suspend fun refreshAccountSession(current: AccountSession): AccountSession {
+    requireCloudSetup()
+    val url = "https://securetoken.googleapis.com/v1/token?key=${BuildConfig.FIREBASE_API_KEY}"
+    val formBody =
+        "grant_type=refresh_token&refresh_token=${
+            URLEncoder.encode(current.refreshToken, StandardCharsets.UTF_8.toString())
+        }"
+
+    return try {
+        val responseText = executeJsonRequest(
+            url = url,
+            method = "POST",
+            bodyJson = formBody,
+            contentType = "application/x-www-form-urlencoded"
+        )
+        val refreshed = accountGson.fromJson(responseText, IdentityRefreshResponse::class.java)
+        current.copy(
+            uid = refreshed.user_id ?: current.uid,
+            idToken = refreshed.id_token ?: current.idToken,
+            refreshToken = refreshed.refresh_token ?: current.refreshToken
+        )
+    } catch (error: IOException) {
+        throw IllegalStateException("Your session expired. Please sign in again.")
+    }
+}
+
+private suspend fun fetchRemoteSnapshot(session: AccountSession): CloudSyncEnvelope? {
+    requireCloudSetup()
+
+    return try {
+        val responseText = executeJsonRequest(
+            url = cloudDocumentUrl(session.uid),
+            method = "GET",
+            bearerToken = session.idToken
+        )
+        val document = accountGson.fromJson(responseText, FirestoreDocumentResponse::class.java)
+        val payloadJson = document.fields?.get("payloadJson")?.stringValue ?: return null
+        accountGson.fromJson(payloadJson, CloudSyncEnvelope::class.java)
+    } catch (error: IOException) {
+        val body = error.message.orEmpty()
+        if (body.contains("NOT_FOUND")) {
+            null
+        } else {
+            throw IllegalStateException(friendlyCloudSyncError(body))
+        }
+    }
+}
+
+private suspend fun pushSnapshotToCloud(
+    context: Context,
+    session: AccountSession
+): AccountSession {
+    requireCloudSetup()
+    val refreshedSession = refreshAccountSession(session)
+    val envelope = captureLocalSnapshot(context)
+    val body = accountGson.toJson(
+        mapOf(
+            "fields" to buildMap<String, Any> {
+                put("email", mapOf("stringValue" to refreshedSession.email))
+                put("provider", mapOf("stringValue" to refreshedSession.provider.name))
+                put("updatedAtMs", mapOf("integerValue" to envelope.updatedAtMs.toString()))
+                put("payloadJson", mapOf("stringValue" to accountGson.toJson(envelope)))
+                refreshedSession.displayName
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { put("displayName", mapOf("stringValue" to it)) }
+                refreshedSession.photoUrl
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { put("photoUrl", mapOf("stringValue" to it)) }
+            }
+        )
+    )
+
+    try {
+        executeJsonRequest(
+            url = cloudDocumentUrl(refreshedSession.uid),
+            method = "PATCH",
+            bearerToken = refreshedSession.idToken,
+            bodyJson = body
+        )
+        saveAccountSession(context, refreshedSession)
+        saveLastSyncedAt(context, envelope.updatedAtMs)
+        return refreshedSession
+    } catch (error: IOException) {
+        throw IllegalStateException(friendlyCloudSyncError(error.message))
+    }
+}
+
+private suspend fun bootstrapSignedInAccount(
+    context: Context,
+    session: AccountSession
+): ResumeResult {
+    val refreshed = refreshAccountSession(session)
+    saveAccountSession(context, refreshed)
+
+    val remote = fetchRemoteSnapshot(refreshed)
+    return if (remote != null) {
+        restoreLocalSnapshot(context, remote)
+        ResumeResult(refreshed, ResumeAction.RESTORED_REMOTE)
+    } else {
+        val synced = pushSnapshotToCloud(context, refreshed)
+        ResumeResult(synced, ResumeAction.PUSHED_LOCAL)
+    }
+}
+
+private suspend fun resumeCloudSync(
+    context: Context,
+    session: AccountSession
+): ResumeResult {
+    val refreshed = refreshAccountSession(session)
+    saveAccountSession(context, refreshed)
+
+    val lastSyncedAt = loadSyncMeta(context).lastSyncedAt
+    val localMutationAt = loadLocalMutationAt(context)
+    val remote = fetchRemoteSnapshot(refreshed)
+
+    return when {
+        remote != null && remote.updatedAtMs > lastSyncedAt && remote.updatedAtMs > localMutationAt -> {
+            restoreLocalSnapshot(context, remote)
+            ResumeResult(refreshed, ResumeAction.RESTORED_REMOTE)
+        }
+        localMutationAt > lastSyncedAt -> {
+            val synced = pushSnapshotToCloud(context, refreshed)
+            ResumeResult(synced, ResumeAction.PUSHED_LOCAL)
+        }
+        else -> ResumeResult(refreshed, ResumeAction.NONE)
+    }
+}
+
+private suspend fun restoreCloudDataNow(
+    context: Context,
+    session: AccountSession
+): AccountSession {
+    val refreshed = refreshAccountSession(session)
+    saveAccountSession(context, refreshed)
+    val remote = fetchRemoteSnapshot(refreshed)
+        ?: throw IllegalStateException("No cloud pantry data was found for this account yet.")
+    restoreLocalSnapshot(context, remote)
+    return refreshed
+}
+
+private suspend fun clearCredentialState(context: Context) {
+    try {
+        CredentialManager.create(context).clearCredentialState(ClearCredentialStateRequest())
+    } catch (_: ClearCredentialException) {
+    }
+}
+
+private suspend fun launchGoogleSignIn(context: Context): AccountSession {
+    check(isGoogleAccountConfigured()) {
+        "Google sign-in is not configured yet. Add GOOGLE_WEB_CLIENT_ID in local.properties and enable Google in Firebase Authentication."
+    }
+
+    val activity = context.findActivity()
+        ?: throw IllegalStateException("Google sign-in needs an activity context.")
+    val googleIdOption = GetGoogleIdOption.Builder()
+        .setServerClientId(BuildConfig.GOOGLE_WEB_CLIENT_ID)
+        .setFilterByAuthorizedAccounts(false)
+        .setAutoSelectEnabled(false)
+        .build()
+
+    val request = GetCredentialRequest.Builder()
+        .addCredentialOption(googleIdOption)
+        .build()
+
+    return try {
+        val result = CredentialManager.create(activity).getCredential(
+            context = activity,
+            request = request
+        )
+        val credential = result.credential
+        if (
+            credential is CustomCredential &&
+            credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
+        ) {
+            val googleCredential = GoogleIdTokenCredential.createFrom(credential.data)
+            exchangeGoogleIdToken(googleCredential.idToken)
+        } else {
+            throw IllegalStateException("Google sign-in did not return a Google account credential.")
+        }
+    } catch (_: GoogleIdTokenParsingException) {
+        throw IllegalStateException("Google sign-in returned an unreadable ID token.")
+    } catch (_: GetCredentialException) {
+        throw IllegalStateException("Google sign-in was cancelled or could not start.")
+    }
+}
+
+private tailrec fun Context.findActivity(): Activity? {
+    return when (this) {
+        is Activity -> this
+        is ContextWrapper -> baseContext.findActivity()
+        else -> null
+    }
+}
+
+@Composable
+fun AccountCloudSyncEffect(session: AccountSession?) {
+    val context = LocalContext.current.applicationContext
+    val scope = rememberCoroutineScope()
+
+    DisposableEffect(context, session?.uid, session?.refreshToken) {
+        if (session == null || !isCloudAccountConfigured()) {
+            onDispose {}
+        } else {
+            val foodPrefs = context.getSharedPreferences(ACCOUNT_FOOD_PREFS, Context.MODE_PRIVATE)
+            val themePrefs = context.getSharedPreferences(ACCOUNT_THEME_PREFS, Context.MODE_PRIVATE)
+            val notifPrefs = context.getSharedPreferences(ACCOUNT_NOTIF_PREFS, Context.MODE_PRIVATE)
+            var syncJob: Job? = null
+            var startJob: Job? = null
+
+            fun scheduleSync() {
+                syncJob?.cancel()
+                syncJob = scope.launch {
+                    delay(900)
+                    runCatching {
+                        pushSnapshotToCloud(context, loadAccountSession(context) ?: session)
+                    }.onFailure { failure ->
+                        saveLastSyncError(
+                            context,
+                            failure.message ?: "Cloud sync couldn't save your latest changes."
+                        )
+                    }
+                }
+            }
+
+            val foodListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+                if (
+                    key == ACCOUNT_FOOD_LIST_KEY ||
+                    key == ACCOUNT_HISTORY_LIST_KEY ||
+                    key == ACCOUNT_CATEGORIES_LIST_KEY ||
+                    key == ACCOUNT_BARCODE_CACHE_KEY
+                ) {
+                    markLocalMutation(context)
+                    scheduleSync()
+                }
+            }
+            val themeListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+                if (
+                    key == ACCOUNT_THEME_KEY ||
+                    key == ACCOUNT_COUNTDOWN_FORMAT_KEY
+                ) {
+                    markLocalMutation(context)
+                    scheduleSync()
+                }
+            }
+            val notifListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+                if (
+                    key == ACCOUNT_DAYS_BEFORE_KEY ||
+                    key == ACCOUNT_DAILY_ENABLED_KEY
+                ) {
+                    markLocalMutation(context)
+                    scheduleSync()
+                }
+            }
+
+            foodPrefs.registerOnSharedPreferenceChangeListener(foodListener)
+            themePrefs.registerOnSharedPreferenceChangeListener(themeListener)
+            notifPrefs.registerOnSharedPreferenceChangeListener(notifListener)
+
+            startJob = scope.launch {
+                runCatching {
+                    val result = resumeCloudSync(context, session)
+                    saveAccountSession(context, result.session)
+                    saveLastSyncError(context, null)
+                }.onFailure { failure ->
+                    if (failure.message?.contains("sign in again", ignoreCase = true) == true) {
+                        clearAccountSession(context)
+                    }
+                    saveLastSyncError(
+                        context,
+                        failure.message ?: "Cloud sync couldn't reconnect."
+                    )
+                }
+            }
+
+            onDispose {
+                foodPrefs.unregisterOnSharedPreferenceChangeListener(foodListener)
+                themePrefs.unregisterOnSharedPreferenceChangeListener(themeListener)
+                notifPrefs.unregisterOnSharedPreferenceChangeListener(notifListener)
+                syncJob?.cancel()
+                startJob?.cancel()
+            }
+        }
+    }
+}
+
+@Composable
+fun AccountSyncScreen(navController: NavHostController) {
+    val context = LocalContext.current
+    val appContext = context.applicationContext
+    val scope = rememberCoroutineScope()
+    val session = rememberAccountSessionPreference()
+    val syncMeta = rememberAccountSyncMeta()
+
+    var email by rememberSaveable { mutableStateOf("") }
+    var password by rememberSaveable { mutableStateOf("") }
+    var busyAction by rememberSaveable { mutableStateOf<String?>(null) }
+    var statusMessage by rememberSaveable { mutableStateOf<String?>(null) }
+    var showLogoutDialog by rememberSaveable { mutableStateOf(false) }
+
+    val canUseEmailPassword =
+        email.isNotBlank() &&
+                password.length >= 6 &&
+                busyAction == null &&
+                isCloudAccountConfigured()
+    val canUseGoogle = busyAction == null && isGoogleAccountConfigured()
+
+    ScaffoldWithTopBar(title = "Account", navController = navController) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            if (session == null) {
+                AccountIntroCard()
+
+                if (!isCloudAccountConfigured()) {
+                    AccountSetupCard()
+                }
+
+                MatchingPillCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    shadowElevation = 6.dp
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(18.dp)
+                    ) {
+                        Text(
+                            text = "Email + password",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            text = "Create an account or sign in so your pantry and settings can follow you to another device.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(14.dp))
+                        OutlinedTextField(
+                            value = email,
+                            onValueChange = { email = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            label = { Text("Email") },
+                            keyboardOptions = KeyboardOptions(
+                                keyboardType = KeyboardType.Email,
+                                imeAction = ImeAction.Next
+                            )
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        OutlinedTextField(
+                            value = password,
+                            onValueChange = { password = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            label = { Text("Password") },
+                            visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(
+                                keyboardType = KeyboardType.Password,
+                                imeAction = ImeAction.Done
+                            )
+                        )
+                        Spacer(Modifier.height(14.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Button(
+                                onClick = {
+                                    statusMessage = null
+                                    busyAction = "create"
+                                    scope.launch {
+                                        runCatching {
+                                            val signedIn = signUpWithEmailPassword(email.trim(), password)
+                                            val result = bootstrapSignedInAccount(appContext, signedIn)
+                                            saveAccountSession(appContext, result.session)
+                                            statusMessage = when (result.action) {
+                                                ResumeAction.RESTORED_REMOTE ->
+                                                    "Account created and your cloud pantry was restored."
+                                                ResumeAction.PUSHED_LOCAL,
+                                                ResumeAction.NONE ->
+                                                    "Account created and this device was connected to cloud sync."
+                                            }
+                                        }.onFailure { failure ->
+                                            statusMessage = failure.message
+                                        }
+                                        busyAction = null
+                                    }
+                                },
+                                enabled = canUseEmailPassword,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                ActionLabel(text = "Create", busy = busyAction == "create")
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    statusMessage = null
+                                    busyAction = "signin"
+                                    scope.launch {
+                                        runCatching {
+                                            val signedIn = signInWithEmailPassword(email.trim(), password)
+                                            val result = bootstrapSignedInAccount(appContext, signedIn)
+                                            saveAccountSession(appContext, result.session)
+                                            statusMessage = when (result.action) {
+                                                ResumeAction.RESTORED_REMOTE ->
+                                                    "Signed in and your cloud pantry was restored."
+                                                ResumeAction.PUSHED_LOCAL,
+                                                ResumeAction.NONE ->
+                                                    "Signed in and cloud sync is ready."
+                                            }
+                                        }.onFailure { failure ->
+                                            statusMessage = failure.message
+                                        }
+                                        busyAction = null
+                                    }
+                                },
+                                enabled = canUseEmailPassword,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                ActionLabel(text = "Sign in", busy = busyAction == "signin")
+                            }
+                        }
+                    }
+                }
+
+                MatchingPillCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    shadowElevation = 6.dp
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(18.dp)
+                    ) {
+                        Text(
+                            text = "Google sign-in",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            text = "Use your Google account instead of typing a password.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(14.dp))
+                        OutlinedButton(
+                            onClick = {
+                                statusMessage = null
+                                busyAction = "google"
+                                scope.launch {
+                                    runCatching {
+                                        val signedIn = launchGoogleSignIn(context)
+                                        val result = bootstrapSignedInAccount(appContext, signedIn)
+                                        saveAccountSession(appContext, result.session)
+                                        statusMessage = when (result.action) {
+                                            ResumeAction.RESTORED_REMOTE ->
+                                                "Google account connected and your cloud pantry was restored."
+                                            ResumeAction.PUSHED_LOCAL,
+                                            ResumeAction.NONE ->
+                                                "Google account connected and cloud sync is ready."
+                                        }
+                                    }.onFailure { failure ->
+                                        statusMessage = failure.message
+                                    }
+                                    busyAction = null
+                                }
+                            },
+                            enabled = canUseGoogle,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            ActionLabel(text = "Continue with Google", busy = busyAction == "google")
+                        }
+                    }
+                }
+            } else {
+                MatchingPillCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    shadowElevation = 7.dp
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(18.dp)
+                    ) {
+                        Text(
+                            text = session.displayName?.takeIf { it.isNotBlank() } ?: "Signed in",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            text = session.email,
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            text = when (session.provider) {
+                                AccountProvider.EMAIL -> "Email + password account"
+                                AccountProvider.GOOGLE -> "Google account"
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(14.dp))
+                        Text(
+                            text = "This account syncs your pantry, history, categories, theme, countdown format, and notification settings.",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        syncMeta.lastSyncedAt.takeIf { it > 0L }?.let {
+                            Spacer(Modifier.height(12.dp))
+                            Text(
+                                text = "Last synced ${formatSyncTime(it)}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+
+                MatchingPillCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    shadowElevation = 6.dp
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(18.dp)
+                    ) {
+                        Text(
+                            text = "Account actions",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(Modifier.height(14.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Button(
+                                onClick = {
+                                    statusMessage = null
+                                    busyAction = "sync"
+                                    scope.launch {
+                                        runCatching {
+                                            val synced = pushSnapshotToCloud(appContext, session)
+                                            saveAccountSession(appContext, synced)
+                                            statusMessage = "Your latest pantry changes were saved to the cloud."
+                                        }.onFailure { failure ->
+                                            statusMessage = failure.message
+                                        }
+                                        busyAction = null
+                                    }
+                                },
+                                enabled = busyAction == null,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                ActionLabel(text = "Sync now", busy = busyAction == "sync")
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    statusMessage = null
+                                    busyAction = "restore"
+                                    scope.launch {
+                                        runCatching {
+                                            val refreshed = restoreCloudDataNow(appContext, session)
+                                            saveAccountSession(appContext, refreshed)
+                                            statusMessage = "Cloud pantry data was restored to this device."
+                                        }.onFailure { failure ->
+                                            statusMessage = failure.message
+                                        }
+                                        busyAction = null
+                                    }
+                                },
+                                enabled = busyAction == null,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                ActionLabel(text = "Restore cloud", busy = busyAction == "restore")
+                            }
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        TextButton(
+                            onClick = { showLogoutDialog = true },
+                            enabled = busyAction == null,
+                            modifier = Modifier.align(Alignment.End)
+                        ) {
+                            Text("Log out")
+                        }
+                    }
+                }
+            }
+
+            statusMessage?.takeIf { it.isNotBlank() }?.let { message ->
+                MatchingPillCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    shadowElevation = 5.dp
+                ) {
+                    Text(
+                        text = message,
+                        modifier = Modifier.padding(16.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (
+                            message.contains("failed", ignoreCase = true) ||
+                            message.contains("couldn't", ignoreCase = true) ||
+                            message.contains("not configured", ignoreCase = true)
+                        ) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        }
+                    )
+                }
+            }
+
+            syncMeta.lastError?.takeIf { it.isNotBlank() }?.let { error ->
+                MatchingPillCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    shadowElevation = 5.dp
+                ) {
+                    Text(
+                        text = error,
+                        modifier = Modifier.padding(16.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(110.dp))
+        }
+    }
+
+    if (showLogoutDialog && session != null) {
+        AlertDialog(
+            onDismissRequest = { showLogoutDialog = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showLogoutDialog = false
+                        busyAction = "logout"
+                        scope.launch {
+                            clearCredentialState(appContext)
+                            clearAccountSession(appContext)
+                            statusMessage = "You were logged out on this device."
+                            busyAction = null
+                        }
+                    }
+                ) {
+                    Text("Log out")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showLogoutDialog = false }) {
+                    Text("Cancel")
+                }
+            },
+            title = { Text("Log out?") },
+            text = {
+                Text("Your cloud data stays in the account. This only signs this device out.")
+            }
+        )
+    }
+}
+
+@Composable
+private fun AccountIntroCard() {
+    MatchingPillCard(
+        modifier = Modifier.fillMaxWidth(),
+        shadowElevation = 7.dp
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(18.dp)
+        ) {
+            Text(
+                text = "Sync across devices",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = "Sign in once and keep your pantry, history, categories, and settings together when you move to another phone.",
+                style = MaterialTheme.typography.bodyLarge
+            )
+        }
+    }
+}
+
+@Composable
+private fun AccountSetupCard() {
+    MatchingPillCard(
+        modifier = Modifier.fillMaxWidth(),
+        shadowElevation = 6.dp
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(18.dp)
+        ) {
+            Text(
+                text = "Cloud setup still needed",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = "This build still needs Firebase values in local.properties to turn accounts on: FIREBASE_API_KEY, FIREBASE_PROJECT_ID, and GOOGLE_WEB_CLIENT_ID.",
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = "You’ll also need Email/Password and Google enabled in Firebase Authentication, plus Firestore rules for users/{uid}.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun ActionLabel(
+    text: String,
+    busy: Boolean
+) {
+    if (busy) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            CircularProgressIndicator(
+                modifier = Modifier
+                    .width(16.dp)
+                    .height(16.dp),
+                strokeWidth = 2.dp
+            )
+            Text(text)
+        }
+    } else {
+        Text(text)
+    }
+}
+
+@Composable
+private fun ScaffoldWithTopBar(
+    title: String,
+    navController: NavHostController,
+    content: @Composable () -> Unit
+) {
+    androidx.compose.material3.Scaffold(
+        containerColor = Color.Transparent,
+        topBar = {
+            SlimTopBar(
+                title = title,
+                onBack = { navController.popBackStack() }
+            )
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+        ) {
+            content()
+        }
+    }
+}
+
+private fun formatSyncTime(timestampMs: Long): String {
+    val formatter = DateTimeFormatter.ofPattern("d MMM, h:mm a", Locale.getDefault())
+    return formatter.format(
+        Instant.ofEpochMilli(timestampMs)
+            .atZone(ZoneId.systemDefault())
+            .toLocalDateTime()
+    )
+}

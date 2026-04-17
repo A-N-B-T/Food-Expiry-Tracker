@@ -95,6 +95,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Category
@@ -103,19 +104,25 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Help
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Home
-import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -144,6 +151,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -164,6 +172,9 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -190,6 +201,8 @@ import androidx.core.content.edit
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -231,8 +244,10 @@ import kotlin.math.roundToInt
 
 private const val THEME_PREFS = "app_settings"
 private const val THEME_KEY = "theme_mode"
+private const val COUNTDOWN_FORMAT_KEY = "countdown_format"
 
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
+enum class CountdownFormat { DAYS_ONLY, MONTHS_AND_DAYS, YEARS_MONTHS_DAYS }
 
 enum class SelectionPurpose { DELETE, CATEGORY }
 
@@ -294,6 +309,65 @@ fun saveThemeMode(context: Context, mode: ThemeMode) {
     val prefs = context.applicationContext.getSharedPreferences(THEME_PREFS,
         Context.MODE_PRIVATE)
     prefs.edit().putString(THEME_KEY, mode.name).apply()
+}
+
+fun loadCountdownFormat(context: Context): CountdownFormat {
+    val prefs = context.applicationContext.getSharedPreferences(THEME_PREFS, Context.MODE_PRIVATE)
+    val raw = prefs.getString(COUNTDOWN_FORMAT_KEY, CountdownFormat.DAYS_ONLY.name)
+        ?: CountdownFormat.DAYS_ONLY.name
+
+    return when (raw.lowercase(Locale.ROOT)) {
+        "days_only" -> CountdownFormat.DAYS_ONLY
+        "months_and_days" -> CountdownFormat.MONTHS_AND_DAYS
+        "years_months_days" -> CountdownFormat.YEARS_MONTHS_DAYS
+        else -> runCatching { CountdownFormat.valueOf(raw) }
+            .getOrDefault(CountdownFormat.DAYS_ONLY)
+    }
+}
+
+fun saveCountdownFormat(context: Context, format: CountdownFormat) {
+    val prefs = context.applicationContext.getSharedPreferences(THEME_PREFS, Context.MODE_PRIVATE)
+    prefs.edit().putString(COUNTDOWN_FORMAT_KEY, format.name).apply()
+}
+
+private fun countdownFormatLabel(format: CountdownFormat): String {
+    return when (format) {
+        CountdownFormat.DAYS_ONLY -> "Days only"
+        CountdownFormat.MONTHS_AND_DAYS -> "Months + days"
+        CountdownFormat.YEARS_MONTHS_DAYS -> "Years + months + days"
+    }
+}
+
+private fun countdownFormatDescription(format: CountdownFormat): String {
+    return when (format) {
+        CountdownFormat.DAYS_ONLY -> "Show the full day count, like 60 days left."
+        CountdownFormat.MONTHS_AND_DAYS -> "Show a shorter format like 2m or 2m 5d."
+        CountdownFormat.YEARS_MONTHS_DAYS -> "Show longer countdowns like 2y 3m 7d."
+    }
+}
+
+@Composable
+private fun rememberCountdownFormatPreference(): CountdownFormat {
+    val context = LocalContext.current
+    val appCtx = context.applicationContext
+    val prefs = remember(appCtx) {
+        appCtx.getSharedPreferences(THEME_PREFS, Context.MODE_PRIVATE)
+    }
+    var countdownFormat by remember { mutableStateOf(loadCountdownFormat(appCtx)) }
+
+    DisposableEffect(prefs, appCtx) {
+        val listener =
+            android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+                if (key == COUNTDOWN_FORMAT_KEY) {
+                    countdownFormat = loadCountdownFormat(appCtx)
+                }
+            }
+
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        onDispose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+
+    return countdownFormat
 }
 
 private enum class GlassTone { CHROME, CARD, SEARCH, ACCENT }
@@ -579,7 +653,7 @@ private fun BlackGlassCard(
 }
 
 @Composable
-private fun MatchingPillCard(
+fun MatchingPillCard(
     modifier: Modifier = Modifier,
     shape: Shape = RoundedCornerShape(25.dp),
     shadowElevation: Dp = 6.dp,
@@ -1137,6 +1211,54 @@ private data class HistoryEntry(
     val name: String,
     val lastUsedAt: Long = System.currentTimeMillis()
 )
+
+private data class ExpiringFoodHint(
+    val name: String,
+    val daysLeft: Int
+)
+
+private enum class RecipeChatRole { USER, ASSISTANT }
+
+private data class RecipeChatMessage(
+    val role: RecipeChatRole,
+    val text: String,
+    val resolvedIngredients: List<String> = emptyList(),
+    val recipes: List<RecipeSuggestion> = emptyList(),
+    val isError: Boolean = false
+)
+
+private class RecipeScreenSessionState {
+    var expiringPromptDismissed by mutableStateOf(false)
+    var messagesJson by mutableStateOf("[]")
+    var previousIngredientsJson by mutableStateOf("[]")
+    var conversationId by mutableStateOf("recipe-session-${System.currentTimeMillis()}")
+}
+
+private val RecipeScreenSessionStateSaver = listSaver<RecipeScreenSessionState, String>(
+    save = { state ->
+        listOf(
+            state.expiringPromptDismissed.toString(),
+            state.messagesJson,
+            state.previousIngredientsJson,
+            state.conversationId
+        )
+    },
+    restore = { saved ->
+        RecipeScreenSessionState().apply {
+            expiringPromptDismissed = saved.getOrNull(0)?.toBooleanStrictOrNull() ?: false
+            messagesJson = saved.getOrNull(1) ?: "[]"
+            previousIngredientsJson = saved.getOrNull(2) ?: "[]"
+            conversationId = saved.getOrNull(3) ?: "recipe-session-${System.currentTimeMillis()}"
+        }
+    }
+)
+
+@Composable
+private fun rememberRecipeScreenSessionState(): RecipeScreenSessionState {
+    return rememberSaveable(saver = RecipeScreenSessionStateSaver) {
+        RecipeScreenSessionState()
+    }
+}
 
 private const val FOOD_PREFS = "food_prefs"
 private const val FOOD_LIST_KEY = "food_list"
@@ -2064,6 +2186,54 @@ private fun countdownTextColor(background: Color): Color {
     return if (background.luminance() > 0.58f) Color.Black else Color.White
 }
 
+private fun compactCountdownText(
+    daysLeft: Int,
+    format: CountdownFormat
+): String {
+    if (daysLeft <= 0) return "0d"
+
+    fun compactParts(years: Int = 0, months: Int = 0, days: Int = 0): String {
+        val parts = buildList {
+            if (years > 0) add("${years}y")
+            if (months > 0) add("${months}m")
+            if (days > 0) add("${days}d")
+        }
+
+        return if (parts.isNotEmpty()) parts.joinToString(" ") else "0d"
+    }
+
+    return when (format) {
+        CountdownFormat.DAYS_ONLY ->
+            if (daysLeft == 1) "1 day left" else "$daysLeft days left"
+
+        CountdownFormat.MONTHS_AND_DAYS -> {
+            val months = daysLeft / 30
+            val days = daysLeft % 30
+            compactParts(months = months, days = days)
+        }
+
+        CountdownFormat.YEARS_MONTHS_DAYS -> {
+            val years = daysLeft / 365
+            val afterYears = daysLeft % 365
+            val months = afterYears / 30
+            val days = afterYears % 30
+            compactParts(years = years, months = months, days = days)
+        }
+    }
+}
+
+private fun countdownText(
+    daysLeft: Int?,
+    format: CountdownFormat
+): String {
+    return when {
+        daysLeft == null -> "--"
+        daysLeft < 0 -> "Expired"
+        daysLeft == 0 -> "Expires Today"
+        else -> compactCountdownText(daysLeft, format)
+    }
+}
+
 private fun countdownStyle(daysLeft: Int?): CountdownStyle {
     val bg = when {
         daysLeft == null -> Color(0xFF9CA8B7)
@@ -2083,16 +2253,15 @@ private fun countdownStyle(daysLeft: Int?): CountdownStyle {
 }
 
 @Composable
-private fun ExpiryCountdownBadge(expiry: String) {
+private fun ExpiryCountdownBadge(
+    expiry: String,
+    countdownFormat: CountdownFormat
+) {
     val daysLeft = remember(expiry) { daysUntil(expiry) }
     val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
 
-    val text = when {
-        daysLeft == null -> "--"
-        daysLeft < 0 -> "Expired"
-        daysLeft == 0 -> "Expires Today"
-        daysLeft == 1 -> "1 day left"
-        else -> "$daysLeft days left"
+    val text = remember(daysLeft, countdownFormat) {
+        countdownText(daysLeft, countdownFormat)
     }
 
     val style = remember(daysLeft) { countdownStyle(daysLeft) }
@@ -3420,15 +3589,24 @@ private val bottomBarItems = listOf(
         unselectedIcon = Icons.Outlined.AutoAwesome
     ),
     BottomBarItem(
-        route = Route.Settings.r,
-        label = "Settings",
-        selectedIcon = Icons.Filled.Settings,
-        unselectedIcon = Icons.Outlined.Settings
+        route = Route.Profile.r,
+        label = "Profile",
+        selectedIcon = Icons.Filled.Person,
+        unselectedIcon = Icons.Outlined.Person
     )
 )
 
+private fun bottomBarSelectedRoute(route: String?): String? {
+    return when {
+        route == null -> null
+        route.startsWith(Route.Profile.r) -> Route.Profile.r
+        else -> route
+    }
+}
+
 private fun bottomBarRouteIndex(route: String?): Int {
-    val currentIndex = bottomBarItems.indexOfFirst { it.route == route }
+    val selectedRoute = bottomBarSelectedRoute(route)
+    val currentIndex = bottomBarItems.indexOfFirst { it.route == selectedRoute }
     if (currentIndex >= 0) return currentIndex
 
     val homeIndex = bottomBarItems.indexOfFirst { it.route == Route.Home.r }
@@ -3442,6 +3620,8 @@ fun AppNav(
     onThemeChange: (ThemeMode) -> Unit
 ) {
     val navController = rememberNavController()
+    val accountSession = rememberAccountSessionPreference()
+    val recipeScreenSessionState = rememberRecipeScreenSessionState()
     val backStack by navController.currentBackStackEntryAsState()
     val current = backStack?.destination?.route
     var showForm by rememberSaveable { mutableStateOf(false) }
@@ -3450,6 +3630,7 @@ fun AppNav(
     val layoutDir = LocalLayoutDirection.current
 
     AskNotificationPermissionOnFirstLaunch()
+    AccountCloudSyncEffect(accountSession)
 
     Scaffold(
         modifier = Modifier.blurWhen(if (showForm || blurBackgroundForOverlay) 16.dp else 0.dp),
@@ -3507,13 +3688,22 @@ fun AppNav(
                 )
             }
 
+            composable(Route.Profile.r) { ProfileScreen(navController) }
+            composable(Route.Account.r) { AccountScreen(navController) }
             composable(Route.Settings.r) { SettingsScreen(navController) }
+            composable(Route.About.r) { AboutScreen(navController) }
+            composable(Route.Help.r) { HelpScreen(navController) }
+            composable(Route.Privacy.r) { PrivacyScreen(navController) }
             composable(Route.History.r) {
                 HistoryScreen(
                     onOverlayVisibilityChange = { blurBackgroundForOverlay = it }
                 )
             }
-            composable(Route.Recipe.r) { RecipeScreen() }
+            composable(Route.Recipe.r) {
+                RecipeScreen(
+                    sessionState = recipeScreenSessionState
+                )
+            }
 
             composable(Route.Theme.r) {
                 ThemeScreen(
@@ -3521,6 +3711,10 @@ fun AppNav(
                     currentMode = themeMode,
                     onModeChange = onThemeChange
                 )
+            }
+
+            composable(Route.CountdownFormat.r) {
+                CountdownFormatScreen(navController)
             }
 
             composable(Route.Notifications.r) {
@@ -3536,6 +3730,7 @@ fun HistoryScreen(
     onOverlayVisibilityChange: (Boolean) -> Unit
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val prefs = remember { context.getSharedPreferences(FOOD_PREFS, Context.MODE_PRIVATE) }
     val gson = remember { Gson() }
     val density = LocalDensity.current
@@ -3604,6 +3799,17 @@ fun HistoryScreen(
 
     SideEffect {
         onOverlayVisibilityChange(shouldBlurBackground)
+    }
+
+    DisposableEffect(lifecycleOwner, showSearchBar) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME && !showSearchBar) {
+                searchFabVisible = true
+            }
+        }
+
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     DisposableEffect(Unit) {
@@ -3780,7 +3986,7 @@ fun HistoryScreen(
                             state = listState,
                             modifier = Modifier.fillMaxSize(),
                             overscrollEffect = null,
-                            contentPadding = PaddingValues(bottom = 80.dp + historyScrollRunway)
+                            contentPadding = PaddingValues(bottom = 45.dp + historyScrollRunway)
                         ) {
                             items(
                                 items = filtered,
@@ -3991,6 +4197,7 @@ fun HistoryScreen(
 private fun PantryFoodCard(
     modifier: Modifier = Modifier,
     food: FoodItem,
+    countdownFormat: CountdownFormat,
     isSelecting: Boolean,
     isSelected: Boolean,
     onSelectionChange: (Boolean) -> Unit,
@@ -4208,7 +4415,10 @@ private fun PantryFoodCard(
                         Spacer(modifier = Modifier.width(10.dp))
 
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            ExpiryCountdownBadge(food.expiry)
+                            ExpiryCountdownBadge(
+                                expiry = food.expiry,
+                                countdownFormat = countdownFormat
+                            )
 
                             Spacer(modifier = Modifier.width(checkboxGapWidth))
 
@@ -4388,48 +4598,855 @@ private fun HistoryFoodCard(
     }
 }
 
-@Composable
-fun RecipeScreen() {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        contentAlignment = Alignment.Center
+private fun loadRecipeChatMessages(
+    gson: Gson,
+    json: String
+): List<RecipeChatMessage> {
+    if (json.isBlank()) return emptyList()
+    val type = object : TypeToken<List<RecipeChatMessage>>() {}.type
+    return runCatching {
+        gson.fromJson<List<RecipeChatMessage>>(json, type)
+    }.getOrDefault(emptyList())
+}
+
+private fun loadRecipeIngredientContext(
+    gson: Gson,
+    json: String
+): List<String> {
+    if (json.isBlank()) return emptyList()
+    val type = object : TypeToken<List<String>>() {}.type
+    return runCatching {
+        gson.fromJson<List<String>>(json, type)
+    }.getOrDefault(emptyList())
+}
+
+private fun compactIngredientSummary(
+    items: List<String>,
+    maxVisible: Int = 4
+): String {
+    val cleaned = items
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+
+    if (cleaned.isEmpty()) return ""
+
+    val visible = cleaned.take(maxVisible)
+    val hiddenCount = cleaned.size - visible.size
+
+    return buildString {
+        append(visible.joinToString(", "))
+        if (hiddenCount > 0) {
+            append(", +$hiddenCount more")
+        }
+    }
+}
+
+private fun expiringFoodLabel(daysLeft: Int): String {
+    return when (daysLeft) {
+        0 -> "today"
+        1 -> "in 1 day"
+        else -> "in $daysLeft days"
+    }
+}
+
+private fun expiringFoodSummary(
+    items: List<ExpiringFoodHint>,
+    maxVisible: Int = 4
+): String {
+    if (items.isEmpty()) return ""
+
+    val visible = items.take(maxVisible)
+    val hiddenCount = items.size - visible.size
+
+    return buildString {
+        append(
+            visible.joinToString(" • ") { food ->
+                "${food.name} ${expiringFoodLabel(food.daysLeft)}"
+            }
+        )
+        if (hiddenCount > 0) {
+            append(" • +$hiddenCount more")
+        }
+    }
+}
+
+private fun buildRecipeAssistantMessage(batch: RecipeSuggestionBatch): RecipeChatMessage {
+    val ingredientSummary = compactIngredientSummary(batch.resolvedIngredients)
+    val headline = when {
+        batch.recipes.isEmpty() && ingredientSummary.isNotBlank() ->
+            "I couldn't find strong recipe cards using $ingredientSummary yet."
+
+        batch.recipes.isEmpty() ->
+            "I couldn't find recipe cards right now."
+
+        ingredientSummary.isNotBlank() ->
+            "Recipe ideas using $ingredientSummary"
+
+        else -> "Recipe ideas"
+    }
+
+    return RecipeChatMessage(
+        role = RecipeChatRole.ASSISTANT,
+        text = headline,
+        resolvedIngredients = batch.resolvedIngredients,
+        recipes = batch.recipes
+    )
+}
+
+private fun looksFoodRelatedRecipeRequest(
+    request: String,
+    pantryIngredients: List<String>
+): Boolean {
+    val normalized = request.trim().lowercase(Locale.US)
+    if (normalized.isBlank()) return false
+
+    val foodKeywords = listOf(
+        "recipe", "recipes", "cook", "cooking", "meal", "meals", "ingredient",
+        "ingredients", "food", "foods", "eat", "eating", "breakfast", "lunch",
+        "dinner", "snack", "dessert", "bake", "baking", "fry", "fried", "boil",
+        "grill", "roast", "salad", "soup", "sandwich", "wrap", "pasta", "rice",
+        "egg", "eggs", "chicken", "beef", "fish", "vegetable", "veggie", "fruit",
+        "bread", "milk", "cheese", "sauce", "spice", "pantry", "expiry",
+        "expiring", "expire", "expired", "use up", "make with", "what can i make"
+    )
+
+    if (foodKeywords.any(normalized::contains)) return true
+
+    val pantryTokens = pantryIngredients
+        .flatMap { ingredient ->
+            ingredient.lowercase(Locale.US).split(Regex("[^a-z0-9]+"))
+        }
+        .filter { it.length >= 3 }
+        .distinct()
+
+    if (pantryTokens.any { token ->
+            Regex("\\b${Regex.escape(token)}\\b").containsMatchIn(normalized)
+        }
     ) {
-        GlassSurface(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(30.dp),
-            tone = GlassTone.CARD,
-            shadowElevation = 14.dp
+        return true
+    }
+
+    val ingredientLikeSegments = normalized
+        .split(Regex("[,\\n/&+]+"))
+        .map { it.trim() }
+        .count { segment ->
+            val tokenCount = segment
+                .split(Regex("\\s+"))
+                .count { token -> token.length >= 3 }
+            tokenCount in 1..4
+        }
+
+    return ingredientLikeSegments >= 2
+}
+
+private fun recipePromptPlaceholder(): String {
+    return "Give me any ingredients, like eggs and rice."
+}
+
+private fun buildExpiringFoodsRequest(expiringFoods: List<ExpiringFoodHint>): String {
+    return "Give me recipe ideas using these foods that expire soon: ${
+        expiringFoods.joinToString(", ") { it.name }
+    }."
+}
+
+@Composable
+private fun ExpiringFoodsPromptCard(
+    foods: List<ExpiringFoodHint>,
+    windowDays: Int,
+    isLoading: Boolean,
+    onUseExpiringFoods: () -> Unit
+) {
+    MatchingPillCard(
+        modifier = Modifier.fillMaxWidth(),
+        shadowElevation = 4.dp
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
+            Text(
+                text = "Foods expiring soon",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = expiringFoodSummary(foods, maxVisible = 5),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(12.dp))
+            Button(
+                onClick = onUseExpiringFoods,
+                enabled = !isLoading,
+                shape = RoundedCornerShape(24.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Default.AutoAwesome,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(28.dp)
-                )
+                Text("Use Expiring Foods")
+            }
+        }
+    }
+}
 
-                Spacer(Modifier.height(12.dp))
+@Composable
+private fun RecipeIntroCard(hasPantryFoods: Boolean) {
+    MatchingPillCard(
+        modifier = Modifier.fillMaxWidth(),
+        shadowElevation = 4.dp
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
+            Text(
+                text = "Food AI",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = if (hasPantryFoods) {
+                    "Tell me your ingredients and I will turn them into recipe cards."
+                } else {
+                    "Add foods in Home, then ask for recipes with your ingredients."
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
 
+@Composable
+private fun RecipeUserMessageCard(text: String) {
+    MatchingPillCard(
+        modifier = Modifier.fillMaxWidth(),
+        shadowElevation = 3.dp
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
+            Text(
+                text = "You",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodyLarge
+            )
+        }
+    }
+}
+
+@Composable
+private fun RecipeSuggestionCard(recipe: RecipeSuggestion) {
+    ExactFrostedPillCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(22.dp),
+        shadowElevation = 2.dp
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp)
+        ) {
+            Text(
+                text = recipe.title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+
+            val usesLine = compactIngredientSummary(recipe.usedIngredients, maxVisible = 5)
+            if (usesLine.isNotBlank()) {
+                Spacer(Modifier.height(8.dp))
                 Text(
-                    text = "AI Recipes",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.SemiBold
+                    text = "Uses: $usesLine",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface
                 )
+            }
 
-                Spacer(Modifier.height(6.dp))
-
+            val addLine = compactIngredientSummary(recipe.missedIngredients, maxVisible = 3)
+            if (addLine.isNotBlank()) {
+                Spacer(Modifier.height(4.dp))
                 Text(
-                    text = "Recipe ideas and food suggestions will live here.",
-                    style = MaterialTheme.typography.bodyMedium,
+                    text = "Add: $addLine",
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+            }
+
+            if (recipe.quickGuide.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = "How:",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(Modifier.height(4.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    recipe.quickGuide.forEachIndexed { index, step ->
+                        Text(
+                            text = "${index + 1}. $step",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecipeAssistantMessageCard(message: RecipeChatMessage) {
+    MatchingPillCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .animateContentSize(),
+        shadowElevation = 4.dp
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
+            Text(
+                text = "Food AI",
+                style = MaterialTheme.typography.labelLarge,
+                color = if (message.isError) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.primary
+                },
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = message.text,
+                style = MaterialTheme.typography.bodyLarge,
+                color = if (message.isError) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.onSurface
+                }
+            )
+
+            if (message.recipes.isNotEmpty()) {
+                Spacer(Modifier.height(12.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    message.recipes.forEach { recipe ->
+                        RecipeSuggestionCard(recipe)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecipeLoadingCard() {
+    MatchingPillCard(
+        modifier = Modifier.fillMaxWidth(),
+        shadowElevation = 3.dp
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(18.dp),
+                strokeWidth = 2.dp
+            )
+            Spacer(Modifier.width(12.dp))
+            Text(
+                text = "Food AI is building recipe cards...",
+                style = MaterialTheme.typography.bodyLarge
+            )
+        }
+    }
+}
+
+@Composable
+private fun RecipePromptBar(
+    value: String,
+    placeholder: String,
+    isLoading: Boolean,
+    onValueChange: (String) -> Unit,
+    onSend: () -> Unit
+) {
+    val scheme = MaterialTheme.colorScheme
+    val isDarkTheme = scheme.background.luminance() < 0.5f
+    val barContainerColor =
+        if (isDarkTheme) {
+            scheme.surfaceContainerHighest.copy(alpha = 0.97f)
+        } else {
+            Color.White.copy(alpha = 0.985f)
+        }
+    val barBorderColor =
+        scheme.outlineVariant.copy(alpha = if (isDarkTheme) 0.90f else 0.76f)
+    val sendEnabled = value.trim().isNotBlank() && !isLoading
+    val sendButtonShape = RoundedCornerShape(50.dp)
+    val sendButtonContainerColor =
+        if (sendEnabled) {
+            scheme.primary.copy(alpha = if (isDarkTheme) 0.82f else 0.68f)
+        } else {
+            scheme.onSurface.copy(alpha = if (isDarkTheme) 0.12f else 0.08f)
+        }
+    val sendButtonContentColor =
+        if (sendEnabled) {
+            scheme.onPrimary
+        } else {
+            scheme.onSurfaceVariant.copy(alpha = 0.72f)
+        }
+
+    GlassSurface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(34.dp),
+        tone = GlassTone.CHROME,
+        containerColor = barContainerColor,
+        borderColor = barBorderColor,
+        showDecorativeOverlays = false,
+        shadowElevation = 16.dp
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Default.AutoAwesome,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(18.dp)
+            )
+
+            Spacer(Modifier.width(8.dp))
+
+            Box(modifier = Modifier.weight(1f)) {
+                if (value.isBlank()) {
+                    Text(
+                        text = placeholder,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                BasicTextField(
+                    value = value,
+                    onValueChange = { if (it.length <= 220) onValueChange(it) },
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(
+                        color = MaterialTheme.colorScheme.onSurface
+                    ),
+                    keyboardOptions = KeyboardOptions(
+                        imeAction = ImeAction.Send,
+                        capitalization = KeyboardCapitalization.Sentences
+                    ),
+                    keyboardActions = KeyboardActions(
+                        onSend = { onSend() }
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+
+            Spacer(Modifier.width(8.dp))
+
+            Box(
+                modifier = Modifier
+                    .height(34.dp)
+                    .width(42.dp)
+                    .clip(sendButtonShape)
+                    .background(sendButtonContainerColor)
+                    .clickable(enabled = sendEnabled, onClick = onSend),
+                contentAlignment = Alignment.Center
+            ) {
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(14.dp),
+                        strokeWidth = 2.dp,
+                        color = sendButtonContentColor
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                        contentDescription = "Send recipe request",
+                        tint = sendButtonContentColor,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecipeScreen(
+    sessionState: RecipeScreenSessionState
+) {
+    val context = LocalContext.current
+    val appCtx = context.applicationContext
+    val density = LocalDensity.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val gson = remember { Gson() }
+    val sharedPrefs = remember(appCtx) {
+        appCtx.getSharedPreferences(FOOD_PREFS, Context.MODE_PRIVATE)
+    }
+    val notifPrefs = remember(appCtx) {
+        appCtx.getSharedPreferences(NOTIF_PREFS, Context.MODE_PRIVATE)
+    }
+    val scope = rememberCoroutineScope()
+    val keyboard = LocalSoftwareKeyboardController.current
+    val listState = rememberLazyListState()
+    val animatedImeShiftPx = rememberAnimatedImeShiftPx(label = "recipeAiImeShift")
+
+    val pantryFoods = remember {
+        mutableStateListOf<FoodItem>().apply {
+            addAll(loadFoodList(sharedPrefs, gson))
+        }
+    }
+
+    var soonExpiryWindowDays by remember {
+        mutableIntStateOf(
+            notifPrefs.getInt(DAYS_BEFORE_KEY, 3)
+                .coerceIn(MIN_DAYS_BEFORE_REMINDER, MAX_DAYS_BEFORE_REMINDER)
+        )
+    }
+    var promptText by rememberSaveable { mutableStateOf("") }
+    var isLoading by rememberSaveable { mutableStateOf(false) }
+    var promptBarVisible by rememberSaveable { mutableStateOf(true) }
+    val expiringPromptDismissed = sessionState.expiringPromptDismissed
+    val messagesJson = sessionState.messagesJson
+    val previousIngredientsJson = sessionState.previousIngredientsJson
+    val conversationId = sessionState.conversationId
+    val isRecipeKeyboardVisible = WindowInsets.ime.getBottom(density) > 0
+
+    val messages = remember(messagesJson) {
+        loadRecipeChatMessages(gson, messagesJson)
+    }
+    val previousIngredients = remember(previousIngredientsJson) {
+        loadRecipeIngredientContext(gson, previousIngredientsJson)
+    }
+    val pantryIngredientNames by remember {
+        derivedStateOf { pantryFoods.map { it.name } }
+    }
+    val soonExpiringFoods by remember(pantryFoods, soonExpiryWindowDays) {
+        derivedStateOf {
+            pantryFoods
+                .mapNotNull { food ->
+                    val daysLeft = daysUntil(food.expiry)
+                    if (daysLeft != null && daysLeft in 0..soonExpiryWindowDays) {
+                        ExpiringFoodHint(food.name, daysLeft)
+                    } else {
+                        null
+                    }
+                }
+                .sortedWith(
+                    compareBy<ExpiringFoodHint>({ it.daysLeft }, { it.name.lowercase(Locale.US) })
+                )
+                .take(8)
+        }
+    }
+    val showExpiringPrompt = soonExpiringFoods.isNotEmpty() && !expiringPromptDismissed
+    val totalVisibleItems =
+        (if (showExpiringPrompt) 1 else 0) +
+        (if (messages.isEmpty()) 1 else 0) +
+        messages.size +
+        (if (isLoading) 1 else 0)
+    val isPromptBarDocked = promptBarVisible || isRecipeKeyboardVisible
+    val recipeListBottomPadding by animateDpAsState(
+        targetValue = if (isPromptBarDocked) 138.dp else 96.dp,
+        animationSpec = tween(
+            durationMillis = if (isPromptBarDocked) 320 else 260,
+            easing = if (isPromptBarDocked) LinearOutSlowInEasing else FastOutSlowInEasing
+        ),
+        label = "recipeListBottomPadding"
+    )
+
+    DisposableEffect(sharedPrefs, gson) {
+        val listener =
+            android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+                if (key == FOOD_LIST_KEY) {
+                    replaceListContentsIfChanged(pantryFoods, loadFoodList(sharedPrefs, gson))
+                }
+            }
+
+        sharedPrefs.registerOnSharedPreferenceChangeListener(listener)
+        onDispose { sharedPrefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+
+    DisposableEffect(notifPrefs) {
+        val listener =
+            android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+                if (key == DAYS_BEFORE_KEY) {
+                    soonExpiryWindowDays = notifPrefs.getInt(DAYS_BEFORE_KEY, 3)
+                        .coerceIn(MIN_DAYS_BEFORE_REMINDER, MAX_DAYS_BEFORE_REMINDER)
+                }
+            }
+
+        notifPrefs.registerOnSharedPreferenceChangeListener(listener)
+        onDispose { notifPrefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                promptBarVisible = true
+            }
+        }
+
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    LaunchedEffect(totalVisibleItems, messagesJson, isLoading) {
+        if (messages.isNotEmpty() || isLoading) {
+            listState.animateScrollToItem((totalVisibleItems - 1).coerceAtLeast(0))
+            promptBarVisible = true
+        }
+    }
+
+    LaunchedEffect(listState) {
+        snapshotFlow {
+            listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
+        }.collect { isAtTop ->
+            if (isAtTop) {
+                promptBarVisible = true
+            }
+        }
+    }
+
+    fun updatePromptBarVisibilityFromScroll(deltaY: Float, source: NestedScrollSource) {
+        if (source == NestedScrollSource.SideEffect || isRecipeKeyboardVisible || deltaY == 0f) {
+            return
+        }
+
+        val isAtTop = listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
+        if (isAtTop) {
+            promptBarVisible = true
+            return
+        }
+
+        when {
+            deltaY < 0f && promptBarVisible -> {
+                promptBarVisible = false
+            }
+
+            deltaY > 0f && !promptBarVisible -> {
+                promptBarVisible = true
+            }
+        }
+    }
+
+    val promptBarNestedScrollConnection = remember(listState, isRecipeKeyboardVisible) {
+        object : NestedScrollConnection {
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource
+            ): Offset {
+                val deltaY = if (consumed.y != 0f) consumed.y else available.y
+                updatePromptBarVisibilityFromScroll(deltaY, source)
+                return Offset.Zero
+            }
+        }
+    }
+
+    fun persistMessages(updated: List<RecipeChatMessage>) {
+        sessionState.messagesJson = gson.toJson(updated)
+    }
+
+    fun persistPreviousIngredients(updated: List<String>) {
+        sessionState.previousIngredientsJson = gson.toJson(updated)
+    }
+
+    fun sendRecipePrompt(
+        rawRequest: String,
+        useExpiringFoods: Boolean = false
+    ) {
+        val trimmed = rawRequest.trim()
+        if (trimmed.isBlank() || isLoading) return
+
+        if (!useExpiringFoods && !looksFoodRelatedRecipeRequest(trimmed, pantryIngredientNames)) {
+            val invalidMessages = messages +
+                RecipeChatMessage(
+                    role = RecipeChatRole.USER,
+                    text = trimmed
+                ) +
+                RecipeChatMessage(
+                    role = RecipeChatRole.ASSISTANT,
+                    text = "Food AI only answers recipe, ingredient, meal, and expiring-food questions.",
+                    isError = true
+                )
+            persistMessages(invalidMessages)
+            promptText = ""
+            keyboard?.hide()
+            return
+        }
+
+        val frozenExpiringFoods = soonExpiringFoods.take(8)
+        val frozenPantryIngredients = pantryIngredientNames.take(16)
+        val requestText = if (useExpiringFoods) {
+            buildExpiringFoodsRequest(frozenExpiringFoods)
+        } else {
+            trimmed
+        }
+
+        val userMessage = RecipeChatMessage(
+            role = RecipeChatRole.USER,
+            text = if (useExpiringFoods) {
+                "Use my foods expiring soon."
+            } else {
+                trimmed
+            }
+        )
+        val baselineMessages = messages + userMessage
+
+        persistMessages(baselineMessages)
+        promptText = ""
+        promptBarVisible = true
+        keyboard?.hide()
+
+        if (useExpiringFoods) {
+            sessionState.expiringPromptDismissed = true
+        }
+
+        isLoading = true
+
+        scope.launch {
+            val result = runCatching {
+                if (useExpiringFoods) {
+                    val recipes = RecipeAiService.findRecipesByIngredients(
+                        ingredients = frozenExpiringFoods.map { it.name },
+                        limit = 6
+                    )
+                    RecipeSuggestionBatch(
+                        resolvedIngredients = frozenExpiringFoods.map { it.name },
+                        recipes = recipes
+                    )
+                } else {
+                    RecipeAiService.generateRecipeSuggestions(
+                        request = requestText,
+                        pantryIngredients = frozenPantryIngredients,
+                        previousIngredients = previousIngredients,
+                        contextId = conversationId,
+                        limit = 6
+                    )
+                }
+            }
+
+            val assistantMessage = result.fold(
+                onSuccess = { batch ->
+                    if (batch.resolvedIngredients.isNotEmpty()) {
+                        persistPreviousIngredients(batch.resolvedIngredients)
+                    }
+                    buildRecipeAssistantMessage(batch)
+                },
+                onFailure = { error ->
+                    RecipeChatMessage(
+                        role = RecipeChatRole.ASSISTANT,
+                        text = error.message
+                            ?: "I couldn't reach the recipe assistant right now. Please try again.",
+                        isError = true
+                    )
+                }
+            )
+
+            persistMessages(baselineMessages + assistantMessage)
+            isLoading = false
+        }
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp)
+        ) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .nestedScroll(promptBarNestedScrollConnection),
+                overscrollEffect = null,
+                contentPadding = PaddingValues(
+                    top = 4.dp,
+                    bottom = recipeListBottomPadding
+                ),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                if (showExpiringPrompt) {
+                    item {
+                        ExpiringFoodsPromptCard(
+                            foods = soonExpiringFoods,
+                            windowDays = soonExpiryWindowDays,
+                            isLoading = isLoading,
+                            onUseExpiringFoods = {
+                                sendRecipePrompt(
+                                    rawRequest = buildExpiringFoodsRequest(soonExpiringFoods),
+                                    useExpiringFoods = true
+                                )
+                            }
+                        )
+                    }
+                }
+
+                if (messages.isEmpty()) {
+                    item {
+                        RecipeIntroCard(hasPantryFoods = pantryFoods.isNotEmpty())
+                    }
+                }
+
+                items(messages) { message ->
+                    when (message.role) {
+                        RecipeChatRole.USER -> RecipeUserMessageCard(message.text)
+                        RecipeChatRole.ASSISTANT -> RecipeAssistantMessageCard(message)
+                    }
+                }
+
+                if (isLoading) {
+                    item {
+                        RecipeLoadingCard()
+                    }
+                }
+            }
+
+            AnimatedVisibility(
+                visible = promptBarVisible || isRecipeKeyboardVisible,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .graphicsLayer {
+                        translationY = -animatedImeShiftPx
+                    },
+                enter = fadeIn(tween(430)) + slideInVertically(tween(430)) { it / 2 },
+                exit = fadeOut(tween(340)) + slideOutVertically(tween(340)) { it / 2 }
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp)
+                        .padding(bottom = 82.dp)
+                ) {
+                    RecipePromptBar(
+                        value = promptText,
+                        placeholder = recipePromptPlaceholder(),
+                        isLoading = isLoading,
+                        onValueChange = { promptText = it },
+                        onSend = { sendRecipePrompt(promptText) }
+                    )
+                }
             }
         }
     }
@@ -4457,9 +5474,302 @@ fun CategoryScreen() {
     }
 }
 
+@Composable
+fun ProfileScreen(navController: NavHostController) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        MatchingPillCard(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 4.dp),
+            shadowElevation = 7.dp
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(92.dp)
+                        .clip(RoundedCornerShape(50.dp))
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Person,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(42.dp)
+                    )
+                }
+                Spacer(Modifier.height(14.dp))
+                Text(
+                    text = "My Profile",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "Account, settings, app info, and personal preferences.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        ProfileActionRow(
+            title = "Account",
+            subtitle = "Sign in, sync, and move your pantry between devices",
+            icon = Icons.Filled.Person
+        ) {
+            navController.navigate(Route.Account.r)
+        }
+        ProfileActionRow(
+            title = "Settings",
+            subtitle = "Theme, countdown format, and notifications",
+            icon = Icons.Filled.Settings
+        ) {
+            navController.navigate(Route.Settings.r)
+        }
+
+        PantryTransferCard()
+
+        ProfileActionRow(
+            title = "Help & support",
+            subtitle = "Tips for pantry, history, and AI recipes",
+            icon = Icons.Filled.Help
+        ) {
+            navController.navigate(Route.Help.r)
+        }
+        ProfileActionRow(
+            title = "Privacy",
+            subtitle = "How your pantry and AI data are handled",
+            icon = Icons.Filled.Lock
+        ) {
+            navController.navigate(Route.Privacy.r)
+        }
+
+        MatchingPillCard(
+            modifier = Modifier.fillMaxWidth(),
+            shadowElevation = 6.dp,
+            onClick = { navController.navigate(Route.About.r) }
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(18.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(RoundedCornerShape(50.dp))
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Info,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+
+                    Spacer(Modifier.width(14.dp))
+
+                    Text(
+                        text = "About",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
+                Spacer(Modifier.height(14.dp))
+
+                Text(
+                    text = "Food Expiry Tracker helps you organize foods, watch expiry dates, review history, and get recipe ideas from ingredients you already have.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+
+                Spacer(Modifier.height(10.dp))
+
+                Text(
+                    text = "Version ${BuildConfig.VERSION_NAME}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        Spacer(Modifier.height(110.dp))
+    }
+}
+
+@Composable
+private fun ProfileActionRow(
+    title: String,
+    subtitle: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    onClick: () -> Unit
+) {
+    MatchingPillCard(
+        modifier = Modifier.fillMaxWidth(),
+        shadowElevation = 6.dp,
+        onClick = onClick
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(42.dp)
+                    .clip(RoundedCornerShape(50.dp))
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+
+            Spacer(Modifier.width(14.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Icon(
+                imageVector = Icons.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProfileInfoScreen(
+    navController: NavHostController,
+    title: String,
+    headline: String,
+    body: String,
+    footer: String? = null
+) {
+    Scaffold(
+        containerColor = Color.Transparent,
+        topBar = {
+            SlimTopBar(
+                title = title,
+                onBack = { navController.popBackStack() }
+            )
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            MatchingPillCard(
+                modifier = Modifier.fillMaxWidth(),
+                shadowElevation = 6.dp
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(18.dp)
+                ) {
+                    Text(
+                        text = headline,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = body,
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                    footer?.takeIf { it.isNotBlank() }?.let {
+                        Spacer(Modifier.height(12.dp))
+                        Text(
+                            text = it,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun AccountScreen(navController: NavHostController) {
+    AccountSyncScreen(navController)
+}
+
+@Composable
+fun AboutScreen(navController: NavHostController) {
+    ProfileInfoScreen(
+        navController = navController,
+        title = "About",
+        headline = "Food Expiry Tracker",
+        body = "Track expiry dates, organize foods by category, review history, and get recipe ideas from your ingredients.",
+        footer = "Version ${BuildConfig.VERSION_NAME}"
+    )
+}
+
+@Composable
+fun HelpScreen(navController: NavHostController) {
+    ProfileInfoScreen(
+        navController = navController,
+        title = "Help & Support",
+        headline = "Need a hand?",
+        body = "Use Home to manage pantry foods, History to re-add older items, and AI to generate recipes from ingredients or expiring foods.",
+        footer = "If something looks wrong, revisit the screen after a full app restart to refresh temporary session state."
+    )
+}
+
+@Composable
+fun PrivacyScreen(navController: NavHostController) {
+    ProfileInfoScreen(
+        navController = navController,
+        title = "Privacy",
+        headline = "Your Data",
+        body = "Food names, expiry dates, categories, and local preferences are stored on your device. AI recipe requests are only sent when you use the AI tab.",
+        footer = "The app does not need an account to manage your pantry."
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(navController: NavHostController) {
+    val countdownFormat = rememberCountdownFormatPreference()
+
     Scaffold(
         containerColor = Color.Transparent,
         topBar = {
@@ -4475,10 +5785,20 @@ fun SettingsScreen(navController: NavHostController) {
                 .padding(padding)
                 .padding(16.dp)
         ) {
-            SettingRow("Theme") {
+            SettingRow(
+                title = "Theme"
+            ) {
                 navController.navigate(Route.Theme.r)
             }
-            SettingRow("Notifications") {
+            SettingRow(
+                title = "Countdown format",
+                subtitle = countdownFormatLabel(countdownFormat)
+            ) {
+                navController.navigate(Route.CountdownFormat.r)
+            }
+            SettingRow(
+                title = "Notifications"
+            ) {
                 navController.navigate(Route.Notifications.r)
             }
         }
@@ -4486,7 +5806,11 @@ fun SettingsScreen(navController: NavHostController) {
 }
 
 @Composable
-private fun SettingRow(title: String, onClick: () -> Unit) {
+private fun SettingRow(
+    title: String,
+    subtitle: String? = null,
+    onClick: () -> Unit
+) {
     MatchingPillCard(
         modifier = Modifier
             .fillMaxWidth()
@@ -4494,8 +5818,18 @@ private fun SettingRow(title: String, onClick: () -> Unit) {
         shadowElevation = 6.dp,
         onClick = onClick
     ) {
-        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(
+            modifier = Modifier.padding(16.dp)
+        ) {
             Text(title, style = MaterialTheme.typography.bodyLarge)
+            subtitle?.let {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }
@@ -4533,6 +5867,40 @@ fun ThemeScreen(
             ThemeOption("Dark", "Always dark mode",
                 selected = currentMode == ThemeMode.DARK
             ) { onModeChange(ThemeMode.DARK) }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CountdownFormatScreen(navController: NavHostController) {
+    val context = LocalContext.current
+    val currentFormat = rememberCountdownFormatPreference()
+
+    Scaffold(
+        containerColor = Color.Transparent,
+        topBar = {
+            SlimTopBar(
+                title = "Countdown Format",
+                onBack = { navController.popBackStack() }
+            )
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(16.dp)
+        ) {
+            CountdownFormat.entries.forEach { option ->
+                ThemeOption(
+                    title = countdownFormatLabel(option),
+                    subtitle = countdownFormatDescription(option),
+                    selected = currentFormat == option
+                ) {
+                    saveCountdownFormat(context, option)
+                }
+            }
         }
     }
 }
@@ -4643,36 +6011,6 @@ fun NotificationsScreen(navController: NavHostController) {
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text("Days before:", style = MaterialTheme.typography.bodyLarge)
-
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(
-                            onClick = { saveDays(daysBefore - 1) },
-                            enabled = daysBefore > MIN_DAYS_BEFORE_REMINDER
-                        ) {
-                            Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Minus")
-                        }
-                        Text("$daysBefore", style = MaterialTheme.typography.titleLarge)
-                        IconButton(
-                            onClick = { saveDays(daysBefore + 1) },
-                            enabled = daysBefore < MAX_DAYS_BEFORE_REMINDER
-                        ) {
-                            Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "Plus")
-                        }
-                    }
-                }
-            }
-
-            MatchingPillCard(
-                shadowElevation = 6.dp
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(14.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
@@ -4707,6 +6045,43 @@ fun NotificationsScreen(navController: NavHostController) {
                 }
             }
 
+            MatchingPillCard(
+                shadowElevation = 6.dp
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Days before", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            "Choose how early to start reminders, from $MIN_DAYS_BEFORE_REMINDER to $MAX_DAYS_BEFORE_REMINDER days.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(
+                            onClick = { saveDays(daysBefore - 1) },
+                            enabled = daysBefore > MIN_DAYS_BEFORE_REMINDER
+                        ) {
+                            Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Minus")
+                        }
+                        Text("$daysBefore", style = MaterialTheme.typography.titleLarge)
+                        IconButton(
+                            onClick = { saveDays(daysBefore + 1) },
+                            enabled = daysBefore < MAX_DAYS_BEFORE_REMINDER
+                        ) {
+                            Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "Plus")
+                        }
+                    }
+                }
+            }
+
             Button(
                 onClick = { runExpiryWorkNow(appCtx) },
                 modifier = Modifier.fillMaxWidth()
@@ -4721,6 +6096,7 @@ fun NotificationsScreen(navController: NavHostController) {
 fun BottomBar(navController: NavHostController, currentRoute: String?) {
     val scope = rememberCoroutineScope()
     var isTabTransitionLocked by remember { mutableStateOf(false) }
+    val selectedRoute = bottomBarSelectedRoute(currentRoute)
 
     Box(
         modifier = Modifier
@@ -4747,12 +6123,12 @@ fun BottomBar(navController: NavHostController, currentRoute: String?) {
                 bottomBarItems.forEach { item ->
                     PillNavItem(
                         modifier = Modifier.weight(1f),
-                        selected = currentRoute == item.route,
+                        selected = selectedRoute == item.route,
                         label = item.label,
                         selectedIcon = item.selectedIcon,
                         unselectedIcon = item.unselectedIcon,
                         onClick = {
-                            if (isTabTransitionLocked || currentRoute == item.route) return@PillNavItem
+                            if (isTabTransitionLocked || selectedRoute == item.route) return@PillNavItem
 
                             isTabTransitionLocked = true
                             navController.safeNavigate(item.route)
@@ -4869,9 +6245,11 @@ fun FoodEntryScreen(
     var customCategoryExistsError by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val density = LocalDensity.current
     val keyboard = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
+    val countdownFormat = rememberCountdownFormatPreference()
     val sharedPrefs = remember { context.getSharedPreferences(FOOD_PREFS, Context.MODE_PRIVATE) }
     val gson = remember { Gson() }
     val homeSearchFocus = remember { FocusRequester() }
@@ -4927,11 +6305,11 @@ fun FoodEntryScreen(
         }
     }
 
-    var showEditCategoriesSheet by remember { mutableStateOf(false) }
-    var editCategoriesBackdropVisible by remember { mutableStateOf(false) }
-    var showAddCategorySheetDialog by remember { mutableStateOf(false) }
-    var newCategoryName by remember { mutableStateOf("") }
-    var addCategoryExistsError by remember { mutableStateOf(false)}
+    var showEditCategoriesSheet by rememberSaveable { mutableStateOf(false) }
+    var editCategoriesBackdropVisible by rememberSaveable { mutableStateOf(false) }
+    var showAddCategorySheetDialog by rememberSaveable { mutableStateOf(false) }
+    var newCategoryName by rememberSaveable { mutableStateOf("") }
+    var addCategoryExistsError by rememberSaveable { mutableStateOf(false) }
 
     var showQuickAddCategoryDialog by remember { mutableStateOf(false) }
     var quickCategoryName by remember { mutableStateOf("") }
@@ -4958,9 +6336,10 @@ fun FoodEntryScreen(
     var editingItem by remember { mutableStateOf<FoodItem?>(null) }
     var pendingDelete by remember { mutableStateOf<FoodItem?>(null) }
     var pendingDeleteSelected by remember { mutableStateOf(false) }
-    var pendingDeleteCategory by remember { mutableStateOf<String?>(null) }
+    var pendingDeleteCategory by rememberSaveable { mutableStateOf<String?>(null) }
     val shouldBlurBackground =
-        editCategoriesBackdropVisible ||
+        showEditCategoriesSheet ||
+                editCategoriesBackdropVisible ||
                 showBulkCategorySheet ||
                 showAddCategorySheetDialog ||
                 showBulkCustomCategoryDialog ||
@@ -5103,6 +6482,17 @@ fun FoodEntryScreen(
         }
     }
     var fabVisible by rememberSaveable { mutableStateOf(true) }
+
+    DisposableEffect(lifecycleOwner, showPantrySearchBar, isSelecting) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME && !showPantrySearchBar && !isSelecting) {
+                fabVisible = true
+            }
+        }
+
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     LaunchedEffect(listState) {
         snapshotFlow { listState.isScrollInProgress }
@@ -5518,6 +6908,7 @@ fun FoodEntryScreen(
                                                 )
                                             ),
                                             food = food,
+                                            countdownFormat = countdownFormat,
                                             isSelecting = isSelecting,
                                             isSelected = selectedItems.contains(food),
                                             onSelectionChange = { checked ->

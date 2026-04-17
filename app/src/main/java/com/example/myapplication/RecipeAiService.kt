@@ -19,7 +19,8 @@ internal data class RecipeSuggestion(
     val usedIngredientCount: Int,
     val missedIngredientCount: Int,
     val usedIngredients: List<String>,
-    val missedIngredients: List<String>
+    val missedIngredients: List<String>,
+    val quickGuide: List<String>
 )
 
 internal data class RecipeSuggestionBatch(
@@ -44,12 +45,22 @@ internal object RecipeAiService {
 
         val cleanedPantryIngredients = sanitizeIngredients(pantryIngredients).take(12)
         val cleanedPreviousIngredients = sanitizeIngredients(previousIngredients).take(8)
+        val explicitRequestIngredients = extractExplicitRequestIngredients(trimmedRequest).take(8)
+        val effectivePantryIngredients =
+            explicitRequestIngredients.ifEmpty { cleanedPantryIngredients }
+        val effectivePreviousIngredients =
+            if (explicitRequestIngredients.isNotEmpty()) {
+                emptyList()
+            } else {
+                cleanedPreviousIngredients
+            }
 
         val responseBody = generateContent(
             prompt = buildRecipeRequestPrompt(
                 request = trimmedRequest,
-                pantryIngredients = cleanedPantryIngredients,
-                previousIngredients = cleanedPreviousIngredients,
+                pantryIngredients = effectivePantryIngredients,
+                previousIngredients = effectivePreviousIngredients,
+                explicitRequestIngredients = explicitRequestIngredients,
                 contextId = contextId,
                 limit = limit.coerceIn(1, 6)
             ),
@@ -58,7 +69,9 @@ internal object RecipeAiService {
 
         parseRecipeSuggestionBatch(
             responseBody = responseBody,
-            fallbackIngredients = cleanedPreviousIngredients.ifEmpty { cleanedPantryIngredients }
+            fallbackIngredients = explicitRequestIngredients.ifEmpty {
+                effectivePreviousIngredients.ifEmpty { effectivePantryIngredients }
+            }
         )
     }
 
@@ -175,11 +188,13 @@ internal object RecipeAiService {
         request: String,
         pantryIngredients: List<String>,
         previousIngredients: List<String>,
+        explicitRequestIngredients: List<String>,
         contextId: String,
         limit: Int
     ): String {
         val pantryText = pantryIngredients.joinToString(", ").ifBlank { "none" }
         val previousText = previousIngredients.joinToString(", ").ifBlank { "none" }
+        val explicitText = explicitRequestIngredients.joinToString(", ").ifBlank { "none" }
 
         return """
             You are FoodExpiryTracker's recipe-only assistant.
@@ -189,15 +204,19 @@ internal object RecipeAiService {
             - Every reply must be recipe suggestions only.
             - Never ask follow-up questions.
             - Never offer storage tips, nutrition advice, pantry tips, or anything outside recipe suggestions.
-            - If the user says "more", "another", "same ingredients", "those ingredients", or "previous ingredients", reuse the previous recipe ingredients.
-            - If the user names ingredients in the new request, use those ingredients.
-            - If the user gives only a meal style like dinner, breakfast, snack, quick, or easy, combine that preference with the previous recipe ingredients when available.
+            - If the current request ingredients are not "none", use only those current request ingredients as the main ingredient set.
+            - If the current request ingredients are not "none", ignore previous recipe ingredients and ignore unrelated pantry ingredients.
+            - If the user says "more", "another", "same ingredients", "those ingredients", or "previous ingredients" and the current request ingredients are "none", reuse the previous recipe ingredients.
+            - If the user gives only a meal style like dinner, breakfast, snack, quick, or easy and the current request ingredients are "none", combine that preference with the previous recipe ingredients when available.
             - If no ingredients are named in the request and there are no previous recipe ingredients, use the pantry ingredients.
             - Keep resolvedIngredients to 8 or fewer unique items.
             - Return between 3 and $limit recipes when possible.
             - Each recipe should use the resolved ingredients as much as possible.
             - missedIngredients must be short pantry staples only, with at most 3 items.
             - Return only valid JSON and nothing else.
+
+            Current request ingredients:
+            $explicitText
             
             Pantry ingredients:
             $pantryText
@@ -205,21 +224,82 @@ internal object RecipeAiService {
             Previous recipe ingredients:
             $previousText
 
-            Return JSON with this exact shape:
-            {
-              "resolvedIngredients": ["ingredient 1", "ingredient 2"],
-              "recipes": [
-                {
-                  "title": "Recipe name",
-                  "usedIngredients": ["ingredient 1", "ingredient 2"],
-                  "missedIngredients": ["optional extra 1", "optional extra 2"]
-                }
-              ]
-            }
+	            Return JSON with this exact shape:
+	            {
+	              "resolvedIngredients": ["ingredient 1", "ingredient 2"],
+	              "recipes": [
+	                {
+	                  "title": "Recipe name",
+	                  "usedIngredients": ["ingredient 1", "ingredient 2"],
+	                  "missedIngredients": ["optional extra 1", "optional extra 2"],
+	                  "quickGuide": ["Short step 1", "Short step 2", "Short step 3"]
+	                }
+	              ]
+	            }
 
-            User request:
-            $request
-        """.trimIndent()
+	            quickGuide rules:
+	            - Include 2 to 4 short steps for every recipe.
+	            - Keep every step simple, direct, and easy to understand.
+	            - Focus only on how to make the recipe.
+	            - Keep each step to one short sentence.
+
+	            User request:
+	            $request
+	        """.trimIndent()
+    }
+
+    private fun extractExplicitRequestIngredients(request: String): List<String> {
+        val normalized = request
+            .lowercase(Locale.US)
+            .replace('\n', ' ')
+            .replace(Regex("\\s+"), " ")
+            .trim()
+
+        if (normalized.isBlank()) return emptyList()
+
+        val tailSource = extractIngredientTail(normalized)
+        val cleanedSource = tailSource
+            .replace(Regex("[?!.]"), " ")
+            .replace(
+                Regex(
+                    "\\b(can you|could you|would you|please|give me|give|make|cook|show me|tell me|recipe|recipes|idea|ideas|meal|meals|snack|breakfast|lunch|dinner|dessert|quick|easy|some more|more|another|just|only|something|anything|with|using|use|from|for|kind of|what can i make)\\b"
+                ),
+                " "
+            )
+            .replace(Regex("\\s+"), " ")
+            .trim(' ', ',', ';', ':')
+
+        val referentialPhrases = setOf(
+            "same ingredients",
+            "those ingredients",
+            "previous ingredients"
+        )
+
+        return cleanedSource
+            .split(Regex("\\s*,\\s*|\\s+and\\s+|\\s*&\\s*|\\s*\\+\\s*|\\s*/\\s*"))
+            .mapNotNull { segment ->
+                val cleaned = segment
+                    .trim()
+                    .trim(',', '.', '?', '!', ';', ':')
+                    .replace(Regex("\\s+"), " ")
+
+                when {
+                    cleaned.isBlank() -> null
+                    cleaned in referentialPhrases -> null
+                    cleaned.length < 2 -> null
+                    else -> cleaned
+                }
+            }
+            .let(::sanitizeIngredients)
+    }
+
+    private fun extractIngredientTail(normalizedRequest: String): String {
+        val markers = listOf(" with ", " using ", ":")
+        val markerIndex = markers.maxOfOrNull { normalizedRequest.lastIndexOf(it) } ?: -1
+        if (markerIndex < 0) return normalizedRequest
+
+        val marker = markers.firstOrNull { normalizedRequest.lastIndexOf(it) == markerIndex }.orEmpty()
+        return normalizedRequest.substring(markerIndex + marker.length).trim()
     }
 
     private fun buildRecipeIdeasPrompt(
@@ -233,26 +313,28 @@ internal object RecipeAiService {
             Use these pantry ingredients that are expiring soon:
             $ingredientList
             
-            Return only valid JSON with this exact shape:
-            {
-              "recipes": [
-                {
-                  "title": "Recipe name",
-                  "usedIngredients": ["ingredient 1", "ingredient 2"],
-                  "missedIngredients": ["optional extra 1", "optional extra 2"]
-                }
-              ]
-            }
-            
-            Rules:
+	            Return only valid JSON with this exact shape:
+	            {
+	              "recipes": [
+	                {
+	                  "title": "Recipe name",
+	                  "usedIngredients": ["ingredient 1", "ingredient 2"],
+	                  "missedIngredients": ["optional extra 1", "optional extra 2"],
+	                  "quickGuide": ["Short step 1", "Short step 2", "Short step 3"]
+	                }
+	              ]
+	            }
+	            
+	            Rules:
             - Return up to $limit recipe ideas.
-            - Use the listed ingredients as much as possible.
-            - Keep recipe titles short and natural.
-            - `missedIngredients` can only include a few simple extras or pantry staples, with a maximum of 3 items.
-            - Do not include instructions, notes, markdown, or any text outside the JSON.
-            - If there are no good recipe ideas, return {"recipes":[]}.
-        """.trimIndent()
-    }
+	            - Use the listed ingredients as much as possible.
+	            - Keep recipe titles short and natural.
+	            - `missedIngredients` can only include a few simple extras or pantry staples, with a maximum of 3 items.
+	            - Include a `quickGuide` with 2 to 4 short, simple steps for each recipe.
+	            - Do not include instructions, notes, markdown, or any text outside the JSON.
+	            - If there are no good recipe ideas, return {"recipes":[]}.
+	        """.trimIndent()
+	    }
 
     private fun extractTextResponse(responseBody: String): String {
         val response = runCatching {
@@ -310,26 +392,47 @@ internal object RecipeAiService {
             val title = recipe.title?.trim().orEmpty()
             if (title.isBlank()) return@mapNotNull null
 
-            val usedIngredients = sanitizeIngredients(recipe.usedIngredients)
-            val missedIngredients = sanitizeIngredients(recipe.missedIngredients)
+	            val usedIngredients = sanitizeIngredients(recipe.usedIngredients)
+	            val missedIngredients = sanitizeIngredients(recipe.missedIngredients)
+	            val quickGuide = sanitizeQuickGuide(recipe.quickGuide)
 
-            RecipeSuggestion(
-                title = title,
-                usedIngredientCount = usedIngredients.size,
-                missedIngredientCount = missedIngredients.size,
-                usedIngredients = usedIngredients,
-                missedIngredients = missedIngredients
-            )
-        }
-    }
+	            RecipeSuggestion(
+	                title = title,
+	                usedIngredientCount = usedIngredients.size,
+	                missedIngredientCount = missedIngredients.size,
+	                usedIngredients = usedIngredients,
+	                missedIngredients = missedIngredients,
+	                quickGuide = quickGuide
+	            )
+	        }
+	    }
 
-    private fun sanitizeIngredients(items: List<String>?): List<String> {
-        return items
-            .orEmpty()
+	    private fun sanitizeIngredients(items: List<String>?): List<String> {
+	        return items
+	            .orEmpty()
             .map { it.trim() }
-            .filter { it.isNotBlank() }
-            .distinctBy { it.lowercase(Locale.US) }
-    }
+	            .filter { it.isNotBlank() }
+	            .distinctBy { it.lowercase(Locale.US) }
+	    }
+
+	    private fun sanitizeQuickGuide(steps: List<String>?): List<String> {
+	        return steps
+	            .orEmpty()
+	            .map { step ->
+	                step.trim()
+	                    .replace(Regex("\\s+"), " ")
+	                    .trim('-', '*', '•', ' ')
+	            }
+	            .filter { it.isNotBlank() }
+	            .map { step ->
+	                if (step.length <= 120) {
+	                    step
+	                } else {
+	                    step.take(117).trimEnd() + "..."
+	                }
+	            }
+	            .take(4)
+	    }
 
     private fun cleanJsonResponse(text: String): String {
         return text
@@ -435,5 +538,6 @@ private data class GeminiRecipeBatchResponse(
 private data class GeminiRecipe(
     val title: String? = null,
     val usedIngredients: List<String>? = null,
-    val missedIngredients: List<String>? = null
+    val missedIngredients: List<String>? = null,
+    val quickGuide: List<String>? = null
 )
