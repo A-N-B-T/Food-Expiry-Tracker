@@ -4224,7 +4224,7 @@ fun HistoryScreen(
                             state = listState,
                             modifier = Modifier.fillMaxSize(),
                             overscrollEffect = null,
-                            contentPadding = PaddingValues(bottom = 75.dp)
+                            contentPadding = PaddingValues(bottom = 80.dp)
                         ) {
                             items(
                                 items = filtered,
@@ -7305,7 +7305,7 @@ fun FoodEntryScreen(
                                     overscrollEffect = null,
                                     contentPadding = PaddingValues(
                                         top = pantryContentTopPadding,
-                                        bottom = 75.dp
+                                        bottom = 80.dp
                                     )
                                 ) {
                                     items(
