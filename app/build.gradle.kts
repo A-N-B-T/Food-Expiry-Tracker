@@ -64,8 +64,8 @@ android {
 }
 
 dependencies {
-    implementation("com.google.firebase:firebase-firestore-ktx")
-    implementation("com.google.firebase:firebase-auth-ktx")
+    implementation("com.google.firebase:firebase-auth")
+    implementation("com.google.firebase:firebase-firestore")
     implementation(platform("com.google.firebase:firebase-bom:34.12.0"))
     implementation("androidx.core:core-splashscreen:1.0.1")
     implementation("androidx.credentials:credentials:1.6.0")
