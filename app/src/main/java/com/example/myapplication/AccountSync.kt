@@ -125,6 +125,7 @@ private const val ACCOUNT_DAILY_ENABLED_KEY = "daily_enabled"
 
 private const val CLOUD_SYNC_VERSION = 1
 private const val ACCOUNT_AUTO_SYNC_WORK_NAME = "account_auto_sync_work"
+private const val EMAIL_PASSWORD_INCORRECT_MESSAGE = "Email or password is incorrect."
 
 private val accountGson = Gson()
 private val accountAuthPillShape = RoundedCornerShape(30.dp)
@@ -173,11 +174,6 @@ private data class IdentityRefreshResponse(
     val user_id: String? = null,
     val id_token: String? = null,
     val refresh_token: String? = null
-)
-
-private data class CreateAuthUriResponse(
-    val registered: Boolean? = null,
-    val signinMethods: List<String>? = null
 )
 
 private data class ServiceErrorEnvelope(
@@ -491,9 +487,9 @@ private fun friendlyIdentityError(body: String?): String {
 
     return when (code) {
         "EMAIL_EXISTS" -> "That email is already in use."
-        "INVALID_PASSWORD" -> "That email or password doesn't match."
-        "EMAIL_NOT_FOUND" -> "There is no account with that email yet. Please sign up first."
-        "INVALID_LOGIN_CREDENTIALS" -> "That email or password doesn't match."
+        "INVALID_PASSWORD" -> EMAIL_PASSWORD_INCORRECT_MESSAGE
+        "EMAIL_NOT_FOUND" -> EMAIL_PASSWORD_INCORRECT_MESSAGE
+        "INVALID_LOGIN_CREDENTIALS" -> EMAIL_PASSWORD_INCORRECT_MESSAGE
         "USER_DISABLED" -> "That account is disabled."
         "TOO_MANY_ATTEMPTS_TRY_LATER" -> "Too many attempts right now. Try again in a moment."
         "OPERATION_NOT_ALLOWED" -> "Enable Email/Password in Firebase Authentication first."
@@ -593,35 +589,11 @@ private suspend fun signUpWithEmailPassword(
     }
 }
 
-private suspend fun lookupEmailRegistration(email: String): Boolean? {
-    requireCloudSetup()
-    val url = "https://identitytoolkit.googleapis.com/v1/accounts:createAuthUri?key=${BuildConfig.FIREBASE_API_KEY}"
-    val body = accountGson.toJson(
-        mapOf(
-            "identifier" to email,
-            "continueUri" to "http://localhost"
-        )
-    )
-
-    return try {
-        val responseText = executeJsonRequest(url = url, method = "POST", bodyJson = body)
-        val response = accountGson.fromJson(responseText, CreateAuthUriResponse::class.java)
-        response.registered
-    } catch (_: IOException) {
-        null
-    }
-}
-
 private suspend fun signInWithEmailPassword(
     email: String,
     password: String
 ): AccountSession {
     requireCloudSetup()
-    val registered = lookupEmailRegistration(email)
-    if (registered == false) {
-        throw IllegalStateException("There is no account with that email yet. Please sign up first.")
-    }
-
     val url =
         "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${BuildConfig.FIREBASE_API_KEY}"
     val body = accountGson.toJson(
@@ -1268,6 +1240,7 @@ private fun SignedOutAccountContent(
     onSignUp: () -> Unit
 ) {
     val hasEmailAuthError = !emailAuthMessage.isNullOrBlank()
+    val showSignUpHint = emailAuthMessage == EMAIL_PASSWORD_INCORRECT_MESSAGE
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -1323,11 +1296,35 @@ private fun SignedOutAccountContent(
             enter = fadeIn(),
             exit = fadeOut()
         ) {
-            emailAuthMessage?.takeIf { it.isNotBlank() }?.let { message ->
-                AccountInlineStatusMessage(
-                    message = message,
-                    isError = true
-                )
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                emailAuthMessage?.takeIf { it.isNotBlank() }?.let { message ->
+                    AccountInlineStatusMessage(
+                        message = message,
+                        isError = true
+                    )
+                }
+
+                if (showSignUpHint) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Don't have an account?",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        TextButton(
+                            onClick = onSignUp,
+                            enabled = canUseEmailPassword
+                        ) {
+                            Text("Sign up")
+                        }
+                    }
+                }
             }
         }
 
