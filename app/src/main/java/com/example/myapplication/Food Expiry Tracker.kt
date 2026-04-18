@@ -976,7 +976,7 @@ private fun EditCategoriesStyledFab(
 }
 
 @Composable
-private fun GlassAlertDialog(
+fun GlassAlertDialog(
     onDismissRequest: () -> Unit,
     title: (@Composable () -> Unit)? = null,
     text: (@Composable () -> Unit)? = null,
@@ -1071,7 +1071,7 @@ private fun GlassAlertDialog(
 }
 
 @Composable
-private fun DialogTitleText(
+fun DialogTitleText(
     text: String,
     modifier: Modifier = Modifier,
     color: Color = Color.Unspecified
@@ -1090,7 +1090,7 @@ private fun DialogTitleText(
 }
 
 @Composable
-private fun DialogBodyText(
+fun DialogBodyText(
     text: String,
     modifier: Modifier = Modifier,
     color: Color = Color.Unspecified
@@ -1108,7 +1108,7 @@ private fun DialogBodyText(
 }
 
 @Composable
-private fun DialogDestructiveText(
+fun DialogDestructiveText(
     text: String,
     modifier: Modifier = Modifier
 ) {

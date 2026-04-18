@@ -8,6 +8,8 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.Arrangement
@@ -28,7 +30,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -174,6 +175,11 @@ private data class IdentityRefreshResponse(
     val refresh_token: String? = null
 )
 
+private data class CreateAuthUriResponse(
+    val registered: Boolean? = null,
+    val signinMethods: List<String>? = null
+)
+
 private data class ServiceErrorEnvelope(
     val error: ServiceErrorBody? = null
 )
@@ -206,6 +212,12 @@ private data class SyncMeta(
     val lastSyncedAt: Long,
     val lastError: String?
 )
+
+private enum class AccountStatusPlacement {
+    EMAIL_AUTH,
+    GOOGLE_AUTH,
+    SYNC_ACTION
+}
 
 private enum class AccountAutoSyncMode {
     DAILY,
@@ -479,10 +491,9 @@ private fun friendlyIdentityError(body: String?): String {
 
     return when (code) {
         "EMAIL_EXISTS" -> "That email is already in use."
-        "INVALID_PASSWORD" -> "That password doesn't match this email."
+        "INVALID_PASSWORD" -> "That email or password doesn't match."
         "EMAIL_NOT_FOUND" -> "There is no account with that email yet. Please sign up first."
-        "INVALID_LOGIN_CREDENTIALS" ->
-            "That email or password doesn't match. If this email is new, please sign up first."
+        "INVALID_LOGIN_CREDENTIALS" -> "That email or password doesn't match."
         "USER_DISABLED" -> "That account is disabled."
         "TOO_MANY_ATTEMPTS_TRY_LATER" -> "Too many attempts right now. Try again in a moment."
         "OPERATION_NOT_ALLOWED" -> "Enable Email/Password in Firebase Authentication first."
@@ -582,11 +593,35 @@ private suspend fun signUpWithEmailPassword(
     }
 }
 
+private suspend fun lookupEmailRegistration(email: String): Boolean? {
+    requireCloudSetup()
+    val url = "https://identitytoolkit.googleapis.com/v1/accounts:createAuthUri?key=${BuildConfig.FIREBASE_API_KEY}"
+    val body = accountGson.toJson(
+        mapOf(
+            "identifier" to email,
+            "continueUri" to "http://localhost"
+        )
+    )
+
+    return try {
+        val responseText = executeJsonRequest(url = url, method = "POST", bodyJson = body)
+        val response = accountGson.fromJson(responseText, CreateAuthUriResponse::class.java)
+        response.registered
+    } catch (_: IOException) {
+        null
+    }
+}
+
 private suspend fun signInWithEmailPassword(
     email: String,
     password: String
 ): AccountSession {
     requireCloudSetup()
+    val registered = lookupEmailRegistration(email)
+    if (registered == false) {
+        throw IllegalStateException("There is no account with that email yet. Please sign up first.")
+    }
+
     val url =
         "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${BuildConfig.FIREBASE_API_KEY}"
     val body = accountGson.toJson(
@@ -1011,6 +1046,7 @@ fun AccountSyncScreen(navController: NavHostController) {
     var password by rememberSaveable { mutableStateOf("") }
     var busyAction by rememberSaveable { mutableStateOf<String?>(null) }
     var statusMessage by rememberSaveable { mutableStateOf<String?>(null) }
+    var statusPlacement by rememberSaveable { mutableStateOf<AccountStatusPlacement?>(null) }
     var showLogoutDialog by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(statusMessage) {
@@ -1018,6 +1054,7 @@ fun AccountSyncScreen(navController: NavHostController) {
         delay(statusMessageDisplayDurationMillis(message))
         if (statusMessage == message) {
             statusMessage = null
+            statusPlacement = null
         }
     }
 
@@ -1030,6 +1067,7 @@ fun AccountSyncScreen(navController: NavHostController) {
 
     fun createAccount() {
         statusMessage = null
+        statusPlacement = null
         busyAction = "create"
         scope.launch {
             runCatching {
@@ -1038,6 +1076,7 @@ fun AccountSyncScreen(navController: NavHostController) {
                 saveAccountSession(appContext, result.session)
             }.onFailure { failure ->
                 statusMessage = failure.message
+                statusPlacement = AccountStatusPlacement.EMAIL_AUTH
             }
             busyAction = null
         }
@@ -1045,6 +1084,7 @@ fun AccountSyncScreen(navController: NavHostController) {
 
     fun signIn() {
         statusMessage = null
+        statusPlacement = null
         busyAction = "signin"
         scope.launch {
             runCatching {
@@ -1053,6 +1093,7 @@ fun AccountSyncScreen(navController: NavHostController) {
                 saveAccountSession(appContext, result.session)
             }.onFailure { failure ->
                 statusMessage = failure.message
+                statusPlacement = AccountStatusPlacement.EMAIL_AUTH
             }
             busyAction = null
         }
@@ -1060,6 +1101,7 @@ fun AccountSyncScreen(navController: NavHostController) {
 
     fun continueWithGoogle() {
         statusMessage = null
+        statusPlacement = null
         busyAction = "google"
         scope.launch {
             runCatching {
@@ -1068,6 +1110,7 @@ fun AccountSyncScreen(navController: NavHostController) {
                 saveAccountSession(appContext, result.session)
             }.onFailure { failure ->
                 statusMessage = failure.message
+                statusPlacement = AccountStatusPlacement.GOOGLE_AUTH
             }
             busyAction = null
         }
@@ -1075,6 +1118,7 @@ fun AccountSyncScreen(navController: NavHostController) {
 
     fun syncNow() {
         statusMessage = null
+        statusPlacement = null
         busyAction = "sync"
         scope.launch {
             runCatching {
@@ -1083,6 +1127,7 @@ fun AccountSyncScreen(navController: NavHostController) {
                 saveAccountSession(appContext, synced)
             }.onFailure { failure ->
                 statusMessage = failure.message
+                statusPlacement = AccountStatusPlacement.SYNC_ACTION
             }
             busyAction = null
         }
@@ -1090,6 +1135,7 @@ fun AccountSyncScreen(navController: NavHostController) {
 
     fun restoreCloud() {
         statusMessage = null
+        statusPlacement = null
         busyAction = "restore"
         scope.launch {
             runCatching {
@@ -1098,6 +1144,7 @@ fun AccountSyncScreen(navController: NavHostController) {
                 saveAccountSession(appContext, refreshed)
             }.onFailure { failure ->
                 statusMessage = failure.message
+                statusPlacement = AccountStatusPlacement.SYNC_ACTION
             }
             busyAction = null
         }
@@ -1138,6 +1185,12 @@ fun AccountSyncScreen(navController: NavHostController) {
                         canUseGoogle = canUseGoogle,
                         showSetupHint = !isCloudAccountConfigured(),
                         busyAction = busyAction,
+                        emailAuthMessage = statusMessage?.takeIf {
+                            statusPlacement == AccountStatusPlacement.EMAIL_AUTH
+                        },
+                        googleAuthMessage = statusMessage?.takeIf {
+                            statusPlacement == AccountStatusPlacement.GOOGLE_AUTH
+                        },
                         onContinueWithGoogle = ::continueWithGoogle,
                         onLogIn = ::signIn,
                         onSignUp = ::createAccount
@@ -1149,41 +1202,16 @@ fun AccountSyncScreen(navController: NavHostController) {
                         autoSyncEnabled = autoSyncEnabled,
                         autoSyncMode = autoSyncMode,
                         busyAction = busyAction,
+                        syncActionMessage = statusMessage?.takeIf {
+                            statusPlacement == AccountStatusPlacement.SYNC_ACTION
+                        },
+                        autoSyncErrorMessage = syncMeta.lastError,
                         onAutoSyncEnabledChange = ::updateAutoSyncEnabled,
                         onAutoSyncModeChange = ::updateAutoSyncMode,
                         onSyncNow = ::syncNow,
                         onRestoreCloud = ::restoreCloud,
                         onLogOut = { showLogoutDialog = true }
                     )
-                }
-
-                AnimatedVisibility(
-                    visible = !statusMessage.isNullOrBlank(),
-                    enter = fadeIn(),
-                    exit = fadeOut()
-                ) {
-                    statusMessage?.takeIf { it.isNotBlank() }?.let { message ->
-                        AccountStatusPill(
-                            message = message,
-                            isError =
-                                message.contains("failed", ignoreCase = true) ||
-                                        message.contains("couldn't", ignoreCase = true) ||
-                                        message.contains("not configured", ignoreCase = true)
-                        )
-                    }
-                }
-
-                AnimatedVisibility(
-                    visible = !syncMeta.lastError.isNullOrBlank(),
-                    enter = fadeIn(),
-                    exit = fadeOut()
-                ) {
-                    syncMeta.lastError?.takeIf { it.isNotBlank() }?.let { error ->
-                        AccountStatusPill(
-                            message = error,
-                            isError = true
-                        )
-                    }
                 }
             }
 
@@ -1192,8 +1220,12 @@ fun AccountSyncScreen(navController: NavHostController) {
     }
 
     if (showLogoutDialog && session != null) {
-        AlertDialog(
+        GlassAlertDialog(
             onDismissRequest = { showLogoutDialog = false },
+            title = { DialogTitleText("Log out?") },
+            text = {
+                DialogBodyText("Your cloud data stays in the account. This only signs this device out.")
+            },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -1206,20 +1238,13 @@ fun AccountSyncScreen(navController: NavHostController) {
                         }
                     }
                 ) {
-                    Text(
-                        text = "Log out",
-                        color = MaterialTheme.colorScheme.error
-                    )
+                    DialogDestructiveText("Log out")
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showLogoutDialog = false }) {
                     Text("Cancel")
                 }
-            },
-            title = { Text("Log out?") },
-            text = {
-                Text("Your cloud data stays in the account. This only signs this device out.")
             }
         )
     }
@@ -1236,10 +1261,13 @@ private fun SignedOutAccountContent(
     canUseGoogle: Boolean,
     showSetupHint: Boolean,
     busyAction: String?,
+    emailAuthMessage: String?,
+    googleAuthMessage: String?,
     onContinueWithGoogle: () -> Unit,
     onLogIn: () -> Unit,
     onSignUp: () -> Unit
 ) {
+    val hasEmailAuthError = !emailAuthMessage.isNullOrBlank()
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -1271,6 +1299,7 @@ private fun SignedOutAccountContent(
             value = email,
             onValueChange = onEmailChange,
             placeholder = "Email",
+            isError = hasEmailAuthError,
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Email,
                 imeAction = ImeAction.Next
@@ -1281,12 +1310,26 @@ private fun SignedOutAccountContent(
             value = password,
             onValueChange = onPasswordChange,
             placeholder = "Password",
+            isError = hasEmailAuthError,
             visualTransformation = PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Password,
                 imeAction = ImeAction.Done
             )
         )
+
+        AnimatedVisibility(
+            visible = !emailAuthMessage.isNullOrBlank(),
+            enter = fadeIn(),
+            exit = fadeOut()
+        ) {
+            emailAuthMessage?.takeIf { it.isNotBlank() }?.let { message ->
+                AccountInlineStatusMessage(
+                    message = message,
+                    isError = true
+                )
+            }
+        }
 
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -1317,6 +1360,19 @@ private fun SignedOutAccountContent(
             onClick = onContinueWithGoogle,
             modifier = Modifier.fillMaxWidth()
         )
+
+        AnimatedVisibility(
+            visible = !googleAuthMessage.isNullOrBlank(),
+            enter = fadeIn(),
+            exit = fadeOut()
+        ) {
+            googleAuthMessage?.takeIf { it.isNotBlank() }?.let { message ->
+                AccountInlineStatusMessage(
+                    message = message,
+                    isError = true
+                )
+            }
+        }
     }
 }
 
@@ -1327,6 +1383,8 @@ private fun SignedInAccountContent(
     autoSyncEnabled: Boolean,
     autoSyncMode: AccountAutoSyncMode,
     busyAction: String?,
+    syncActionMessage: String?,
+    autoSyncErrorMessage: String?,
     onAutoSyncEnabledChange: (Boolean) -> Unit,
     onAutoSyncModeChange: (AccountAutoSyncMode) -> Unit,
     onSyncNow: () -> Unit,
@@ -1389,6 +1447,19 @@ private fun SignedInAccountContent(
             onModeSelected = onAutoSyncModeChange
         )
 
+        AnimatedVisibility(
+            visible = !autoSyncErrorMessage.isNullOrBlank(),
+            enter = fadeIn(),
+            exit = fadeOut()
+        ) {
+            autoSyncErrorMessage?.takeIf { it.isNotBlank() }?.let { message ->
+                AccountInlineStatusMessage(
+                    message = message,
+                    isError = true
+                )
+            }
+        }
+
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -1407,6 +1478,19 @@ private fun SignedInAccountContent(
                 onClick = onRestoreCloud,
                 modifier = Modifier.weight(1f)
             )
+        }
+
+        AnimatedVisibility(
+            visible = !syncActionMessage.isNullOrBlank(),
+            enter = fadeIn(),
+            exit = fadeOut()
+        ) {
+            syncActionMessage?.takeIf { it.isNotBlank() }?.let { message ->
+                AccountInlineStatusMessage(
+                    message = message,
+                    isError = true
+                )
+            }
         }
 
         TextButton(
@@ -1630,10 +1714,45 @@ private fun AccountStatusPill(
 }
 
 @Composable
+private fun AccountInlineStatusMessage(
+    message: String,
+    isError: Boolean
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.Top
+    ) {
+        Icon(
+            imageVector = Icons.Filled.Info,
+            contentDescription = null,
+            tint = if (isError) {
+                MaterialTheme.colorScheme.error
+            } else {
+                MaterialTheme.colorScheme.primary
+            },
+            modifier = Modifier
+                .padding(top = 1.dp)
+                .size(15.dp)
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            text = message,
+            style = MaterialTheme.typography.bodySmall,
+            color = if (isError) {
+                MaterialTheme.colorScheme.error
+            } else {
+                MaterialTheme.colorScheme.onSurface
+            }
+        )
+    }
+}
+
+@Composable
 private fun AccountPillTextField(
     value: String,
     onValueChange: (String) -> Unit,
     placeholder: String,
+    isError: Boolean = false,
     keyboardOptions: KeyboardOptions,
     visualTransformation: VisualTransformation = VisualTransformation.None
 ) {
@@ -1641,7 +1760,11 @@ private fun AccountPillTextField(
     val fieldContainerColor =
         MaterialTheme.colorScheme.surface.copy(alpha = if (isDarkTheme) 0.42f else 0.86f)
     val fieldBorderColor =
-        MaterialTheme.colorScheme.outline.copy(alpha = if (isDarkTheme) 0.34f else 0.2f)
+        if (isError) {
+            MaterialTheme.colorScheme.error.copy(alpha = if (isDarkTheme) 0.74f else 0.62f)
+        } else {
+            MaterialTheme.colorScheme.outline.copy(alpha = if (isDarkTheme) 0.34f else 0.2f)
+        }
 
     OutlinedTextField(
         value = value,
@@ -1650,6 +1773,7 @@ private fun AccountPillTextField(
         singleLine = true,
         placeholder = { Text(placeholder) },
         shape = accountAuthPillShape,
+        isError = isError,
         visualTransformation = visualTransformation,
         keyboardOptions = keyboardOptions,
         textStyle = MaterialTheme.typography.bodyLarge,
