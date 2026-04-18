@@ -11,10 +11,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -105,21 +107,25 @@ fun PantryTransferCard() {
 
     MatchingPillCard(
         modifier = Modifier.fillMaxWidth(),
-        shadowElevation = 6.dp
+        shadowElevation = 0.dp
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(18.dp)
         ) {
-            Text(
-                text = "Pantry transfer",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Pantry transfer",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
             Spacer(Modifier.height(6.dp))
             Text(
-                text = "Export your Home pantry items to a file, then import them later with their saved expiry dates and categories.",
+                text = "Export pantry items to a file, then import them later with saved expiry dates and categories.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -133,7 +139,11 @@ fun PantryTransferCard() {
                         exportLauncher.launch(defaultExportFileName())
                     },
                     enabled = busyAction == null,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(22.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 ) {
                     Icon(
                         imageVector = Icons.Filled.Download,
@@ -147,7 +157,8 @@ fun PantryTransferCard() {
                         importLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
                     },
                     enabled = busyAction == null,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(22.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Filled.Upload,

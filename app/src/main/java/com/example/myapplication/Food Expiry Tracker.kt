@@ -9,6 +9,9 @@ import android.app.DatePickerDialog
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
@@ -52,6 +55,7 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -176,12 +180,14 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -252,6 +258,8 @@ import kotlin.math.roundToInt
 private const val THEME_PREFS = "app_settings"
 private const val THEME_KEY = "theme_mode"
 private const val COUNTDOWN_FORMAT_KEY = "countdown_format"
+private const val LOCAL_PROFILE_NAME_KEY = "local_profile_name"
+private const val LOCAL_PROFILE_PHOTO_URI_KEY = "local_profile_photo_uri"
 
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
 enum class CountdownFormat { DAYS_ONLY, MONTHS_AND_DAYS, YEARS_MONTHS_DAYS }
@@ -335,6 +343,38 @@ fun loadCountdownFormat(context: Context): CountdownFormat {
 fun saveCountdownFormat(context: Context, format: CountdownFormat) {
     val prefs = context.applicationContext.getSharedPreferences(THEME_PREFS, Context.MODE_PRIVATE)
     prefs.edit().putString(COUNTDOWN_FORMAT_KEY, format.name).apply()
+}
+
+private fun loadLocalProfileName(context: Context): String {
+    val prefs = context.applicationContext.getSharedPreferences(THEME_PREFS, Context.MODE_PRIVATE)
+    return prefs.getString(LOCAL_PROFILE_NAME_KEY, "").orEmpty().trim().take(12)
+}
+
+private fun saveLocalProfileName(
+    context: Context,
+    name: String
+) {
+    val prefs = context.applicationContext.getSharedPreferences(THEME_PREFS, Context.MODE_PRIVATE)
+    prefs.edit().putString(LOCAL_PROFILE_NAME_KEY, name.trim().take(12)).apply()
+}
+
+private fun loadLocalProfilePhotoUri(context: Context): String {
+    val prefs = context.applicationContext.getSharedPreferences(THEME_PREFS, Context.MODE_PRIVATE)
+    return prefs.getString(LOCAL_PROFILE_PHOTO_URI_KEY, "").orEmpty().trim()
+}
+
+private fun saveLocalProfilePhotoUri(
+    context: Context,
+    photoUri: String
+) {
+    val prefs = context.applicationContext.getSharedPreferences(THEME_PREFS, Context.MODE_PRIVATE)
+    prefs.edit {
+        if (photoUri.isBlank()) {
+            remove(LOCAL_PROFILE_PHOTO_URI_KEY)
+        } else {
+            putString(LOCAL_PROFILE_PHOTO_URI_KEY, photoUri.trim())
+        }
+    }
 }
 
 private fun countdownFormatLabel(format: CountdownFormat): String {
@@ -5008,6 +5048,71 @@ private fun looksFoodRelatedRecipeRequest(
     return ingredientLikeSegments >= 2
 }
 
+private fun looksLikeFoodIngredientInput(
+    request: String,
+    pantryIngredients: List<String>
+): Boolean {
+    val normalized = request.trim().lowercase(Locale.US)
+    if (normalized.isBlank()) return false
+
+    val knownFoodTokens = setOf(
+        "apple", "avocado", "banana", "bean", "beans", "beef", "bread", "broccoli",
+        "butter", "cabbage", "carrot", "cheese", "chicken", "chili", "corn",
+        "cucumber", "egg", "eggs", "fish", "flour", "garlic", "grape", "ham",
+        "honey", "lettuce", "lemon", "lime", "mango", "meat", "milk", "mushroom",
+        "noodle", "noodles", "oat", "oats", "oil", "onion", "orange", "pasta",
+        "peanut", "potato", "potatoes", "rice", "salmon", "salt", "sausage",
+        "shrimp", "spinach", "sugar", "tomato", "tomatoes", "tuna", "turkey",
+        "vegetable", "vegetables", "veggie", "veggies", "yogurt"
+    )
+
+    val pantryTokens = pantryIngredients
+        .flatMap { ingredient ->
+            ingredient.lowercase(Locale.US).split(Regex("[^a-z0-9]+"))
+        }
+        .filter { it.length >= 3 }
+        .distinct()
+
+    val requestTokens = normalized
+        .split(Regex("[^a-z0-9]+"))
+        .filter { it.length >= 3 }
+
+    return requestTokens.any { token ->
+        token in knownFoodTokens || token in pantryTokens
+    }
+}
+
+private fun isSingleFoodLikeRequest(
+    request: String,
+    pantryIngredients: List<String>
+): Boolean {
+    val normalized = request.trim().lowercase(Locale.US)
+    if (normalized.isBlank()) return false
+
+    val requestTokens = normalized
+        .split(Regex("[^a-z0-9]+"))
+        .filter { it.length >= 3 }
+
+    if (requestTokens.size != 1) return false
+
+    val token = requestTokens.single()
+    val pantryTokens = pantryIngredients
+        .flatMap { ingredient ->
+            ingredient.lowercase(Locale.US).split(Regex("[^a-z0-9]+"))
+        }
+        .filter { it.length >= 3 }
+        .distinct()
+
+    val foodSuffixes = listOf(
+        "nut", "nuts", "berry", "berries", "bean", "beans", "seed", "seeds",
+        "melon", "melons", "pepper", "peppers", "cheese", "fruit", "fruits"
+    )
+
+    return token in pantryTokens ||
+            looksLikeFoodIngredientInput(token, pantryIngredients) ||
+            foodSuffixes.any(token::endsWith)
+}
+
 private fun recipePromptPlaceholder(): String {
     return "Give me any ingredients, like eggs and rice."
 }
@@ -5284,7 +5389,7 @@ private fun RecipeSuggestionCard(recipe: RecipeSuggestion) {
                     Spacer(Modifier.height(8.dp))
                     Text(
                         text = "Uses: $usesLine",
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                 }
@@ -5294,7 +5399,7 @@ private fun RecipeSuggestionCard(recipe: RecipeSuggestion) {
                     Spacer(Modifier.height(4.dp))
                     Text(
                         text = "Add: $addLine",
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -5303,7 +5408,7 @@ private fun RecipeSuggestionCard(recipe: RecipeSuggestion) {
                     Spacer(Modifier.height(8.dp))
                     Text(
                         text = "How:",
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurface,
                         fontWeight = FontWeight.SemiBold
                     )
@@ -5312,7 +5417,7 @@ private fun RecipeSuggestionCard(recipe: RecipeSuggestion) {
                         recipe.quickGuide.forEachIndexed { index, step ->
                             Text(
                                 text = "${index + 1}. $step",
-                                style = MaterialTheme.typography.bodySmall,
+                                style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
@@ -5690,6 +5795,14 @@ private fun RecipeScreen(
         if (trimmed.isBlank() || isLoading) return
 
         if (!useExpiringFoods && !looksFoodRelatedRecipeRequest(trimmed, pantryIngredientNames)) {
+            val invalidPromptMessage =
+                if (isSingleFoodLikeRequest(trimmed, pantryIngredientNames)) {
+                    "Can you give me some more foods?"
+                } else if (looksLikeFoodIngredientInput(trimmed, pantryIngredientNames)) {
+                    "Can you give me some more ingredients?"
+                } else {
+                    "I can only help with food ingredients or food-related recipe requests."
+                }
             val invalidMessages = messages +
                 RecipeChatMessage(
                     role = RecipeChatRole.USER,
@@ -5697,7 +5810,7 @@ private fun RecipeScreen(
                 ) +
                 RecipeChatMessage(
                     role = RecipeChatRole.ASSISTANT,
-                    text = "Can you give me some more ingredients?",
+                    text = invalidPromptMessage,
                     isError = true
                 )
             persistMessages(invalidMessages)
@@ -5886,6 +5999,47 @@ fun CategoryScreen() {
 
 @Composable
 fun ProfileScreen(navController: NavHostController) {
+    val context = LocalContext.current
+    val accountSession = rememberAccountSessionPreference()
+    var localProfileName by rememberSaveable { mutableStateOf(loadLocalProfileName(context)) }
+    var localProfilePhotoUri by rememberSaveable { mutableStateOf(loadLocalProfilePhotoUri(context)) }
+    var showEditLocalNameDialog by rememberSaveable { mutableStateOf(false) }
+    var draftLocalProfileName by rememberSaveable { mutableStateOf(localProfileName) }
+    val isGoogleProfile = accountSession?.provider == AccountProvider.GOOGLE
+    val canUseLocalProfilePhoto = accountSession?.provider != AccountProvider.GOOGLE
+    val localPhotoPickerLauncher =
+        rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.OpenDocument()
+        ) { uri ->
+            uri ?: return@rememberLauncherForActivityResult
+
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+
+            val savedUri = uri.toString()
+            localProfilePhotoUri = savedUri
+            saveLocalProfilePhotoUri(context, savedUri)
+        }
+    val profileName =
+        when {
+            accountSession != null -> accountSession.displayName
+                ?.takeIf { it.isNotBlank() }
+                ?: formatProfileNameFromEmail(accountSession.email)
+            localProfileName.isNotBlank() -> localProfileName
+            else -> "My Profile"
+        }
+    @Suppress("UNNECESSARY_SAFE_CALL") val profileSubtitle =
+        when {
+            isGoogleProfile -> accountSession?.email ?: ""
+            accountSession != null -> "Signed in with ${accountSession.email}"
+            localProfileName.isNotBlank() -> "This name stays on this device."
+            else -> "Add a name to personalize your profile on this device."
+        }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -5893,47 +6047,24 @@ fun ProfileScreen(navController: NavHostController) {
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        MatchingPillCard(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 4.dp),
-            shadowElevation = 7.dp
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(92.dp)
-                        .clip(RoundedCornerShape(50.dp))
-                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Person,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(42.dp)
-                    )
-                }
-                Spacer(Modifier.height(14.dp))
-                Text(
-                    text = "My Profile",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = "Account, settings, app info, and personal preferences.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+        @Suppress("UNNECESSARY_SAFE_CALL")
+        ProfileHeaderCard(
+            name = profileName,
+            subtitle = profileSubtitle,
+            photoUrl = if (isGoogleProfile) accountSession?.photoUrl else null,
+            localPhotoUri = if (canUseLocalProfilePhoto) localProfilePhotoUri else null,
+            showEditName = accountSession == null,
+            canEditPhoto = canUseLocalProfilePhoto,
+            onEditPhoto = {
+                localPhotoPickerLauncher.launch(arrayOf("image/*"))
+            },
+            onEditName = {
+                draftLocalProfileName = localProfileName
+                showEditLocalNameDialog = true
             }
-        }
+        )
 
+        ProfileSectionTitle("Manage")
         ProfileActionRow(
             title = "Account",
             subtitle = "Sign in, sync, and move your pantry between devices",
@@ -5949,8 +6080,10 @@ fun ProfileScreen(navController: NavHostController) {
             navController.navigate(Route.Settings.r)
         }
 
+        ProfileSectionTitle("Transfer")
         PantryTransferCard()
 
+        ProfileSectionTitle("More")
         ProfileActionRow(
             title = "Help & support",
             subtitle = "Tips for pantry, history, and AI recipes",
@@ -5965,62 +6098,287 @@ fun ProfileScreen(navController: NavHostController) {
         ) {
             navController.navigate(Route.Privacy.r)
         }
-
-        MatchingPillCard(
-            modifier = Modifier.fillMaxWidth(),
-            shadowElevation = 6.dp,
-            onClick = { navController.navigate(Route.About.r) }
+        ProfileActionRow(
+            title = "About",
+            subtitle = "App details and version ${BuildConfig.VERSION_NAME}",
+            icon = Icons.Filled.Info
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(18.dp)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(42.dp)
-                            .clip(RoundedCornerShape(50.dp))
-                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Info,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                    }
-
-                    Spacer(Modifier.width(14.dp))
-
-                    Text(
-                        text = "About",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-
-                Spacer(Modifier.height(14.dp))
-
-                Text(
-                    text = "Food Expiry Tracker helps you organize foods, watch expiry dates, review history, and get recipe ideas from ingredients you already have.",
-                    style = MaterialTheme.typography.bodyMedium
-                )
-
-                Spacer(Modifier.height(10.dp))
-
-                Text(
-                    text = "Version ${BuildConfig.VERSION_NAME}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
+            navController.navigate(Route.About.r)
         }
 
         Spacer(Modifier.height(110.dp))
     }
+
+    if (showEditLocalNameDialog) {
+        val trimmedDraftName = draftLocalProfileName.trim().take(12)
+        GlassAlertDialog(
+            onDismissRequest = { showEditLocalNameDialog = false },
+            title = { DialogTitleText(if (localProfileName.isBlank()) "Add name" else "Edit name") },
+            text = {
+                Column {
+                    DialogBodyText("Choose the name you want to show on your profile.")
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = draftLocalProfileName,
+                        onValueChange = { draftLocalProfileName = it.take(12) },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        label = { Text("Name") }
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        localProfileName = trimmedDraftName
+                        saveLocalProfileName(context, trimmedDraftName)
+                        showEditLocalNameDialog = false
+                    },
+                    enabled = trimmedDraftName.isNotBlank()
+                ) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEditLocalNameDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun ProfileHeaderCard(
+    name: String,
+    subtitle: String,
+    photoUrl: String?,
+    localPhotoUri: String?,
+    showEditName: Boolean,
+    canEditPhoto: Boolean,
+    onEditPhoto: () -> Unit,
+    onEditName: () -> Unit
+) {
+    MatchingPillCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 4.dp),
+        shadowElevation = 0.dp
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 18.dp, vertical = 18.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            ProfileHeaderAvatar(
+                name = name,
+                photoUrl = photoUrl,
+                localPhotoUri = localPhotoUri,
+                editable = canEditPhoto,
+                onEditPhoto = onEditPhoto,
+                modifier = Modifier.size(68.dp)
+            )
+
+            Spacer(Modifier.width(16.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = name,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .weight(1f)
+                            .let { baseModifier ->
+                                if (showEditName) {
+                                    baseModifier.clickable(onClick = onEditName)
+                                } else {
+                                    baseModifier
+                                }
+                            }
+                    )
+
+                    if (showEditName) {
+                        Box(
+                            modifier = Modifier
+                                .padding(start = 8.dp)
+                                .size(30.dp)
+                                .clip(RoundedCornerShape(50.dp))
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Edit,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(15.dp)
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProfileHeaderAvatar(
+    name: String,
+    photoUrl: String?,
+    localPhotoUri: String?,
+    editable: Boolean,
+    onEditPhoto: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    var profileBitmap by remember(photoUrl, localPhotoUri) { mutableStateOf<Bitmap?>(null) }
+    val initials = profileInitials(name)
+    val avatarShape = RoundedCornerShape(50.dp)
+
+    LaunchedEffect(photoUrl, localPhotoUri) {
+        profileBitmap =
+            when {
+                !localPhotoUri.isNullOrBlank() -> {
+                    withContext(Dispatchers.IO) {
+                        runCatching {
+                            context.contentResolver
+                                .openInputStream(Uri.parse(localPhotoUri))
+                                ?.use(BitmapFactory::decodeStream)
+                        }.getOrNull()
+                    }
+                }
+
+                !photoUrl.isNullOrBlank() -> {
+                    withContext(Dispatchers.IO) {
+                        runCatching {
+                            val connection = (URL(photoUrl).openConnection() as HttpURLConnection).apply {
+                                connectTimeout = 4_000
+                                readTimeout = 4_000
+                                doInput = true
+                            }
+                            connection.connect()
+                            connection.inputStream.use(BitmapFactory::decodeStream)
+                        }.getOrNull()
+                    }
+                }
+
+                else -> null
+            }
+    }
+
+    Box(
+        modifier = modifier
+            .let { baseModifier ->
+                if (editable) {
+                    baseModifier.clickable(onClick = onEditPhoto)
+                } else {
+                    baseModifier
+                }
+            }
+            .clip(avatarShape)
+            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)),
+        contentAlignment = Alignment.Center
+    ) {
+        val bitmap = profileBitmap
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else if (initials.isNotBlank()) {
+            Text(
+                text = initials,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+        } else {
+            Icon(
+                imageVector = Icons.Filled.Person,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(30.dp)
+            )
+        }
+
+        if (editable) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .size(22.dp)
+                    .clip(RoundedCornerShape(50.dp))
+                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.94f))
+                    .border(
+                        width = 1.dp,
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f),
+                        shape = RoundedCornerShape(50.dp)
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Edit,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(11.dp)
+                )
+            }
+        }
+    }
+}
+
+private fun formatProfileNameFromEmail(email: String): String {
+    val localPart = email.substringBefore("@").trim()
+    if (localPart.isBlank()) return "My Profile"
+
+    return localPart
+        .split(Regex("[._-]+"))
+        .filter { it.isNotBlank() }
+        .joinToString(" ") { token ->
+            token.replaceFirstChar { char ->
+                if (char.isLowerCase()) char.titlecase(Locale.US) else char.toString()
+            }
+        }
+        .ifBlank { "My Profile" }
+}
+
+private fun profileInitials(name: String): String {
+    val parts = name
+        .trim()
+        .split(Regex("\\s+"))
+        .filter { it.isNotBlank() }
+
+    return when {
+        parts.isEmpty() -> ""
+        parts.size == 1 -> parts.first().take(1).uppercase(Locale.US)
+        else -> (parts[0].take(1) + parts[1].take(1)).uppercase(Locale.US)
+    }
+}
+
+@Composable
+private fun ProfileSectionTitle(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelLarge,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 6.dp, top = 2.dp)
+    )
 }
 
 @Composable
@@ -6032,13 +6390,13 @@ private fun ProfileActionRow(
 ) {
     MatchingPillCard(
         modifier = Modifier.fillMaxWidth(),
-        shadowElevation = 6.dp,
+        shadowElevation = 0.dp,
         onClick = onClick
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding(horizontal = 16.dp, vertical = 15.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
@@ -6067,7 +6425,9 @@ private fun ProfileActionRow(
                 Text(
                     text = subtitle,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
 
@@ -6148,7 +6508,7 @@ fun AboutScreen(navController: NavHostController) {
         navController = navController,
         title = "About",
         headline = "Food Expiry Tracker",
-        body = "Track expiry dates, organize foods by category, review history, and get recipe ideas from your ingredients.",
+        body = "Use this app to:\n• track expiry dates\n• organize your pantry\n• review item history\n• get quick recipe ideas",
         footer = "Version ${BuildConfig.VERSION_NAME}"
     )
 }
@@ -6158,9 +6518,9 @@ fun HelpScreen(navController: NavHostController) {
     ProfileInfoScreen(
         navController = navController,
         title = "Help & Support",
-        headline = "Need a hand?",
-        body = "Use Home to manage pantry foods, History to re-add older items, and AI to generate recipes from ingredients or expiring foods.",
-        footer = "If something looks wrong, revisit the screen after a full app restart to refresh temporary session state."
+        headline = "Quick help",
+        body = "Home: add and manage foods.\nHistory: re-add old items.\nAI: get recipe ideas from ingredients.\nProfile: account, sync, and settings.",
+        footer = "If something looks off, try closing and reopening the app."
     )
 }
 
@@ -6169,9 +6529,9 @@ fun PrivacyScreen(navController: NavHostController) {
     ProfileInfoScreen(
         navController = navController,
         title = "Privacy",
-        headline = "Your Data",
-        body = "Food names, expiry dates, categories, and local preferences are stored on your device. AI recipe requests are only sent when you use the AI tab.",
-        footer = "The app does not need an account to manage your pantry."
+        headline = "Your data",
+        body = "Your pantry data stays on this device unless you sign in and sync.\nAI only sends the recipe prompt you choose to submit.\nNotifications use the expiry dates saved on your device.",
+        footer = "You can use the app without creating an account."
     )
 }
 

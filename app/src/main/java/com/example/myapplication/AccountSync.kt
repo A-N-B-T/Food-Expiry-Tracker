@@ -4,6 +4,9 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.SharedPreferences
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -34,6 +37,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -55,6 +59,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
@@ -65,7 +70,17 @@ import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.ClearCredentialException
 import androidx.credentials.exceptions.GetCredentialException
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.navigation.NavHostController
+import androidx.work.Constraints
+import androidx.work.CoroutineWorker
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.NetworkType
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
+import androidx.work.WorkerParameters
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.android.libraries.identity.googleid.GoogleIdTokenParsingException
@@ -84,12 +99,15 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 
 private const val ACCOUNT_PREFS = "account_sync"
 private const val ACCOUNT_SESSION_KEY = "account_session"
 private const val ACCOUNT_LAST_SYNCED_AT_KEY = "account_last_synced_at"
 private const val ACCOUNT_LOCAL_MUTATION_AT_KEY = "account_local_mutation_at"
 private const val ACCOUNT_LAST_SYNC_ERROR_KEY = "account_last_sync_error"
+private const val ACCOUNT_AUTO_SYNC_ENABLED_KEY = "account_auto_sync_enabled"
+private const val ACCOUNT_AUTO_SYNC_MODE_KEY = "account_auto_sync_mode"
 
 private const val ACCOUNT_FOOD_PREFS = "food_prefs"
 private const val ACCOUNT_THEME_PREFS = "app_settings"
@@ -105,6 +123,7 @@ private const val ACCOUNT_DAYS_BEFORE_KEY = "days_before"
 private const val ACCOUNT_DAILY_ENABLED_KEY = "daily_enabled"
 
 private const val CLOUD_SYNC_VERSION = 1
+private const val ACCOUNT_AUTO_SYNC_WORK_NAME = "account_auto_sync_work"
 
 private val accountGson = Gson()
 private val accountAuthPillShape = RoundedCornerShape(30.dp)
@@ -188,6 +207,12 @@ private data class SyncMeta(
     val lastError: String?
 )
 
+private enum class AccountAutoSyncMode {
+    DAILY,
+    WEEKLY,
+    MONTHLY
+}
+
 private fun accountPrefs(context: Context): SharedPreferences {
     return context.applicationContext.getSharedPreferences(ACCOUNT_PREFS, Context.MODE_PRIVATE)
 }
@@ -214,6 +239,7 @@ private fun clearAccountSession(context: Context) {
         remove(ACCOUNT_LAST_SYNCED_AT_KEY)
         remove(ACCOUNT_LOCAL_MUTATION_AT_KEY)
     }
+    cancelAccountAutoSyncWork(context.applicationContext)
 }
 
 private fun loadSyncMeta(context: Context): SyncMeta {
@@ -249,6 +275,41 @@ private fun saveLastSyncError(context: Context, message: String?) {
         } else {
             putString(ACCOUNT_LAST_SYNC_ERROR_KEY, message)
         }
+    }
+}
+
+private fun loadAccountAutoSyncEnabled(context: Context): Boolean {
+    return accountPrefs(context).getBoolean(ACCOUNT_AUTO_SYNC_ENABLED_KEY, true)
+}
+
+private fun saveAccountAutoSyncEnabled(
+    context: Context,
+    enabled: Boolean
+) {
+    accountPrefs(context).edit {
+        putBoolean(ACCOUNT_AUTO_SYNC_ENABLED_KEY, enabled)
+    }
+}
+
+private fun loadAccountAutoSyncMode(context: Context): AccountAutoSyncMode {
+    val raw = accountPrefs(context).getString(
+        ACCOUNT_AUTO_SYNC_MODE_KEY,
+        AccountAutoSyncMode.DAILY.name
+    ) ?: AccountAutoSyncMode.DAILY.name
+
+    return when (raw) {
+        "APP_OPEN_ONLY" -> AccountAutoSyncMode.DAILY
+        else -> runCatching { AccountAutoSyncMode.valueOf(raw) }
+            .getOrDefault(AccountAutoSyncMode.DAILY)
+    }
+}
+
+private fun saveAccountAutoSyncMode(
+    context: Context,
+    mode: AccountAutoSyncMode
+) {
+    accountPrefs(context).edit {
+        putString(ACCOUNT_AUTO_SYNC_MODE_KEY, mode.name)
     }
 }
 
@@ -301,6 +362,44 @@ private fun rememberAccountSyncMeta(): SyncMeta {
     }
 
     return meta
+}
+
+@Composable
+private fun rememberAccountAutoSyncEnabledPreference(): Boolean {
+    val context = LocalContext.current
+    val prefs = remember(context) { accountPrefs(context) }
+    var autoSyncEnabled by remember { mutableStateOf(loadAccountAutoSyncEnabled(context)) }
+
+    DisposableEffect(prefs, context) {
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == ACCOUNT_AUTO_SYNC_ENABLED_KEY) {
+                autoSyncEnabled = loadAccountAutoSyncEnabled(context)
+            }
+        }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        onDispose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+
+    return autoSyncEnabled
+}
+
+@Composable
+private fun rememberAccountAutoSyncModePreference(): AccountAutoSyncMode {
+    val context = LocalContext.current
+    val prefs = remember(context) { accountPrefs(context) }
+    var autoSyncMode by remember { mutableStateOf(loadAccountAutoSyncMode(context)) }
+
+    DisposableEffect(prefs, context) {
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == ACCOUNT_AUTO_SYNC_MODE_KEY) {
+                autoSyncMode = loadAccountAutoSyncMode(context)
+            }
+        }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        onDispose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+
+    return autoSyncMode
 }
 
 private fun requireCloudSetup() {
@@ -369,22 +468,27 @@ private fun restoreLocalSnapshot(context: Context, envelope: CloudSyncEnvelope) 
     saveLastSyncedAt(context, envelope.updatedAtMs)
 }
 
-private fun friendlyIdentityError(body: String?): String {
-    val code = runCatching {
+private fun parseIdentityErrorCode(body: String?): String {
+    return runCatching {
         accountGson.fromJson(body, ServiceErrorEnvelope::class.java).error?.message
     }.getOrNull().orEmpty()
+}
+
+private fun friendlyIdentityError(body: String?): String {
+    val code = parseIdentityErrorCode(body)
 
     return when (code) {
         "EMAIL_EXISTS" -> "That email is already in use."
-        "INVALID_LOGIN_CREDENTIALS",
-        "INVALID_PASSWORD",
-        "EMAIL_NOT_FOUND" -> "That email or password doesn't match."
+        "INVALID_PASSWORD" -> "That password doesn't match this email."
+        "EMAIL_NOT_FOUND" -> "There is no account with that email yet. Please sign up first."
+        "INVALID_LOGIN_CREDENTIALS" ->
+            "That email or password doesn't match. If this email is new, please sign up first."
         "USER_DISABLED" -> "That account is disabled."
         "TOO_MANY_ATTEMPTS_TRY_LATER" -> "Too many attempts right now. Try again in a moment."
         "OPERATION_NOT_ALLOWED" -> "Enable Email/Password in Firebase Authentication first."
         "CONFIGURATION_NOT_FOUND" -> "Enable Google in Firebase Authentication and set the web client ID for this build."
         "INVALID_IDP_RESPONSE" -> "Google sign-in did not return a usable account token."
-        else -> "Sign-in failed. Check the Firebase Authentication setup for this app."
+        else -> "Sign in failed. Try again."
     }
 }
 
@@ -674,6 +778,78 @@ private suspend fun clearCredentialState(context: Context) {
     }
 }
 
+private fun AccountAutoSyncMode.intervalDays(): Long? {
+    return when (this) {
+        AccountAutoSyncMode.DAILY -> 1L
+        AccountAutoSyncMode.WEEKLY -> 7L
+        AccountAutoSyncMode.MONTHLY -> 30L
+    }
+}
+
+private fun statusMessageDisplayDurationMillis(message: String): Long {
+    val wordCount = message
+        .trim()
+        .split(Regex("\\s+"))
+        .count { it.isNotBlank() }
+
+    return (4200L + (wordCount * 260L)).coerceIn(5200L, 9000L)
+}
+
+private fun scheduleAccountAutoSyncWork(
+    context: Context,
+    mode: AccountAutoSyncMode
+) {
+    val repeatIntervalDays = mode.intervalDays() ?: return
+
+    val constraints = Constraints.Builder()
+        .setRequiredNetworkType(NetworkType.CONNECTED)
+        .build()
+
+    val request =
+        PeriodicWorkRequestBuilder<AccountAutoSyncWorker>(repeatIntervalDays, TimeUnit.DAYS)
+            .setInitialDelay(repeatIntervalDays, TimeUnit.DAYS)
+            .setConstraints(constraints)
+            .build()
+
+    WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+        ACCOUNT_AUTO_SYNC_WORK_NAME,
+        ExistingPeriodicWorkPolicy.UPDATE,
+        request
+    )
+}
+
+private fun cancelAccountAutoSyncWork(context: Context) {
+    WorkManager.getInstance(context).cancelUniqueWork(ACCOUNT_AUTO_SYNC_WORK_NAME)
+}
+
+class AccountAutoSyncWorker(
+    appContext: Context,
+    params: WorkerParameters
+) : CoroutineWorker(appContext, params) {
+
+    override suspend fun doWork(): Result {
+        if (!isCloudAccountConfigured()) return Result.success()
+
+        val session = loadAccountSession(applicationContext) ?: return Result.success()
+
+        return runCatching {
+            val result = resumeCloudSync(applicationContext, session)
+            saveAccountSession(applicationContext, result.session)
+            saveLastSyncError(applicationContext, null)
+            Result.success()
+        }.getOrElse { failure ->
+            if (failure.message?.contains("sign in again", ignoreCase = true) == true) {
+                clearAccountSession(applicationContext)
+            }
+            saveLastSyncError(
+                applicationContext,
+                failure.message ?: "Cloud sync couldn't run in the background."
+            )
+            Result.success()
+        }
+    }
+}
+
 private suspend fun launchGoogleSignIn(context: Context): AccountSession {
     check(isGoogleAccountConfigured()) {
         "Google sign-in is not configured yet. Add GOOGLE_WEB_CLIENT_ID in local.properties and enable Google in Firebase Authentication."
@@ -726,28 +902,43 @@ private tailrec fun Context.findActivity(): Activity? {
 @Composable
 fun AccountCloudSyncEffect(session: AccountSession?) {
     val context = LocalContext.current.applicationContext
+    val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
+    val autoSyncEnabled = rememberAccountAutoSyncEnabledPreference()
+    val autoSyncMode = rememberAccountAutoSyncModePreference()
 
-    DisposableEffect(context, session?.uid, session?.refreshToken) {
+    DisposableEffect(context, session?.uid, autoSyncEnabled, autoSyncMode) {
+        if (session == null || !isCloudAccountConfigured() || !autoSyncEnabled) {
+            cancelAccountAutoSyncWork(context)
+        } else {
+            scheduleAccountAutoSyncWork(context, autoSyncMode)
+        }
+        onDispose { }
+    }
+
+    DisposableEffect(context, lifecycleOwner, session?.uid, session?.refreshToken, autoSyncEnabled) {
         if (session == null || !isCloudAccountConfigured()) {
             onDispose {}
         } else {
             val foodPrefs = context.getSharedPreferences(ACCOUNT_FOOD_PREFS, Context.MODE_PRIVATE)
             val themePrefs = context.getSharedPreferences(ACCOUNT_THEME_PREFS, Context.MODE_PRIVATE)
             val notifPrefs = context.getSharedPreferences(ACCOUNT_NOTIF_PREFS, Context.MODE_PRIVATE)
-            var syncJob: Job? = null
-            var startJob: Job? = null
+            var foregroundSyncJob: Job? = null
 
-            fun scheduleSync() {
-                syncJob?.cancel()
-                syncJob = scope.launch {
-                    delay(900)
+            fun runForegroundSync() {
+                foregroundSyncJob?.cancel()
+                foregroundSyncJob = scope.launch {
                     runCatching {
-                        pushSnapshotToCloud(context, loadAccountSession(context) ?: session)
+                        val result = resumeCloudSync(context, loadAccountSession(context) ?: session)
+                        saveAccountSession(context, result.session)
+                        saveLastSyncError(context, null)
                     }.onFailure { failure ->
+                        if (failure.message?.contains("sign in again", ignoreCase = true) == true) {
+                            clearAccountSession(context)
+                        }
                         saveLastSyncError(
                             context,
-                            failure.message ?: "Cloud sync couldn't save your latest changes."
+                            failure.message ?: "Cloud sync couldn't reconnect."
                         )
                     }
                 }
@@ -761,7 +952,6 @@ fun AccountCloudSyncEffect(session: AccountSession?) {
                     key == ACCOUNT_BARCODE_CACHE_KEY
                 ) {
                     markLocalMutation(context)
-                    scheduleSync()
                 }
             }
             val themeListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
@@ -770,7 +960,6 @@ fun AccountCloudSyncEffect(session: AccountSession?) {
                     key == ACCOUNT_COUNTDOWN_FORMAT_KEY
                 ) {
                     markLocalMutation(context)
-                    scheduleSync()
                 }
             }
             val notifListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
@@ -779,7 +968,6 @@ fun AccountCloudSyncEffect(session: AccountSession?) {
                     key == ACCOUNT_DAILY_ENABLED_KEY
                 ) {
                     markLocalMutation(context)
-                    scheduleSync()
                 }
             }
 
@@ -787,28 +975,23 @@ fun AccountCloudSyncEffect(session: AccountSession?) {
             themePrefs.registerOnSharedPreferenceChangeListener(themeListener)
             notifPrefs.registerOnSharedPreferenceChangeListener(notifListener)
 
-            startJob = scope.launch {
-                runCatching {
-                    val result = resumeCloudSync(context, session)
-                    saveAccountSession(context, result.session)
-                    saveLastSyncError(context, null)
-                }.onFailure { failure ->
-                    if (failure.message?.contains("sign in again", ignoreCase = true) == true) {
-                        clearAccountSession(context)
-                    }
-                    saveLastSyncError(
-                        context,
-                        failure.message ?: "Cloud sync couldn't reconnect."
-                    )
+            val observer = LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_START && autoSyncEnabled) {
+                    runForegroundSync()
                 }
+            }
+            lifecycleOwner.lifecycle.addObserver(observer)
+
+            if (autoSyncEnabled) {
+                runForegroundSync()
             }
 
             onDispose {
+                lifecycleOwner.lifecycle.removeObserver(observer)
                 foodPrefs.unregisterOnSharedPreferenceChangeListener(foodListener)
                 themePrefs.unregisterOnSharedPreferenceChangeListener(themeListener)
                 notifPrefs.unregisterOnSharedPreferenceChangeListener(notifListener)
-                syncJob?.cancel()
-                startJob?.cancel()
+                foregroundSyncJob?.cancel()
             }
         }
     }
@@ -821,12 +1004,22 @@ fun AccountSyncScreen(navController: NavHostController) {
     val scope = rememberCoroutineScope()
     val session = rememberAccountSessionPreference()
     val syncMeta = rememberAccountSyncMeta()
+    val autoSyncEnabled = rememberAccountAutoSyncEnabledPreference()
+    val autoSyncMode = rememberAccountAutoSyncModePreference()
 
     var email by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
     var busyAction by rememberSaveable { mutableStateOf<String?>(null) }
     var statusMessage by rememberSaveable { mutableStateOf<String?>(null) }
     var showLogoutDialog by rememberSaveable { mutableStateOf(false) }
+
+    LaunchedEffect(statusMessage) {
+        val message = statusMessage?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
+        delay(statusMessageDisplayDurationMillis(message))
+        if (statusMessage == message) {
+            statusMessage = null
+        }
+    }
 
     val canUseEmailPassword =
         email.isNotBlank() &&
@@ -843,14 +1036,6 @@ fun AccountSyncScreen(navController: NavHostController) {
                 val signedIn = signUpWithEmailPassword(email.trim(), password)
                 val result = bootstrapSignedInAccount(appContext, signedIn)
                 saveAccountSession(appContext, result.session)
-                statusMessage = when (result.action) {
-                    ResumeAction.RESTORED_REMOTE ->
-                        "Account created and your cloud pantry was restored."
-
-                    ResumeAction.PUSHED_LOCAL,
-                    ResumeAction.NONE ->
-                        "Account created and this device was connected to cloud sync."
-                }
             }.onFailure { failure ->
                 statusMessage = failure.message
             }
@@ -866,14 +1051,6 @@ fun AccountSyncScreen(navController: NavHostController) {
                 val signedIn = signInWithEmailPassword(email.trim(), password)
                 val result = bootstrapSignedInAccount(appContext, signedIn)
                 saveAccountSession(appContext, result.session)
-                statusMessage = when (result.action) {
-                    ResumeAction.RESTORED_REMOTE ->
-                        "Signed in and your cloud pantry was restored."
-
-                    ResumeAction.PUSHED_LOCAL,
-                    ResumeAction.NONE ->
-                        "Signed in and cloud sync is ready."
-                }
             }.onFailure { failure ->
                 statusMessage = failure.message
             }
@@ -889,14 +1066,6 @@ fun AccountSyncScreen(navController: NavHostController) {
                 val signedIn = launchGoogleSignIn(context)
                 val result = bootstrapSignedInAccount(appContext, signedIn)
                 saveAccountSession(appContext, result.session)
-                statusMessage = when (result.action) {
-                    ResumeAction.RESTORED_REMOTE ->
-                        "Google account connected and your cloud pantry was restored."
-
-                    ResumeAction.PUSHED_LOCAL,
-                    ResumeAction.NONE ->
-                        "Google account connected and cloud sync is ready."
-                }
             }.onFailure { failure ->
                 statusMessage = failure.message
             }
@@ -912,7 +1081,6 @@ fun AccountSyncScreen(navController: NavHostController) {
                 val currentSession = session ?: return@runCatching
                 val synced = pushSnapshotToCloud(appContext, currentSession)
                 saveAccountSession(appContext, synced)
-                statusMessage = "Your latest pantry changes were saved to the cloud."
             }.onFailure { failure ->
                 statusMessage = failure.message
             }
@@ -928,12 +1096,19 @@ fun AccountSyncScreen(navController: NavHostController) {
                 val currentSession = session ?: return@runCatching
                 val refreshed = restoreCloudDataNow(appContext, currentSession)
                 saveAccountSession(appContext, refreshed)
-                statusMessage = "Cloud pantry data was restored to this device."
             }.onFailure { failure ->
                 statusMessage = failure.message
             }
             busyAction = null
         }
+    }
+
+    fun updateAutoSyncEnabled(enabled: Boolean) {
+        saveAccountAutoSyncEnabled(appContext, enabled)
+    }
+
+    fun updateAutoSyncMode(mode: AccountAutoSyncMode) {
+        saveAccountAutoSyncMode(appContext, mode)
     }
 
     ScaffoldWithTopBar(title = "Account", navController = navController) {
@@ -971,28 +1146,44 @@ fun AccountSyncScreen(navController: NavHostController) {
                     SignedInAccountContent(
                         session = session,
                         lastSyncedAt = syncMeta.lastSyncedAt,
+                        autoSyncEnabled = autoSyncEnabled,
+                        autoSyncMode = autoSyncMode,
                         busyAction = busyAction,
+                        onAutoSyncEnabledChange = ::updateAutoSyncEnabled,
+                        onAutoSyncModeChange = ::updateAutoSyncMode,
                         onSyncNow = ::syncNow,
                         onRestoreCloud = ::restoreCloud,
                         onLogOut = { showLogoutDialog = true }
                     )
                 }
 
-                statusMessage?.takeIf { it.isNotBlank() }?.let { message ->
-                    AccountStatusPill(
-                        message = message,
-                        isError =
-                            message.contains("failed", ignoreCase = true) ||
-                                    message.contains("couldn't", ignoreCase = true) ||
-                                    message.contains("not configured", ignoreCase = true)
-                    )
+                AnimatedVisibility(
+                    visible = !statusMessage.isNullOrBlank(),
+                    enter = fadeIn(),
+                    exit = fadeOut()
+                ) {
+                    statusMessage?.takeIf { it.isNotBlank() }?.let { message ->
+                        AccountStatusPill(
+                            message = message,
+                            isError =
+                                message.contains("failed", ignoreCase = true) ||
+                                        message.contains("couldn't", ignoreCase = true) ||
+                                        message.contains("not configured", ignoreCase = true)
+                        )
+                    }
                 }
 
-                syncMeta.lastError?.takeIf { it.isNotBlank() }?.let { error ->
-                    AccountStatusPill(
-                        message = error,
-                        isError = true
-                    )
+                AnimatedVisibility(
+                    visible = !syncMeta.lastError.isNullOrBlank(),
+                    enter = fadeIn(),
+                    exit = fadeOut()
+                ) {
+                    syncMeta.lastError?.takeIf { it.isNotBlank() }?.let { error ->
+                        AccountStatusPill(
+                            message = error,
+                            isError = true
+                        )
+                    }
                 }
             }
 
@@ -1011,12 +1202,14 @@ fun AccountSyncScreen(navController: NavHostController) {
                         scope.launch {
                             clearCredentialState(appContext)
                             clearAccountSession(appContext)
-                            statusMessage = "You were logged out on this device."
                             busyAction = null
                         }
                     }
                 ) {
-                    Text("Log out")
+                    Text(
+                        text = "Log out",
+                        color = MaterialTheme.colorScheme.error
+                    )
                 }
             },
             dismissButton = {
@@ -1030,6 +1223,7 @@ fun AccountSyncScreen(navController: NavHostController) {
             }
         )
     }
+
 }
 
 @Composable
@@ -1130,7 +1324,11 @@ private fun SignedOutAccountContent(
 private fun SignedInAccountContent(
     session: AccountSession,
     lastSyncedAt: Long,
+    autoSyncEnabled: Boolean,
+    autoSyncMode: AccountAutoSyncMode,
     busyAction: String?,
+    onAutoSyncEnabledChange: (Boolean) -> Unit,
+    onAutoSyncModeChange: (AccountAutoSyncMode) -> Unit,
     onSyncNow: () -> Unit,
     onRestoreCloud: () -> Unit,
     onLogOut: () -> Unit
@@ -1178,6 +1376,19 @@ private fun SignedInAccountContent(
             }
         }
 
+        AccountAutoSyncToggleCard(
+            enabled = autoSyncEnabled,
+            controlsEnabled = busyAction == null,
+            onCheckedChange = onAutoSyncEnabledChange
+        )
+
+        AccountSyncScheduleCard(
+            autoSyncEnabled = autoSyncEnabled,
+            selectedMode = autoSyncMode,
+            enabled = busyAction == null,
+            onModeSelected = onAutoSyncModeChange
+        )
+
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -1190,7 +1401,7 @@ private fun SignedInAccountContent(
                 modifier = Modifier.weight(1f)
             )
             SecondaryPillButton(
-                text = "Restore cloud",
+                text = "Load backup",
                 busy = busyAction == "restore",
                 enabled = busyAction == null,
                 onClick = onRestoreCloud,
@@ -1202,7 +1413,178 @@ private fun SignedInAccountContent(
             onClick = onLogOut,
             enabled = busyAction == null
         ) {
-            Text("Log out")
+            Text(
+                text = "Log out",
+                color = MaterialTheme.colorScheme.error
+            )
+        }
+    }
+}
+
+@Composable
+private fun AccountAutoSyncToggleCard(
+    enabled: Boolean,
+    controlsEnabled: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    MatchingPillCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = accountAuthPillShape,
+        shadowElevation = 2.dp
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 18.dp, vertical = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Auto sync",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = if (enabled) {
+                        "Sync when the app opens and back up in the background."
+                    } else {
+                        "Turn this on to sync automatically when the app opens."
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Switch(
+                checked = enabled,
+                enabled = controlsEnabled,
+                onCheckedChange = onCheckedChange
+            )
+        }
+    }
+}
+
+@Composable
+private fun AccountSyncScheduleCard(
+    autoSyncEnabled: Boolean,
+    selectedMode: AccountAutoSyncMode,
+    enabled: Boolean,
+    onModeSelected: (AccountAutoSyncMode) -> Unit
+) {
+    MatchingPillCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = accountAuthPillShape,
+        shadowElevation = 2.dp
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 18.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = "Sync schedule",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = if (autoSyncEnabled) {
+                    "Choose how often background sync should run. Daily is safer."
+                } else {
+                    "Pick the background schedule to use when Auto sync is on."
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                AccountAutoSyncModeButton(
+                    text = "Daily",
+                    supportingText = "Safer",
+                    selected = selectedMode == AccountAutoSyncMode.DAILY,
+                    enabled = enabled,
+                    onClick = { onModeSelected(AccountAutoSyncMode.DAILY) },
+                    modifier = Modifier.weight(1f)
+                )
+                AccountAutoSyncModeButton(
+                    text = "Weekly",
+                    selected = selectedMode == AccountAutoSyncMode.WEEKLY,
+                    enabled = enabled,
+                    onClick = { onModeSelected(AccountAutoSyncMode.WEEKLY) },
+                    modifier = Modifier.weight(1f)
+                )
+                AccountAutoSyncModeButton(
+                    text = "Monthly",
+                    selected = selectedMode == AccountAutoSyncMode.MONTHLY,
+                    enabled = enabled,
+                    onClick = { onModeSelected(AccountAutoSyncMode.MONTHLY) },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AccountAutoSyncModeButton(
+    text: String,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    supportingText: String? = null
+) {
+    val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val containerColor =
+        if (selected) {
+            MaterialTheme.colorScheme.primary.copy(alpha = if (isDarkTheme) 0.24f else 0.14f)
+        } else {
+            MaterialTheme.colorScheme.surface.copy(alpha = if (isDarkTheme) 0.46f else 0.88f)
+        }
+    val borderColor =
+        if (selected) {
+            MaterialTheme.colorScheme.primary.copy(alpha = if (isDarkTheme) 0.44f else 0.28f)
+        } else {
+            MaterialTheme.colorScheme.outline.copy(alpha = if (isDarkTheme) 0.28f else 0.16f)
+        }
+
+    OutlinedButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier.height(60.dp),
+        shape = accountAuthPillShape,
+        border = BorderStroke(1.dp, borderColor),
+        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp),
+        colors = ButtonDefaults.outlinedButtonColors(
+            containerColor = containerColor,
+            contentColor = if (selected) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.onSurface
+            }
+        )
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
+            )
+            supportingText?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }
