@@ -14,6 +14,7 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.view.WindowManager
 import android.widget.Toast
 import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
@@ -184,9 +185,6 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
-import androidx.compose.ui.input.nestedscroll.NestedScrollSource
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
@@ -1056,8 +1054,23 @@ fun GlassAlertDialog(
                     shadowElevation = 16.dp,
                     primaryBlur = 100.dp,
                     accentBlur = 28.dp,
-                    content = dialogContent
-                )
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(dialogShape)
+                            .background(
+                                brush = Brush.verticalGradient(
+                                    colors = listOf(
+                                        Color.Black.copy(alpha = 0.96f),
+                                        Color.Black.copy(alpha = 0.84f)
+                                    )
+                                )
+                            )
+                    ) {
+                        dialogContent()
+                    }
+                }
             } else {
                 ExactFrostedPillCard(
                     modifier = dialogModifier,
@@ -1241,7 +1254,8 @@ fun SlimTopBar(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 3.dp)
+            .statusBarsPadding()
+            .padding(start = 12.dp, top = 8.dp, end = 12.dp, bottom = 3.dp)
     ) {
         GlassSurface(
             modifier = Modifier.fillMaxWidth(),
@@ -1311,6 +1325,48 @@ private fun ApplySystemBarStyle(isDark: Boolean) {
         WindowInsetsControllerCompat(window, view).apply {
             isAppearanceLightStatusBars = !isDark
             isAppearanceLightNavigationBars = !isDark
+        }
+    }
+}
+
+@Composable
+private fun OverrideStatusBarColor(
+    color: Color,
+    isDarkIcons: Boolean
+) {
+    val view = LocalView.current
+    val defaultLightStatusBars = MaterialTheme.colorScheme.background.luminance() > 0.5f
+    if (view.isInEditMode) return
+
+    DisposableEffect(view, color, isDarkIcons) {
+        val window = (view.context as Activity).window
+        val insetsController = WindowInsetsControllerCompat(window, view)
+
+        window.statusBarColor = color.toArgb()
+        insetsController.isAppearanceLightStatusBars = isDarkIcons
+
+        onDispose {
+            window.statusBarColor = Color.Transparent.toArgb()
+            insetsController.isAppearanceLightStatusBars = defaultLightStatusBars
+        }
+    }
+}
+
+@Composable
+private fun OverrideSoftInputMode(
+    softInputMode: Int
+) {
+    val view = LocalView.current
+    if (view.isInEditMode) return
+
+    DisposableEffect(view, softInputMode) {
+        val window = (view.context as Activity).window
+        val previousSoftInputMode = window.attributes.softInputMode
+
+        window.setSoftInputMode(softInputMode)
+
+        onDispose {
+            window.setSoftInputMode(previousSoftInputMode)
         }
     }
 }
@@ -2554,6 +2610,7 @@ fun CompactSearchBar(
     modifier: Modifier = Modifier,
     textFieldModifier: Modifier = Modifier,
     showClearButton: Boolean = true,
+    placeholderText: String = "Search foods...",
     onTap: (() -> Unit)? = null
 ) {
     val density = LocalDensity.current
@@ -2594,10 +2651,10 @@ fun CompactSearchBar(
                 } else {
                     Modifier
                 }
-            ),
+        ),
         shape = RoundedCornerShape(50.dp),
         tone = GlassTone.SEARCH,
-        shadowElevation = 8.dp
+        shadowElevation = 0.dp
     ) {
         Row(
             modifier = Modifier
@@ -2617,7 +2674,7 @@ fun CompactSearchBar(
             Box(modifier = Modifier.weight(1f)) {
                 if (value.isBlank()) {
                     Text(
-                        text = "Search foods...",
+                        text = placeholderText,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
@@ -2845,23 +2902,85 @@ private fun SelectionActionChip(
 }
 
 @Composable
-private fun HistoryClearFloatingActionButton(
-    onClick: () -> Unit,
+private fun HistoryTopBar(
+    showSearchBar: Boolean,
+    searchQuery: String,
+    canClearHistory: Boolean,
+    onSearchQueryChange: (String) -> Unit,
+    onShowSearchBar: () -> Unit,
+    searchTextFieldModifier: Modifier,
+    onSearchBarTap: () -> Unit,
+    onClearHistoryClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
-    val deleteFabRed = if (isDarkTheme) Color(0xFFFF6257) else Color(0xFFD32F2F)
-    val deleteFabOverlay = if (isDarkTheme) Color(0xFF9F1F1F) else Color(0xFFB71C1C)
-
-    EditCategoriesStyledFab(
-        onClick = onClick,
-        icon = Icons.Default.Delete,
-        contentDescription = "Clear history",
-        backgroundTint = deleteFabOverlay,
-        iconTint = deleteFabRed,
-        tintAlpha = if (isDarkTheme) 0.78f else 0.64f,
+    Box(
         modifier = modifier
-    )
+            .fillMaxWidth()
+            .statusBarsPadding()
+            .padding(start = 12.dp, top = 8.dp, end = 12.dp, bottom = 3.dp)
+    ) {
+        EditCategoriesBackgroundSurface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(30.dp),
+            shadowElevation = 12.dp
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .animateContentSize()
+                    .padding(horizontal = 16.dp, vertical = 14.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "History",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    IconButton(onClick = onShowSearchBar) {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = "Show search"
+                        )
+                    }
+
+                    if (canClearHistory) {
+                        IconButton(onClick = onClearHistoryClick) {
+                            Icon(
+                                imageVector = Icons.Default.Delete,
+                                contentDescription = "Clear history",
+                                tint = MaterialTheme.colorScheme.error.copy(alpha = 0.82f)
+                            )
+                        }
+                    }
+                }
+
+                AnimatedVisibility(
+                    visible = showSearchBar,
+                    enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(tween(350)),
+                    exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut(tween(350))
+                ) {
+                    Column {
+                        Spacer(Modifier.height(10.dp))
+
+                        CompactSearchBar(
+                            value = searchQuery,
+                            onValueChange = onSearchQueryChange,
+                            textFieldModifier = searchTextFieldModifier,
+                            placeholderText = "Search history...",
+                            onTap = onSearchBarTap
+                        )
+
+                        Spacer(Modifier.height(10.dp))
+                    }
+                }
+            }
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -3322,7 +3441,8 @@ fun MyPantryTopBar(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 3.dp)
+            .statusBarsPadding()
+            .padding(start = 12.dp, top = 8.dp, end = 12.dp, bottom = 3.dp)
     ) {
         EditCategoriesBackgroundSurface(
             modifier = Modifier.fillMaxWidth(),
@@ -3899,9 +4019,7 @@ fun AppNav(
                 .padding(
                     start = padding.calculateStartPadding(layoutDir),
                     end = padding.calculateEndPadding(layoutDir)
-                )
-                .statusBarsPadding()
-                .padding(top = 10.dp),
+                ),
 
             enterTransition = { bottomTabEnterTransition() },
 
@@ -3964,7 +4082,6 @@ fun HistoryScreen(
     onOverlayVisibilityChange: (Boolean) -> Unit
 ) {
     val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
     val prefs = remember { context.getSharedPreferences(FOOD_PREFS, Context.MODE_PRIVATE) }
     val gson = remember { Gson() }
     val density = LocalDensity.current
@@ -4017,11 +4134,9 @@ fun HistoryScreen(
         }
     }
     val listState = rememberLazyListState()
-    var searchFabVisible by rememberSaveable { mutableStateOf(true) }
-    val isHistoryFabVisible = searchFabVisible && !showSearchBar
     val historyBottomSafePadding = listBottomSafePadding(
         itemCount = filtered.size,
-        hasFab = isHistoryFabVisible
+        hasFab = false
     )
     val isHistorySearchKeyboardVisible = WindowInsets.ime.getBottom(density) > 0
     var historySearchKeyboardWasVisible by remember { mutableStateOf(false) }
@@ -4041,17 +4156,6 @@ fun HistoryScreen(
 
     SideEffect {
         onOverlayVisibilityChange(shouldBlurBackground)
-    }
-
-    DisposableEffect(lifecycleOwner, showSearchBar) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME && !showSearchBar) {
-                searchFabVisible = true
-            }
-        }
-
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     DisposableEffect(Unit) {
@@ -4100,210 +4204,104 @@ fun HistoryScreen(
         }
     }
 
-    LaunchedEffect(listState) {
-        var prevIndex = listState.firstVisibleItemIndex
-        var prevOffset = listState.firstVisibleItemScrollOffset
-        var currentFabVisible = searchFabVisible
-
-        snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
-            .collect { (index, offset) ->
-                val scrollingUp = if (index != prevIndex) index < prevIndex else offset < prevOffset
-                val newFabVisible = scrollingUp || (index == 0 && offset == 0)
-
-                if (currentFabVisible != newFabVisible) {
-                    currentFabVisible = newFabVisible
-                    searchFabVisible = newFabVisible
-                }
-
-                prevIndex = index
-                prevOffset = offset
-            }
-    }
+    val historyTopBarDensity = LocalDensity.current
+    val defaultHistoryTopBarHeightPx = with(historyTopBarDensity) { 84.dp.roundToPx() }
+    var historyTopBarHeightPx by remember { mutableIntStateOf(defaultHistoryTopBarHeightPx) }
+    val historyContentTopPadding = with(historyTopBarDensity) { historyTopBarHeightPx.toDp() } + 8.dp
 
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
             containerColor = Color.Transparent,
-            contentWindowInsets = WindowInsets.ime,
-            floatingActionButtonPosition = FabPosition.End,
-            floatingActionButton = {
-                Column(
-                    modifier = Modifier.padding(bottom = 90.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    horizontalAlignment = Alignment.End
-                ) {
-                    AnimatedVisibility(
-                        visible = history.isNotEmpty() && searchFabVisible && !showSearchBar,
-                        enter = fadeIn(tween(350)) + slideInVertically(tween(350)) { it / 2 },
-                        exit = fadeOut(tween(350)) + slideOutVertically(tween(350)) { it / 2 }
-                    ) {
-                        HistoryClearFloatingActionButton(
-                            onClick = { pendingClearHistory = true }
-                        )
-                    }
-
-                    AnimatedVisibility(
-                        visible = searchFabVisible && !showSearchBar,
-                        enter = fadeIn(tween(350)) + slideInVertically(tween(350)) { it / 2 },
-                        exit = fadeOut(tween(350)) + slideOutVertically(tween(350)) { it / 2 }
-                    ) {
-                        val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
-
-                        EditCategoriesStyledFab(
-                            onClick = { showSearchBar = true },
-                            icon = Icons.Default.Search,
-                            contentDescription = "Search history",
-                            backgroundTint = MaterialTheme.colorScheme.primary,
-                            iconTint = MaterialTheme.colorScheme.onPrimary,
-                            tintAlpha = if (isDarkTheme) 0.76f else 0.62f
-                        )
-                    }
-                }
-            }
+            contentWindowInsets = WindowInsets.ime
         ) { innerPadding ->
-            Column(
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding)
-                    .padding(horizontal = 16.dp)
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .animateContentSize(
-                            animationSpec = tween(
-                                durationMillis = 280,
-                                easing = FastOutSlowInEasing
-                            )
-                        )
-                ) {
-                    AnimatedVisibility(
-                        visible = showSearchBar,
-                        enter =
-                            fadeIn(
-                                animationSpec = tween(
-                                    durationMillis = 320,
-                                    easing = LinearOutSlowInEasing
-                                )
-                            ) +
-                                    slideInVertically(
-                                        initialOffsetY = { -it / 3 },
-                                        animationSpec = tween(
-                                            durationMillis = 320,
-                                            easing = LinearOutSlowInEasing
-                                        )
-                                    ) +
-                                    expandVertically(
-                                        expandFrom = Alignment.Top,
-                                        animationSpec = tween(
-                                            durationMillis = 320,
-                                            easing = LinearOutSlowInEasing
-                                        )
-                                    ),
-                        exit =
-                            fadeOut(
-                                animationSpec = tween(
-                                    durationMillis = 220,
-                                    easing = FastOutLinearInEasing
-                                )
-                            ) +
-                                    slideOutVertically(
-                                        targetOffsetY = { -it / 4 },
-                                        animationSpec = tween(
-                                            durationMillis = 220,
-                                            easing = FastOutLinearInEasing
-                                        )
-                                    ) +
-                                    shrinkVertically(
-                                        shrinkTowards = Alignment.Top,
-                                        animationSpec = tween(
-                                            durationMillis = 220,
-                                            easing = FastOutLinearInEasing
-                                        )
-                                    )
-                    ) {
-                        Column {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                CompactSearchBar(
-                                    value = search,
-                                    onValueChange = { search = it },
-                                    modifier = Modifier.fillMaxWidth(),
-                                    textFieldModifier = Modifier.focusRequester(historySearchFocus),
-                                    showClearButton = false,
-                                    onTap = {
-                                        historySearchFocus.requestFocus()
-                                        keyboard?.show()
-                                    }
-                                )
-                            }
-
-                            Spacer(Modifier.height(8.dp))
-                        }
-                    }
-
-                }
-
                 if (filtered.isEmpty()) {
                     Box(
                         modifier = Modifier
-                            .weight(1f, fill = true)
-                            .fillMaxWidth(),
+                            .fillMaxSize()
+                            .padding(horizontal = 16.dp)
+                            .padding(top = historyContentTopPadding),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(if (search.isNotBlank()) "No history found" else "No history yet")
                     }
                 } else {
-                    Box(
+                    LazyColumn(
+                        state = listState,
                         modifier = Modifier
-                            .weight(1f, fill = true)
                             .fillMaxWidth()
+                            .padding(horizontal = 16.dp),
+                        overscrollEffect = null,
+                        contentPadding = PaddingValues(
+                            top = historyContentTopPadding,
+                            bottom = historyBottomSafePadding
+                        )
                     ) {
-                        LazyColumn(
-                            state = listState,
-                            modifier = Modifier.fillMaxSize(),
-                            overscrollEffect = null,
-                            contentPadding = PaddingValues(bottom = 80.dp)
-                        ) {
-                            items(
-                                items = filtered,
-                                key = { normalizeFoodName(it.name) },
-                                contentType = { "history_food_item" }
-                            ) { entry ->
-                                HistoryFoodCard(
-                                    modifier = Modifier.animateItem(
-                                        fadeInSpec = null,
-                                        fadeOutSpec = null,
-                                        placementSpec = tween(
-                                            durationMillis = SWIPE_ITEM_PLACEMENT_DURATION_MS,
-                                            easing = FastOutSlowInEasing
-                                        )
-                                    ),
-                                    name = entry.name,
-                                    onQuickAdd = {
-                                        val existsInPantry = pantryFoods.any {
-                                            normalizeFoodName(it.name) == normalizeFoodName(entry.name)
-                                        }
-
-                                        if (existsInPantry) {
-                                            historyNoticeMessage =
-                                                "\"${entry.name}\" is already in your food list."
-                                        } else {
-                                            quickAddName = entry.name
-                                            quickAddExpiry = ""
-                                            quickAddCategory = null
-                                            quickAddError = null
-                                        }
-                                    },
-                                    onDelete = {
-                                        pendingDeleteHistoryEntry = entry
+                        items(
+                            items = filtered,
+                            key = { normalizeFoodName(it.name) },
+                            contentType = { "history_food_item" }
+                        ) { entry ->
+                            HistoryFoodCard(
+                                modifier = Modifier.animateItem(
+                                    fadeInSpec = null,
+                                    fadeOutSpec = null,
+                                    placementSpec = tween(
+                                        durationMillis = SWIPE_ITEM_PLACEMENT_DURATION_MS,
+                                        easing = FastOutSlowInEasing
+                                    )
+                                ),
+                                name = entry.name,
+                                onQuickAdd = {
+                                    val existsInPantry = pantryFoods.any {
+                                        normalizeFoodName(it.name) == normalizeFoodName(entry.name)
                                     }
-                                )
-                            }
+
+                                    if (existsInPantry) {
+                                        historyNoticeMessage =
+                                            "\"${entry.name}\" is already in your food list."
+                                    } else {
+                                        quickAddName = entry.name
+                                        quickAddExpiry = ""
+                                        quickAddCategory = null
+                                        quickAddError = null
+                                    }
+                                },
+                                onDelete = {
+                                    pendingDeleteHistoryEntry = entry
+                                }
+                            )
                         }
                     }
                 }
+
+                HistoryTopBar(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .onSizeChanged { historyTopBarHeightPx = it.height },
+                    showSearchBar = showSearchBar,
+                    searchQuery = search,
+                    canClearHistory = history.isNotEmpty(),
+                    onSearchQueryChange = { search = it },
+                    onShowSearchBar = {
+                        if (!showSearchBar) {
+                            showSearchBar = true
+                        } else {
+                            historySearchFocus.requestFocus()
+                            keyboard?.show()
+                        }
+                    },
+                    searchTextFieldModifier = Modifier.focusRequester(historySearchFocus),
+                    onSearchBarTap = {
+                        historySearchFocus.requestFocus()
+                        keyboard?.show()
+                    },
+                    onClearHistoryClick = { pendingClearHistory = true }
+                )
             }
         }
     }
@@ -5531,7 +5529,7 @@ private fun RecipePromptBar(
         containerColor = barContainerColor,
         borderColor = barBorderColor,
         showDecorativeOverlays = false,
-        shadowElevation = 16.dp
+        shadowElevation = 6.dp
     ) {
         Row(
             modifier = Modifier
@@ -5614,7 +5612,6 @@ private fun RecipeScreen(
     val context = LocalContext.current
     val appCtx = context.applicationContext
     val density = LocalDensity.current
-    val lifecycleOwner = LocalLifecycleOwner.current
     val gson = remember { Gson() }
     val sharedPrefs = remember(appCtx) {
         appCtx.getSharedPreferences(FOOD_PREFS, Context.MODE_PRIVATE)
@@ -5625,7 +5622,16 @@ private fun RecipeScreen(
     val scope = rememberCoroutineScope()
     val keyboard = LocalSoftwareKeyboardController.current
     val listState = rememberLazyListState()
-    val animatedImeShiftPx = rememberAnimatedImeShiftPx(label = "recipeAiImeShift")
+    val imeBottomPadding = with(density) { WindowInsets.ime.getBottom(this).toDp() }
+    val recipePromptBarRestingBottomPadding = 82.dp
+    val recipePromptBarBottomPadding by animateDpAsState(
+        targetValue = maxOf(recipePromptBarRestingBottomPadding, imeBottomPadding + 12.dp),
+        animationSpec = tween(
+            durationMillis = 220,
+            easing = LinearOutSlowInEasing
+        ),
+        label = "recipePromptBarBottomPadding"
+    )
 
     val pantryFoods = remember {
         mutableStateListOf<FoodItem>().apply {
@@ -5641,12 +5647,12 @@ private fun RecipeScreen(
     }
     var promptText by rememberSaveable { mutableStateOf("") }
     var isLoading by rememberSaveable { mutableStateOf(false) }
-    var promptBarVisible by rememberSaveable { mutableStateOf(true) }
     val expiringPromptDismissed = sessionState.expiringPromptDismissed
     val messagesJson = sessionState.messagesJson
     val previousIngredientsJson = sessionState.previousIngredientsJson
     val conversationId = sessionState.conversationId
-    val isRecipeKeyboardVisible = WindowInsets.ime.getBottom(density) > 0
+
+    OverrideSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING)
 
     val messages = remember(messagesJson) {
         loadRecipeChatMessages(gson, messagesJson)
@@ -5680,15 +5686,7 @@ private fun RecipeScreen(
         (if (messages.isEmpty()) 1 else 0) +
         messages.size +
         (if (isLoading) 1 else 0)
-    val isPromptBarDocked = promptBarVisible || isRecipeKeyboardVisible
-    val recipeListBottomPadding by animateDpAsState(
-        targetValue = if (isPromptBarDocked) 138.dp else 96.dp,
-        animationSpec = tween(
-            durationMillis = if (isPromptBarDocked) 320 else 260,
-            easing = if (isPromptBarDocked) LinearOutSlowInEasing else FastOutSlowInEasing
-        ),
-        label = "recipeListBottomPadding"
-    )
+    val recipeListBottomPadding = 138.dp
 
     DisposableEffect(sharedPrefs, gson) {
         val listener =
@@ -5715,67 +5713,9 @@ private fun RecipeScreen(
         onDispose { notifPrefs.unregisterOnSharedPreferenceChangeListener(listener) }
     }
 
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                promptBarVisible = true
-            }
-        }
-
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
-
     LaunchedEffect(totalVisibleItems, messagesJson, isLoading) {
         if (messages.isNotEmpty() || isLoading) {
             listState.animateScrollToItem((totalVisibleItems - 1).coerceAtLeast(0))
-            promptBarVisible = true
-        }
-    }
-
-    LaunchedEffect(listState) {
-        snapshotFlow {
-            listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
-        }.collect { isAtTop ->
-            if (isAtTop) {
-                promptBarVisible = true
-            }
-        }
-    }
-
-    fun updatePromptBarVisibilityFromScroll(deltaY: Float, source: NestedScrollSource) {
-        if (source == NestedScrollSource.SideEffect || isRecipeKeyboardVisible || deltaY == 0f) {
-            return
-        }
-
-        val isAtTop = listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
-        if (isAtTop) {
-            promptBarVisible = true
-            return
-        }
-
-        when {
-            deltaY < 0f && promptBarVisible -> {
-                promptBarVisible = false
-            }
-
-            deltaY > 0f && !promptBarVisible -> {
-                promptBarVisible = true
-            }
-        }
-    }
-
-    val promptBarNestedScrollConnection = remember(listState, isRecipeKeyboardVisible) {
-        object : NestedScrollConnection {
-            override fun onPostScroll(
-                consumed: Offset,
-                available: Offset,
-                source: NestedScrollSource
-            ): Offset {
-                val deltaY = if (consumed.y != 0f) consumed.y else available.y
-                updatePromptBarVisibilityFromScroll(deltaY, source)
-                return Offset.Zero
-            }
         }
     }
 
@@ -5839,7 +5779,6 @@ private fun RecipeScreen(
 
         persistMessages(baselineMessages)
         promptText = ""
-        promptBarVisible = true
         keyboard?.hide()
 
         if (useExpiringFoods) {
@@ -5896,13 +5835,13 @@ private fun RecipeScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                .statusBarsPadding()
+                .padding(top = 8.dp)
                 .padding(horizontal = 16.dp)
         ) {
             LazyColumn(
                 state = listState,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .nestedScroll(promptBarNestedScrollConnection),
+                modifier = Modifier.fillMaxSize(),
                 overscrollEffect = null,
                 contentPadding = PaddingValues(
                     top = 4.dp,
@@ -5946,21 +5885,15 @@ private fun RecipeScreen(
                 }
             }
 
-            AnimatedVisibility(
-                visible = promptBarVisible || isRecipeKeyboardVisible,
+            Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .graphicsLayer {
-                        translationY = -animatedImeShiftPx
-                    },
-                enter = fadeIn(tween(430)) + slideInVertically(tween(430)) { it / 2 },
-                exit = fadeOut(tween(340)) + slideOutVertically(tween(340)) { it / 2 }
+                    .padding(bottom = recipePromptBarBottomPadding)
             ) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(vertical = 8.dp)
-                        .padding(bottom = 82.dp)
                 ) {
                     RecipePromptBar(
                         value = promptText,
@@ -5982,6 +5915,11 @@ fun HomeScreen(
     onSelectionModeChange: (Boolean) -> Unit,
     onOverlayVisibilityChange: (Boolean) -> Unit
 ) {
+    OverrideStatusBarColor(
+        color = MaterialTheme.colorScheme.surface,
+        isDarkIcons = MaterialTheme.colorScheme.surface.luminance() > 0.5f
+    )
+
     FoodEntryScreen(
         showForm = showForm,
         onShowFormChange = onShowFormChange,
@@ -6043,6 +5981,8 @@ fun ProfileScreen(navController: NavHostController) {
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .statusBarsPadding()
+            .padding(top = 8.dp)
             .padding(horizontal = 16.dp)
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -6450,6 +6390,7 @@ private fun ProfileInfoScreen(
 ) {
     Scaffold(
         containerColor = Color.Transparent,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             SlimTopBar(
                 title = title,
@@ -6542,6 +6483,7 @@ fun SettingsScreen(navController: NavHostController) {
 
     Scaffold(
         containerColor = Color.Transparent,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             SlimTopBar(
                 title = "Settings",
@@ -6613,6 +6555,7 @@ fun ThemeScreen(
 ) {
     Scaffold(
         containerColor = Color.Transparent,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             SlimTopBar(
                 title = "Theme",
@@ -6649,6 +6592,7 @@ fun CountdownFormatScreen(navController: NavHostController) {
 
     Scaffold(
         containerColor = Color.Transparent,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             SlimTopBar(
                 title = "Countdown Format",
@@ -6755,6 +6699,7 @@ fun NotificationsScreen(navController: NavHostController) {
 
     Scaffold(
         containerColor = Color.Transparent,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             SlimTopBar(
                 title = "Notifications",

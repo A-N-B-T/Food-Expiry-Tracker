@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -762,7 +763,10 @@ private suspend fun resumeCloudSync(
             val synced = pushSnapshotToCloud(context, refreshed)
             ResumeResult(synced, ResumeAction.PUSHED_LOCAL)
         }
-        else -> ResumeResult(refreshed, ResumeAction.NONE)
+        else -> {
+            saveLastSyncedAt(context, System.currentTimeMillis())
+            ResumeResult(refreshed, ResumeAction.NONE)
+        }
     }
 }
 
@@ -1955,6 +1959,7 @@ private fun ScaffoldWithTopBar(
 ) {
     androidx.compose.material3.Scaffold(
         containerColor = Color.Transparent,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             SlimTopBar(
                 title = title,
