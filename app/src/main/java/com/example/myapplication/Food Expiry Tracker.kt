@@ -2035,16 +2035,6 @@ private fun removeFoodNameFromHistory(
     }
 }
 
-private fun clearHistoryEntries(
-    prefs: android.content.SharedPreferences,
-    gson: Gson,
-    history: MutableList<HistoryEntry>
-) {
-    if (history.isEmpty() && !prefs.contains(HISTORY_LIST_KEY)) return
-    history.clear()
-    saveHistoryEntries(prefs, gson, emptyList())
-}
-
 private val EXPIRY_FORMATTER: DateTimeFormatter =
     DateTimeFormatter.ofPattern("d/M/yyyy", Locale.US)
 
@@ -2905,12 +2895,10 @@ private fun SelectionActionChip(
 private fun HistoryTopBar(
     showSearchBar: Boolean,
     searchQuery: String,
-    canClearHistory: Boolean,
     onSearchQueryChange: (String) -> Unit,
     onShowSearchBar: () -> Unit,
-    searchTextFieldModifier: Modifier,
+    @SuppressLint("ModifierParameter") searchTextFieldModifier: Modifier,
     onSearchBarTap: () -> Unit,
-    onClearHistoryClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Box(
@@ -2946,16 +2934,6 @@ private fun HistoryTopBar(
                             imageVector = Icons.Default.Search,
                             contentDescription = "Show search"
                         )
-                    }
-
-                    if (canClearHistory) {
-                        IconButton(onClick = onClearHistoryClick) {
-                            Icon(
-                                imageVector = Icons.Default.Delete,
-                                contentDescription = "Clear history",
-                                tint = MaterialTheme.colorScheme.error.copy(alpha = 0.82f)
-                            )
-                        }
                     }
                 }
 
@@ -4147,12 +4125,10 @@ fun HistoryScreen(
     var quickAddError by remember { mutableStateOf<String?>(null) }
     var historyNoticeMessage by remember { mutableStateOf<String?>(null) }
     var pendingDeleteHistoryEntry by remember { mutableStateOf<HistoryEntry?>(null) }
-    var pendingClearHistory by remember { mutableStateOf(false) }
     val shouldBlurBackground =
         quickAddName != null ||
                 historyNoticeMessage != null ||
-                pendingDeleteHistoryEntry != null ||
-                pendingClearHistory
+                pendingDeleteHistoryEntry != null
 
     SideEffect {
         onOverlayVisibilityChange(shouldBlurBackground)
@@ -4285,7 +4261,6 @@ fun HistoryScreen(
                         .onSizeChanged { historyTopBarHeightPx = it.height },
                     showSearchBar = showSearchBar,
                     searchQuery = search,
-                    canClearHistory = history.isNotEmpty(),
                     onSearchQueryChange = { search = it },
                     onShowSearchBar = {
                         if (!showSearchBar) {
@@ -4299,8 +4274,7 @@ fun HistoryScreen(
                     onSearchBarTap = {
                         historySearchFocus.requestFocus()
                         keyboard?.show()
-                    },
-                    onClearHistoryClick = { pendingClearHistory = true }
+                    }
                 )
             }
         }
@@ -4340,37 +4314,6 @@ fun HistoryScreen(
             },
             dismissButton = {
                 TextButton(onClick = { pendingDeleteHistoryEntry = null }) {
-                    Text("Cancel")
-                }
-            }
-        )
-    }
-
-    if (pendingClearHistory) {
-        GlassAlertDialog(
-            onDismissRequest = { pendingClearHistory = false },
-            title = { Text("Clear history?") },
-            text = { Text("Are you sure you want to delete all history items?") },
-            confirmButton = {
-                DelayedDestructiveConfirmButton(
-                    itemCount = history.size,
-                    finalButtonText = "Clear",
-                    onConfirm = {
-                        if (quickAddName != null) {
-                            quickAddName = null
-                            quickAddExpiry = ""
-                            quickAddCategory = null
-                            quickAddError = null
-                    }
-                        pendingDeleteHistoryEntry = null
-                        historyNoticeMessage = null
-                        clearHistoryEntries(prefs, gson, history)
-                        pendingClearHistory = false
-                    }
-                )
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingClearHistory = false }) {
                     Text("Cancel")
                 }
             }

@@ -5,9 +5,12 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.SharedPreferences
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.foundation.layout.imePadding
@@ -1025,8 +1028,12 @@ fun AccountSyncScreen(navController: NavHostController) {
     var statusPlacement by rememberSaveable { mutableStateOf<AccountStatusPlacement?>(null) }
     var showLogoutDialog by rememberSaveable { mutableStateOf(false) }
 
-    LaunchedEffect(statusMessage) {
+    LaunchedEffect(statusMessage, statusPlacement) {
         val message = statusMessage?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
+        if (statusPlacement == AccountStatusPlacement.EMAIL_AUTH) {
+            return@LaunchedEffect
+        }
+
         delay(statusMessageDisplayDurationMillis(message))
         if (statusMessage == message) {
             statusMessage = null
@@ -1134,6 +1141,13 @@ fun AccountSyncScreen(navController: NavHostController) {
         saveAccountAutoSyncMode(appContext, mode)
     }
 
+    fun clearEmailAuthMessageIfNeeded() {
+        if (statusPlacement == AccountStatusPlacement.EMAIL_AUTH) {
+            statusMessage = null
+            statusPlacement = null
+        }
+    }
+
     ScaffoldWithTopBar(title = "Account", navController = navController) {
         Column(
             modifier = Modifier
@@ -1154,9 +1168,19 @@ fun AccountSyncScreen(navController: NavHostController) {
                 if (session == null) {
                     SignedOutAccountContent(
                         email = email,
-                        onEmailChange = { email = it },
+                        onEmailChange = { updatedEmail ->
+                            if (updatedEmail != email) {
+                                clearEmailAuthMessageIfNeeded()
+                            }
+                            email = updatedEmail
+                        },
                         password = password,
-                        onPasswordChange = { password = it },
+                        onPasswordChange = { updatedPassword ->
+                            if (updatedPassword != password) {
+                                clearEmailAuthMessageIfNeeded()
+                            }
+                            password = updatedPassword
+                        },
                         canUseEmailPassword = canUseEmailPassword,
                         canUseGoogle = canUseGoogle,
                         showSetupHint = !isCloudAccountConfigured(),
@@ -1244,10 +1268,18 @@ private fun SignedOutAccountContent(
     onSignUp: () -> Unit
 ) {
     val hasEmailAuthError = !emailAuthMessage.isNullOrBlank()
-    val showSignUpHint = emailAuthMessage == EMAIL_PASSWORD_INCORRECT_MESSAGE
+    var displayedEmailAuthMessage by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(emailAuthMessage) {
+        if (!emailAuthMessage.isNullOrBlank()) {
+            displayedEmailAuthMessage = emailAuthMessage
+        }
+    }
+
+    val showSignUpHint = displayedEmailAuthMessage == EMAIL_PASSWORD_INCORRECT_MESSAGE
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        verticalArrangement = Arrangement.Top,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Column(
@@ -1268,8 +1300,11 @@ private fun SignedOutAccountContent(
             )
         }
 
+        Spacer(Modifier.height(14.dp))
+
         if (showSetupHint) {
             AccountSetupHint()
+            Spacer(Modifier.height(14.dp))
         }
 
         AccountPillTextField(
@@ -1283,6 +1318,8 @@ private fun SignedOutAccountContent(
             )
         )
 
+        Spacer(Modifier.height(14.dp))
+
         AccountPillTextField(
             value = password,
             onValueChange = onPasswordChange,
@@ -1295,16 +1332,20 @@ private fun SignedOutAccountContent(
             )
         )
 
+        Spacer(Modifier.height(14.dp))
+
         AnimatedVisibility(
-            visible = !emailAuthMessage.isNullOrBlank(),
-            enter = fadeIn(),
-            exit = fadeOut()
+            visible = hasEmailAuthError,
+            enter = expandVertically(expandFrom = Alignment.Top),
+            exit = shrinkVertically(shrinkTowards = Alignment.Top)
         ) {
             Column(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 14.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
-                emailAuthMessage?.takeIf { it.isNotBlank() }?.let { message ->
+                displayedEmailAuthMessage?.takeIf { it.isNotBlank() }?.let { message ->
                     AccountInlineStatusMessage(
                         message = message,
                         isError = true
@@ -1312,22 +1353,12 @@ private fun SignedOutAccountContent(
                 }
 
                 if (showSignUpHint) {
-                    Row(
+                    Text(
+                        text = "Don't have an account? Sign Up.",
                         modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Don't have an account?",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        TextButton(
-                            onClick = onSignUp,
-                            enabled = canUseEmailPassword
-                        ) {
-                            Text("Sign up")
-                        }
-                    }
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         }
@@ -1352,7 +1383,11 @@ private fun SignedOutAccountContent(
             )
         }
 
+        Spacer(Modifier.height(14.dp))
+
         AccountSectionDivider()
+
+        Spacer(Modifier.height(14.dp))
 
         GooglePillButton(
             text = "Continue with Google",
@@ -1367,11 +1402,17 @@ private fun SignedOutAccountContent(
             enter = fadeIn(),
             exit = fadeOut()
         ) {
-            googleAuthMessage?.takeIf { it.isNotBlank() }?.let { message ->
-                AccountInlineStatusMessage(
-                    message = message,
-                    isError = true
-                )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 14.dp)
+            ) {
+                googleAuthMessage?.takeIf { it.isNotBlank() }?.let { message ->
+                    AccountInlineStatusMessage(
+                        message = message,
+                        isError = true
+                    )
+                }
             }
         }
     }
@@ -1435,32 +1476,6 @@ private fun SignedInAccountContent(
             }
         }
 
-        AccountAutoSyncToggleCard(
-            enabled = autoSyncEnabled,
-            controlsEnabled = busyAction == null,
-            onCheckedChange = onAutoSyncEnabledChange
-        )
-
-        AccountSyncScheduleCard(
-            autoSyncEnabled = autoSyncEnabled,
-            selectedMode = autoSyncMode,
-            enabled = busyAction == null,
-            onModeSelected = onAutoSyncModeChange
-        )
-
-        AnimatedVisibility(
-            visible = !autoSyncErrorMessage.isNullOrBlank(),
-            enter = fadeIn(),
-            exit = fadeOut()
-        ) {
-            autoSyncErrorMessage?.takeIf { it.isNotBlank() }?.let { message ->
-                AccountInlineStatusMessage(
-                    message = message,
-                    isError = true
-                )
-            }
-        }
-
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -1494,14 +1509,89 @@ private fun SignedInAccountContent(
             }
         }
 
-        TextButton(
-            onClick = onLogOut,
-            enabled = busyAction == null
+        AccountAutoSyncToggleCard(
+            enabled = autoSyncEnabled,
+            controlsEnabled = busyAction == null,
+            onCheckedChange = onAutoSyncEnabledChange
+        )
+
+        AccountSyncScheduleCard(
+            autoSyncEnabled = autoSyncEnabled,
+            selectedMode = autoSyncMode,
+            enabled = busyAction == null,
+            onModeSelected = onAutoSyncModeChange
+        )
+
+        AnimatedVisibility(
+            visible = !autoSyncErrorMessage.isNullOrBlank(),
+            enter = fadeIn(),
+            exit = fadeOut()
         ) {
-            Text(
-                text = "Log out",
-                color = MaterialTheme.colorScheme.error
-            )
+            autoSyncErrorMessage?.takeIf { it.isNotBlank() }?.let { message ->
+                AccountInlineStatusMessage(
+                    message = message,
+                    isError = true
+                )
+            }
+        }
+
+        AccountLogoutCard(
+            enabled = busyAction == null,
+            onLogOut = onLogOut
+        )
+    }
+}
+
+@Composable
+private fun AccountLogoutCard(
+    enabled: Boolean,
+    onLogOut: () -> Unit
+) {
+    MatchingPillCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = accountAuthPillShape,
+        shadowElevation = 2.dp
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 18.dp, vertical = 14.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Account",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "Sign out of this device.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            OutlinedButton(
+                onClick = onLogOut,
+                enabled = enabled,
+                shape = accountAuthPillShape,
+                border = BorderStroke(
+                    width = 1.dp,
+                    color = MaterialTheme.colorScheme.error.copy(alpha = if (enabled) 0.42f else 0.18f)
+                ),
+                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = MaterialTheme.colorScheme.error,
+                    disabledContentColor = MaterialTheme.colorScheme.error.copy(alpha = 0.42f)
+                )
+            ) {
+                Text(
+                    text = "Log out",
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
         }
     }
 }
@@ -1759,18 +1849,22 @@ private fun AccountPillTextField(
 ) {
     val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
     val fieldContainerColor =
-        MaterialTheme.colorScheme.surface.copy(alpha = if (isDarkTheme) 0.42f else 0.86f)
-    val fieldBorderColor =
-        if (isError) {
-            MaterialTheme.colorScheme.error.copy(alpha = if (isDarkTheme) 0.74f else 0.62f)
-        } else {
-            MaterialTheme.colorScheme.outline.copy(alpha = if (isDarkTheme) 0.34f else 0.2f)
-        }
+        MaterialTheme.colorScheme.surface.copy(alpha = if (isDarkTheme) 0.48f else 0.92f)
+    val errorBorderColor =
+        MaterialTheme.colorScheme.error.copy(alpha = if (isDarkTheme) 0.74f else 0.62f)
+    val textColor = MaterialTheme.colorScheme.onSurface
+    val placeholderColor = MaterialTheme.colorScheme.onSurfaceVariant
 
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(
+                width = 1.dp,
+                color = if (isError) errorBorderColor else Color.Transparent,
+                shape = accountAuthPillShape
+            ),
         singleLine = true,
         placeholder = { Text(placeholder) },
         shape = accountAuthPillShape,
@@ -1779,13 +1873,22 @@ private fun AccountPillTextField(
         keyboardOptions = keyboardOptions,
         textStyle = MaterialTheme.typography.bodyLarge,
         colors = OutlinedTextFieldDefaults.colors(
+            focusedTextColor = textColor,
+            unfocusedTextColor = textColor,
+            errorTextColor = textColor,
+            focusedPlaceholderColor = placeholderColor,
+            unfocusedPlaceholderColor = placeholderColor,
+            errorPlaceholderColor = placeholderColor,
             focusedContainerColor = fieldContainerColor,
             unfocusedContainerColor = fieldContainerColor,
+            errorContainerColor = fieldContainerColor,
             disabledContainerColor = fieldContainerColor.copy(alpha = 0.72f),
-            focusedBorderColor = fieldBorderColor,
-            unfocusedBorderColor = fieldBorderColor.copy(alpha = 0.9f),
-            disabledBorderColor = fieldBorderColor.copy(alpha = 0.6f),
-            cursorColor = MaterialTheme.colorScheme.primary
+            focusedBorderColor = Color.Transparent,
+            unfocusedBorderColor = Color.Transparent,
+            errorBorderColor = Color.Transparent,
+            disabledBorderColor = Color.Transparent,
+            cursorColor = MaterialTheme.colorScheme.primary,
+            errorCursorColor = MaterialTheme.colorScheme.primary
         )
     )
 }
