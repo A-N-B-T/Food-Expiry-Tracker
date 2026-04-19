@@ -270,6 +270,7 @@ private const val THEME_KEY = "theme_mode"
 private const val COUNTDOWN_FORMAT_KEY = "countdown_format"
 private const val LOCAL_PROFILE_NAME_KEY = "local_profile_name"
 private const val LOCAL_PROFILE_PHOTO_URI_KEY = "local_profile_photo_uri"
+private const val LOCAL_PROFILE_NAME_MAX_LENGTH = 15
 
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
 enum class CountdownFormat { DAYS_ONLY, MONTHS_AND_DAYS, YEARS_MONTHS_DAYS }
@@ -357,7 +358,8 @@ fun saveCountdownFormat(context: Context, format: CountdownFormat) {
 
 private fun loadLocalProfileName(context: Context): String {
     val prefs = context.applicationContext.getSharedPreferences(THEME_PREFS, Context.MODE_PRIVATE)
-    return prefs.getString(LOCAL_PROFILE_NAME_KEY, "").orEmpty().trim().take(12)
+    return prefs.getString(LOCAL_PROFILE_NAME_KEY, "").orEmpty().trim()
+        .take(LOCAL_PROFILE_NAME_MAX_LENGTH)
 }
 
 private fun saveLocalProfileName(
@@ -365,7 +367,9 @@ private fun saveLocalProfileName(
     name: String
 ) {
     val prefs = context.applicationContext.getSharedPreferences(THEME_PREFS, Context.MODE_PRIVATE)
-    prefs.edit().putString(LOCAL_PROFILE_NAME_KEY, name.trim().take(12)).apply()
+    prefs.edit()
+        .putString(LOCAL_PROFILE_NAME_KEY, name.trim().take(LOCAL_PROFILE_NAME_MAX_LENGTH))
+        .apply()
 }
 
 private fun loadLocalProfilePhotoUri(context: Context): String {
@@ -6493,7 +6497,7 @@ fun ProfileScreen(navController: NavHostController) {
     }
 
     if (showEditLocalNameDialog) {
-        val trimmedDraftName = draftLocalProfileName.trim().take(12)
+        val trimmedDraftName = draftLocalProfileName.trim().take(LOCAL_PROFILE_NAME_MAX_LENGTH)
         GlassAlertDialog(
             onDismissRequest = { showEditLocalNameDialog = false },
             title = { DialogTitleText(if (localProfileName.isBlank()) "Add name" else "Edit name") },
@@ -6503,7 +6507,9 @@ fun ProfileScreen(navController: NavHostController) {
                     Spacer(Modifier.height(12.dp))
                     OutlinedTextField(
                         value = draftLocalProfileName,
-                        onValueChange = { draftLocalProfileName = it.take(12) },
+                        onValueChange = {
+                            draftLocalProfileName = it.take(LOCAL_PROFILE_NAME_MAX_LENGTH)
+                        },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
                         label = { Text("Name") }
