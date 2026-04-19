@@ -31,6 +31,7 @@ import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
@@ -49,10 +50,12 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -68,6 +71,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
@@ -177,15 +181,23 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -897,6 +909,8 @@ private fun SelectionControlsWarmup() {
 @Composable
 private fun HomeAddFloatingActionButton(
     visible: Boolean,
+    modifier: Modifier = Modifier,
+    onPositioned: ((Rect) -> Unit)? = null,
     onClick: () -> Unit
 ) {
     val density = LocalDensity.current
@@ -932,7 +946,10 @@ private fun HomeAddFloatingActionButton(
             backgroundTint = MaterialTheme.colorScheme.primary,
             iconTint = MaterialTheme.colorScheme.onPrimary,
             tintAlpha = if (isDarkTheme) 0.76f else 0.62f,
-            modifier = Modifier.padding(bottom = 90.dp)
+            onPositioned = onPositioned,
+            modifier = Modifier
+                .padding(bottom = 90.dp)
+                .then(modifier)
         )
     }
 }
@@ -945,13 +962,23 @@ private fun EditCategoriesStyledFab(
     backgroundTint: Color,
     iconTint: Color,
     modifier: Modifier = Modifier,
-    tintAlpha: Float = 0.62f
+    tintAlpha: Float = 0.62f,
+    onPositioned: ((Rect) -> Unit)? = null
 ) {
     val shape = RoundedCornerShape(50.dp)
+    val positionedModifier =
+        if (onPositioned == null) {
+            Modifier
+        } else {
+            Modifier.onGloballyPositioned { coordinates ->
+                onPositioned(coordinates.boundsInRoot())
+            }
+        }
 
     EditCategoriesBackgroundSurface(
         modifier = modifier
             .size(50.dp)
+            .then(positionedModifier)
             .clip(shape)
             .clickable(onClick = onClick),
         shape = shape,
@@ -1190,6 +1217,221 @@ private fun DelayedDestructiveConfirmButton(
             )
         } else {
             DialogDestructiveText(finalButtonText)
+        }
+    }
+}
+
+enum class OnboardingSpotlightTarget {
+    HOME_ADD_FAB,
+    PANTRY_ITEM,
+    CATEGORY_CONTROLS
+}
+
+private data class OnboardingStep(
+    val target: OnboardingSpotlightTarget,
+    val title: String,
+    val body: String
+)
+
+private val firstLaunchOnboardingSteps = listOf(
+    OnboardingStep(
+        target = OnboardingSpotlightTarget.HOME_ADD_FAB,
+        title = "Add food",
+        body = "Tap the plus button to save a food with an expiry date."
+    ),
+    OnboardingStep(
+        target = OnboardingSpotlightTarget.PANTRY_ITEM,
+        title = "Swipe right to edit",
+        body = "Drag a food card to the right when you want to edit it."
+    ),
+    OnboardingStep(
+        target = OnboardingSpotlightTarget.PANTRY_ITEM,
+        title = "Swipe left to delete",
+        body = "Drag a food card to the left to remove it."
+    ),
+    OnboardingStep(
+        target = OnboardingSpotlightTarget.CATEGORY_CONTROLS,
+        title = "Categories",
+        body = "Use these pills to filter your pantry or open category editing."
+    )
+)
+
+private fun Rect.expandedBy(px: Float): Rect {
+    return Rect(
+        left = left - px,
+        top = top - px,
+        right = right + px,
+        bottom = bottom + px
+    )
+}
+
+@Composable
+private fun FirstLaunchOnboardingOverlay(
+    visible: Boolean,
+    stepIndex: Int,
+    targetBounds: Map<OnboardingSpotlightTarget, Rect>,
+    onNext: () -> Unit,
+    onSkip: () -> Unit
+) {
+    if (!visible) return
+
+    val safeStepIndex = stepIndex.coerceIn(firstLaunchOnboardingSteps.indices)
+    val step = firstLaunchOnboardingSteps[safeStepIndex]
+    val targetRect = targetBounds[step.target]
+    val density = LocalDensity.current
+    val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val blockerInteraction = remember { MutableInteractionSource() }
+    val spotlightPaddingPx = with(density) { 14.dp.toPx() }
+    val spotlightCornerPx = with(density) { 30.dp.toPx() }
+    val spotlightStrokePx = with(density) { 2.dp.toPx() }
+    val cardGapPx = with(density) { 18.dp.toPx() }
+    val estimatedCardHeightPx = with(density) { 198.dp.toPx() }
+    val scrimColor = Color.Black.copy(alpha = if (isDarkTheme) 0.58f else 0.46f)
+    val spotlightBorderColor =
+        MaterialTheme.colorScheme.primary.copy(alpha = if (isDarkTheme) 0.62f else 0.46f)
+    val spotlightHaloColor = Color.White.copy(alpha = if (isDarkTheme) 0.12f else 0.22f)
+
+    BackHandler(onBack = onSkip)
+
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxSize()
+            .clickable(
+                interactionSource = blockerInteraction,
+                indication = null,
+                onClick = {}
+            )
+    ) {
+        val screenHeightPx = with(density) { maxHeight.toPx() }
+        val minCardTopPx = with(density) { 22.dp.toPx() }
+        val maxCardTopPx = max(minCardTopPx, screenHeightPx - estimatedCardHeightPx - minCardTopPx)
+        val rawCardTopPx =
+            if (targetRect == null) {
+                screenHeightPx * 0.32f
+            } else {
+                val targetCenterY = (targetRect.top + targetRect.bottom) / 2f
+                if (targetCenterY < screenHeightPx * 0.52f) {
+                    targetRect.bottom + cardGapPx
+                } else {
+                    targetRect.top - estimatedCardHeightPx - cardGapPx
+                }
+            }
+        val cardTop = with(density) {
+            rawCardTopPx
+                .coerceIn(minCardTopPx, maxCardTopPx)
+                .toDp()
+        }
+
+        Canvas(
+            modifier = Modifier
+                .matchParentSize()
+                .graphicsLayer {
+                    compositingStrategy = CompositingStrategy.Offscreen
+                }
+        ) {
+            drawRect(color = scrimColor)
+
+            targetRect?.let { rect ->
+                val spotlightRect = rect.expandedBy(spotlightPaddingPx)
+
+                drawRoundRect(
+                    color = Color.Transparent,
+                    topLeft = Offset(spotlightRect.left, spotlightRect.top),
+                    size = Size(spotlightRect.width, spotlightRect.height),
+                    cornerRadius = CornerRadius(spotlightCornerPx, spotlightCornerPx),
+                    blendMode = BlendMode.Clear
+                )
+
+                drawRoundRect(
+                    color = spotlightBorderColor,
+                    topLeft = Offset(spotlightRect.left, spotlightRect.top),
+                    size = Size(spotlightRect.width, spotlightRect.height),
+                    cornerRadius = CornerRadius(spotlightCornerPx, spotlightCornerPx),
+                    style = Stroke(width = spotlightStrokePx)
+                )
+
+                drawRoundRect(
+                    color = spotlightHaloColor,
+                    topLeft = Offset(spotlightRect.left - spotlightPaddingPx, spotlightRect.top - spotlightPaddingPx),
+                    size = Size(
+                        spotlightRect.width + spotlightPaddingPx * 2f,
+                        spotlightRect.height + spotlightPaddingPx * 2f
+                    ),
+                    cornerRadius = CornerRadius(
+                        spotlightCornerPx + spotlightPaddingPx,
+                        spotlightCornerPx + spotlightPaddingPx
+                    ),
+                    style = Stroke(width = spotlightStrokePx)
+                )
+            }
+        }
+
+        AnimatedContent(
+            targetState = step,
+            transitionSpec = {
+                (fadeIn(tween(220)) + scaleIn(tween(220), initialScale = 0.96f)) togetherWith
+                        (fadeOut(tween(120)) + scaleOut(tween(120), targetScale = 0.98f))
+            },
+            label = "firstLaunchOnboardingCard",
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .offset(y = cardTop)
+                .padding(horizontal = 22.dp)
+        ) { currentStep ->
+            ExactFrostedPillCard(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(28.dp),
+                shadowElevation = 18.dp
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(20.dp)
+                ) {
+                    Text(
+                        text = currentStep.title,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+
+                    Spacer(Modifier.height(8.dp))
+
+                    Text(
+                        text = currentStep.body,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Spacer(Modifier.height(16.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "${safeStepIndex + 1} of ${firstLaunchOnboardingSteps.size}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f)
+                        )
+
+                        TextButton(onClick = onSkip) {
+                            Text("Skip")
+                        }
+
+                        Spacer(Modifier.width(6.dp))
+
+                        Button(
+                            onClick = onNext,
+                            shape = RoundedCornerShape(50.dp),
+                            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp)
+                        ) {
+                            Text(if (safeStepIndex == firstLaunchOnboardingSteps.lastIndex) "Done" else "Next")
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -1494,6 +1736,9 @@ private const val FOOD_PREFS = "food_prefs"
 private const val FOOD_LIST_KEY = "food_list"
 private const val HISTORY_LIST_KEY = "history_list"
 private const val CATEGORIES_LIST_KEY = "categories_list"
+private const val ONBOARDING_COMPLETED_KEY = "first_launch_onboarding_completed"
+private const val ONBOARDING_DEMO_SEEDED_KEY = "first_launch_demo_seeded"
+private const val ONBOARDING_DEMO_FOOD_NAME = "Example"
 private const val NOTIF_FIRST_PROMPT_SHOWN_KEY = "notif_first_prompt_shown"
 private const val HISTORY_RETENTION_DAYS = 30L
 private const val DAY_IN_MILLIS = 86_400_000L
@@ -2018,6 +2263,52 @@ private fun addFoodNameToHistory(
 ) {
     val history = loadHistoryEntries(prefs, gson)
     recordFoodNameInHistory(prefs, gson, history, name)
+}
+
+private fun shouldShowFirstLaunchOnboarding(context: Context): Boolean {
+    val prefs = context.applicationContext.getSharedPreferences(FOOD_PREFS, Context.MODE_PRIVATE)
+    return !prefs.getBoolean(ONBOARDING_COMPLETED_KEY, false)
+}
+
+private fun markFirstLaunchOnboardingComplete(context: Context) {
+    val prefs = context.applicationContext.getSharedPreferences(FOOD_PREFS, Context.MODE_PRIVATE)
+    prefs.edit { putBoolean(ONBOARDING_COMPLETED_KEY, true) }
+}
+
+private fun formatExpiryDate(date: LocalDate): String {
+    return String.format(
+        Locale.US,
+        "%02d/%02d/%04d",
+        date.dayOfMonth,
+        date.monthValue,
+        date.year
+    )
+}
+
+private fun seedFirstLaunchDemoFoodIfNeeded(context: Context) {
+    val appContext = context.applicationContext
+    val prefs = appContext.getSharedPreferences(FOOD_PREFS, Context.MODE_PRIVATE)
+    if (prefs.getBoolean(ONBOARDING_DEMO_SEEDED_KEY, false)) return
+
+    val gson = Gson()
+    val demoKey = normalizeFoodName(ONBOARDING_DEMO_FOOD_NAME)
+    val foods = loadFoodList(prefs, gson)
+    val alreadyHasDemo = foods.any { normalizeFoodName(it.name) == demoKey }
+
+    if (!alreadyHasDemo) {
+        foods.add(
+            FoodItem(
+                name = ONBOARDING_DEMO_FOOD_NAME,
+                expiry = formatExpiryDate(LocalDate.now().plusDays(3))
+            )
+        )
+        saveFoodList(prefs, gson, foods)
+    }
+
+    val history = loadHistoryEntries(prefs, gson)
+    recordFoodNameInHistory(prefs, gson, history, ONBOARDING_DEMO_FOOD_NAME)
+
+    prefs.edit { putBoolean(ONBOARDING_DEMO_SEEDED_KEY, true) }
 }
 
 private fun removeFoodNameFromHistory(
@@ -2736,11 +3027,14 @@ private fun CategoryChip(
 }
 
 @Composable
-private fun EditCategoriesChip(onClick: () -> Unit) {
+private fun EditCategoriesChip(
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
     val palette = rememberGlassPalette()
 
     Box(
-        modifier = Modifier
+        modifier = modifier
             .clip(RoundedCornerShape(50.dp))
             .border(1.dp, palette.border, RoundedCornerShape(50.dp))
             .background(palette.card.copy(alpha = 0.52f))
@@ -3408,7 +3702,9 @@ fun MyPantryTopBar(
     onBulkAddToCategoryClick: () -> Unit,
     onBulkCustomCategoryClick: () -> Unit,
 
-    onAddCategoryClick: () -> Unit
+    onAddCategoryClick: () -> Unit,
+    tutorialActive: Boolean = false,
+    onTutorialTargetPositioned: (OnboardingSpotlightTarget, Rect) -> Unit = { _, _ -> }
 ) {
     val enabled = selectedItemsCount > 0
     val selectionTitle =
@@ -3552,7 +3848,22 @@ fun MyPantryTopBar(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             item {
-                                EditCategoriesChip(onClick = { onAddCategoryClick() })
+                                val tutorialCategoryModifier =
+                                    if (tutorialActive) {
+                                        Modifier.onGloballyPositioned { coordinates ->
+                                            onTutorialTargetPositioned(
+                                                OnboardingSpotlightTarget.CATEGORY_CONTROLS,
+                                                coordinates.boundsInRoot()
+                                            )
+                                        }
+                                    } else {
+                                        Modifier
+                                    }
+
+                                EditCategoriesChip(
+                                    modifier = tutorialCategoryModifier,
+                                    onClick = { onAddCategoryClick() }
+                                )
                             }
 
                             item {
@@ -3951,6 +4262,8 @@ fun AppNav(
     themeMode: ThemeMode,
     onThemeChange: (ThemeMode) -> Unit
 ) {
+    val context = LocalContext.current
+    val appContext = remember(context) { context.applicationContext }
     val navController = rememberNavController()
     val accountSession = rememberAccountSessionPreference()
     val recipeScreenSessionState = rememberRecipeScreenSessionState()
@@ -3959,98 +4272,146 @@ fun AppNav(
     var showForm by rememberSaveable { mutableStateOf(false) }
     var blurBackgroundForOverlay by rememberSaveable { mutableStateOf(false) }
     var hideBottomBar by rememberSaveable { mutableStateOf(false) }
+    var showFirstLaunchOnboarding by rememberSaveable {
+        mutableStateOf(shouldShowFirstLaunchOnboarding(appContext))
+    }
+    var onboardingStepIndex by rememberSaveable { mutableIntStateOf(0) }
+    var onboardingTargetBounds by remember {
+        mutableStateOf(emptyMap<OnboardingSpotlightTarget, Rect>())
+    }
     val layoutDir = LocalLayoutDirection.current
+    val firstLaunchOnboardingVisible = showFirstLaunchOnboarding && current == Route.Home.r
+
+    fun finishFirstLaunchOnboarding() {
+        markFirstLaunchOnboardingComplete(appContext)
+        showFirstLaunchOnboarding = false
+        onboardingStepIndex = 0
+        onboardingTargetBounds = emptyMap()
+    }
+
+    LaunchedEffect(showFirstLaunchOnboarding, appContext) {
+        if (showFirstLaunchOnboarding) {
+            seedFirstLaunchDemoFoodIfNeeded(appContext)
+        }
+    }
 
     AskNotificationPermissionOnFirstLaunch()
     AccountCloudSyncEffect(accountSession)
 
-    Scaffold(
-        modifier = Modifier.blurWhen(if (showForm || blurBackgroundForOverlay) 16.dp else 0.dp),
-        containerColor = Color.Transparent,
-        contentColor = MaterialTheme.colorScheme.onBackground,
-        bottomBar = {
-            AnimatedVisibility(
-                visible = !(current == Route.Home.r && hideBottomBar),
-                enter = slideInVertically(
-                    initialOffsetY = { it },
-                    animationSpec = tween(350)
-                ) + fadeIn(
-                    animationSpec = tween(350)
-                ),
-                exit = slideOutVertically(
-                    targetOffsetY = { it },
-                    animationSpec = tween(350)
-                ) + fadeOut(
-                    animationSpec = tween(350)
-                )
+    Box(modifier = Modifier.fillMaxSize()) {
+        Scaffold(
+            modifier = Modifier.blurWhen(
+                if (showForm || blurBackgroundForOverlay || firstLaunchOnboardingVisible) 16.dp else 0.dp
+            ),
+            containerColor = Color.Transparent,
+            contentColor = MaterialTheme.colorScheme.onBackground,
+            bottomBar = {
+                AnimatedVisibility(
+                    visible = !(current == Route.Home.r && hideBottomBar),
+                    enter = slideInVertically(
+                        initialOffsetY = { it },
+                        animationSpec = tween(350)
+                    ) + fadeIn(
+                        animationSpec = tween(350)
+                    ),
+                    exit = slideOutVertically(
+                        targetOffsetY = { it },
+                        animationSpec = tween(350)
+                    ) + fadeOut(
+                        animationSpec = tween(350)
+                    )
+                ) {
+                    BottomBar(navController, currentRoute = current)
+                }
+            }
+        ) { padding ->
+            NavHost(
+                navController = navController,
+                startDestination = Route.Home.r,
+                contentAlignment = Alignment.TopStart,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(
+                        start = padding.calculateStartPadding(layoutDir),
+                        end = padding.calculateEndPadding(layoutDir)
+                    ),
+
+                enterTransition = { bottomTabEnterTransition() },
+
+                exitTransition = { bottomTabExitTransition() },
+
+                popEnterTransition = { bottomTabEnterTransition() },
+
+                popExitTransition = { bottomTabExitTransition() },
+
+                sizeTransform = { null }
             ) {
-                BottomBar(navController, currentRoute = current)
+                composable(Route.Home.r) {
+                    HomeScreen(
+                        showForm = showForm,
+                        onShowFormChange = { showForm = it },
+                        onSelectionModeChange = { hideBottomBar = it },
+                        onOverlayVisibilityChange = { blurBackgroundForOverlay = it },
+                        tutorialActive = firstLaunchOnboardingVisible,
+                        onTutorialTargetPositioned = { target, bounds ->
+                            if (onboardingTargetBounds[target] != bounds) {
+                                onboardingTargetBounds =
+                                    onboardingTargetBounds.toMutableMap().apply {
+                                        put(target, bounds)
+                                    }
+                            }
+                        }
+                    )
+                }
+
+                composable(Route.Profile.r) { ProfileScreen(navController) }
+                composable(Route.Account.r) { AccountScreen(navController) }
+                composable(Route.Settings.r) { SettingsScreen(navController) }
+                composable(Route.About.r) { AboutScreen(navController) }
+                composable(Route.Help.r) { HelpScreen(navController) }
+                composable(Route.Privacy.r) { PrivacyScreen(navController) }
+                composable(Route.History.r) {
+                    HistoryScreen(
+                        onOverlayVisibilityChange = { blurBackgroundForOverlay = it }
+                    )
+                }
+                composable(Route.Recipe.r) {
+                    RecipeScreen(
+                        sessionState = recipeScreenSessionState
+                    )
+                }
+
+                composable(Route.Theme.r) {
+                    ThemeScreen(
+                        navController = navController,
+                        currentMode = themeMode,
+                        onModeChange = onThemeChange
+                    )
+                }
+
+                composable(Route.CountdownFormat.r) {
+                    CountdownFormatScreen(navController)
+                }
+
+                composable(Route.Notifications.r) {
+                    NotificationsScreen(navController)
+                }
             }
         }
-    ) { padding ->
-        NavHost(
-            navController = navController,
-            startDestination = Route.Home.r,
-            contentAlignment = Alignment.TopStart,
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(
-                    start = padding.calculateStartPadding(layoutDir),
-                    end = padding.calculateEndPadding(layoutDir)
-                ),
 
-            enterTransition = { bottomTabEnterTransition() },
-
-            exitTransition = { bottomTabExitTransition() },
-
-            popEnterTransition = { bottomTabEnterTransition() },
-
-            popExitTransition = { bottomTabExitTransition() },
-
-            sizeTransform = { null }
-        ) {
-            composable(Route.Home.r) {
-                HomeScreen(
-                    showForm = showForm,
-                    onShowFormChange = { showForm = it },
-                    onSelectionModeChange = { hideBottomBar = it },
-                    onOverlayVisibilityChange = { blurBackgroundForOverlay = it }
-                )
-            }
-
-            composable(Route.Profile.r) { ProfileScreen(navController) }
-            composable(Route.Account.r) { AccountScreen(navController) }
-            composable(Route.Settings.r) { SettingsScreen(navController) }
-            composable(Route.About.r) { AboutScreen(navController) }
-            composable(Route.Help.r) { HelpScreen(navController) }
-            composable(Route.Privacy.r) { PrivacyScreen(navController) }
-            composable(Route.History.r) {
-                HistoryScreen(
-                    onOverlayVisibilityChange = { blurBackgroundForOverlay = it }
-                )
-            }
-            composable(Route.Recipe.r) {
-                RecipeScreen(
-                    sessionState = recipeScreenSessionState
-                )
-            }
-
-            composable(Route.Theme.r) {
-                ThemeScreen(
-                    navController = navController,
-                    currentMode = themeMode,
-                    onModeChange = onThemeChange
-                )
-            }
-
-            composable(Route.CountdownFormat.r) {
-                CountdownFormatScreen(navController)
-            }
-
-            composable(Route.Notifications.r) {
-                NotificationsScreen(navController)
-            }
-        }
+        FirstLaunchOnboardingOverlay(
+            visible = firstLaunchOnboardingVisible,
+            stepIndex = onboardingStepIndex,
+            targetBounds = onboardingTargetBounds,
+            onNext = {
+                if (onboardingStepIndex >= firstLaunchOnboardingSteps.lastIndex) {
+                    finishFirstLaunchOnboarding()
+                } else {
+                    onboardingStepIndex += 1
+                }
+            },
+            onSkip = ::finishFirstLaunchOnboarding
+        )
     }
 }
 
@@ -5856,7 +6217,9 @@ fun HomeScreen(
     showForm: Boolean,
     onShowFormChange: (Boolean) -> Unit,
     onSelectionModeChange: (Boolean) -> Unit,
-    onOverlayVisibilityChange: (Boolean) -> Unit
+    onOverlayVisibilityChange: (Boolean) -> Unit,
+    tutorialActive: Boolean = false,
+    onTutorialTargetPositioned: (OnboardingSpotlightTarget, Rect) -> Unit = { _, _ -> }
 ) {
     OverrideStatusBarColor(
         color = MaterialTheme.colorScheme.surface,
@@ -5867,7 +6230,9 @@ fun HomeScreen(
         showForm = showForm,
         onShowFormChange = onShowFormChange,
         onSelectionModeChange = onSelectionModeChange,
-        onOverlayVisibilityChange = onOverlayVisibilityChange
+        onOverlayVisibilityChange = onOverlayVisibilityChange,
+        tutorialActive = tutorialActive,
+        onTutorialTargetPositioned = onTutorialTargetPositioned
     )
 }
 
@@ -6893,7 +7258,9 @@ fun FoodEntryScreen(
     showForm: Boolean,
     onShowFormChange: (Boolean) -> Unit,
     onSelectionModeChange: (Boolean) -> Unit,
-    onOverlayVisibilityChange: (Boolean) -> Unit
+    onOverlayVisibilityChange: (Boolean) -> Unit,
+    tutorialActive: Boolean = false,
+    onTutorialTargetPositioned: (OnboardingSpotlightTarget, Rect) -> Unit = { _, _ -> }
 ) {
     var foodName by remember { mutableStateOf("") }
     var expiryDate by remember { mutableStateOf("") }
@@ -7466,6 +7833,14 @@ fun FoodEntryScreen(
     val defaultTopBarHeightPx = with(overlayDensity) { 170.dp.roundToPx() }
     var pantryTopBarHeightPx by remember { mutableIntStateOf(defaultTopBarHeightPx) }
     val pantryContentTopPadding = with(overlayDensity) { pantryTopBarHeightPx.toDp() } + 8.dp
+    val tutorialPantryTarget =
+        if (tutorialActive) {
+            val demoKey = normalizeFoodName(ONBOARDING_DEMO_FOOD_NAME)
+            filteredFoodList.firstOrNull { normalizeFoodName(it.name) == demoKey }
+                ?: filteredFoodList.firstOrNull()
+        } else {
+            null
+        }
     var shouldWarmSelectionControls by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
@@ -7486,6 +7861,16 @@ fun FoodEntryScreen(
                     if (!isSelecting) {
                         HomeAddFloatingActionButton(
                             visible = fabVisible && !showForm,
+                            onPositioned = if (tutorialActive) {
+                                { bounds ->
+                                    onTutorialTargetPositioned(
+                                        OnboardingSpotlightTarget.HOME_ADD_FAB,
+                                        bounds
+                                    )
+                                }
+                            } else {
+                                null
+                            },
                             onClick = {
                                 if (!showForm) {
                                     editingItem = null
@@ -7561,15 +7946,29 @@ fun FoodEntryScreen(
                                         key = { "${it.name}|${it.expiry}|${it.category ?: ""}" },
                                         contentType = { "pantry_food_item" }
                                     ) { food ->
+                                        val tutorialItemModifier =
+                                            if (tutorialActive && food == tutorialPantryTarget) {
+                                                Modifier.onGloballyPositioned { coordinates ->
+                                                    onTutorialTargetPositioned(
+                                                        OnboardingSpotlightTarget.PANTRY_ITEM,
+                                                        coordinates.boundsInRoot()
+                                                    )
+                                                }
+                                            } else {
+                                                Modifier
+                                            }
+
                                         PantryFoodCard(
-                                            modifier = Modifier.animateItem(
-                                                fadeInSpec = null,
-                                                fadeOutSpec = null,
-                                                placementSpec = tween(
-                                                    durationMillis = SWIPE_ITEM_PLACEMENT_DURATION_MS,
-                                                    easing = FastOutSlowInEasing
-                                                )
-                                            ),
+                                            modifier = Modifier
+                                                .then(tutorialItemModifier)
+                                                .animateItem(
+                                                    fadeInSpec = null,
+                                                    fadeOutSpec = null,
+                                                    placementSpec = tween(
+                                                        durationMillis = SWIPE_ITEM_PLACEMENT_DURATION_MS,
+                                                        easing = FastOutSlowInEasing
+                                                    )
+                                                ),
                                             food = food,
                                             countdownFormat = countdownFormat,
                                             isSelecting = isSelecting,
@@ -7651,7 +8050,9 @@ fun FoodEntryScreen(
                         onAddCategoryClick = {
                             editCategoriesBackdropVisible = true
                             showEditCategoriesSheet = true
-                        }
+                        },
+                        tutorialActive = tutorialActive,
+                        onTutorialTargetPositioned = onTutorialTargetPositioned
                     )
                 }
             }
