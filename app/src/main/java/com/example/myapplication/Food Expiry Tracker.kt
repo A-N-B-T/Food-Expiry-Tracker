@@ -1739,6 +1739,7 @@ private const val CATEGORIES_LIST_KEY = "categories_list"
 private const val ONBOARDING_COMPLETED_KEY = "first_launch_onboarding_completed"
 private const val ONBOARDING_DEMO_SEEDED_KEY = "first_launch_demo_seeded"
 private const val ONBOARDING_DEMO_FOOD_NAME = "Example"
+private const val ONBOARDING_DEMO_CATEGORY_NAME = "Example"
 private const val NOTIF_FIRST_PROMPT_SHOWN_KEY = "notif_first_prompt_shown"
 private const val HISTORY_RETENTION_DAYS = 30L
 private const val DAY_IN_MILLIS = 86_400_000L
@@ -2288,18 +2289,32 @@ private fun formatExpiryDate(date: LocalDate): String {
 private fun seedFirstLaunchDemoFoodIfNeeded(context: Context) {
     val appContext = context.applicationContext
     val prefs = appContext.getSharedPreferences(FOOD_PREFS, Context.MODE_PRIVATE)
-    if (prefs.getBoolean(ONBOARDING_DEMO_SEEDED_KEY, false)) return
 
     val gson = Gson()
     val demoKey = normalizeFoodName(ONBOARDING_DEMO_FOOD_NAME)
-    val foods = loadFoodList(prefs, gson)
-    val alreadyHasDemo = foods.any { normalizeFoodName(it.name) == demoKey }
+    val demoCategoryKey = normalizeFoodName(ONBOARDING_DEMO_CATEGORY_NAME)
 
-    if (!alreadyHasDemo) {
+    val categories = loadStringList(prefs, gson, CATEGORIES_LIST_KEY)
+    if (categories.none { normalizeFoodName(it) == demoCategoryKey }) {
+        categories.add(ONBOARDING_DEMO_CATEGORY_NAME)
+        saveStringList(prefs, gson, CATEGORIES_LIST_KEY, categories)
+    }
+
+    val foods = loadFoodList(prefs, gson)
+    val demoIndex = foods.indexOfFirst { normalizeFoodName(it.name) == demoKey }
+
+    if (demoIndex >= 0) {
+        val existingDemo = foods[demoIndex]
+        if (existingDemo.category != ONBOARDING_DEMO_CATEGORY_NAME) {
+            foods[demoIndex] = existingDemo.copy(category = ONBOARDING_DEMO_CATEGORY_NAME)
+            saveFoodList(prefs, gson, foods)
+        }
+    } else {
         foods.add(
             FoodItem(
                 name = ONBOARDING_DEMO_FOOD_NAME,
-                expiry = formatExpiryDate(LocalDate.now().plusDays(3))
+                expiry = formatExpiryDate(LocalDate.now().plusDays(3)),
+                category = ONBOARDING_DEMO_CATEGORY_NAME
             )
         )
         saveFoodList(prefs, gson, foods)
@@ -3339,14 +3354,16 @@ private fun EditCategoriesBottomSheet(
 
     Dialog(
         onDismissRequest = ::dismissSheet,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            dismissOnClickOutside = false
+        )
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             Box(
                 modifier = Modifier
                     .matchParentSize()
                     .background(Color.Black.copy(alpha = 0.28f * scrimAlpha))
-                    .clickable { dismissSheet() }
             )
 
             val cardShape = RoundedCornerShape(30.dp)
@@ -4301,7 +4318,7 @@ fun AppNav(
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
             modifier = Modifier.blurWhen(
-                if (showForm || blurBackgroundForOverlay || firstLaunchOnboardingVisible) 16.dp else 0.dp
+                if (showForm || blurBackgroundForOverlay) 16.dp else 0.dp
             ),
             containerColor = Color.Transparent,
             contentColor = MaterialTheme.colorScheme.onBackground,
