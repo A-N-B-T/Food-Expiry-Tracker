@@ -1224,13 +1224,22 @@ private fun DelayedDestructiveConfirmButton(
 enum class OnboardingSpotlightTarget {
     HOME_ADD_FAB,
     PANTRY_ITEM,
-    CATEGORY_CONTROLS
+    CATEGORY_CONTROLS,
+    HISTORY_TAB,
+    AI_TAB,
+    PROFILE_TAB
+}
+
+private enum class OnboardingSwipeHint {
+    LEFT,
+    RIGHT
 }
 
 private data class OnboardingStep(
     val target: OnboardingSpotlightTarget,
     val title: String,
-    val body: String
+    val body: String,
+    val swipeHint: OnboardingSwipeHint? = null
 )
 
 private val firstLaunchOnboardingSteps = listOf(
@@ -1242,17 +1251,39 @@ private val firstLaunchOnboardingSteps = listOf(
     OnboardingStep(
         target = OnboardingSpotlightTarget.PANTRY_ITEM,
         title = "Swipe right to edit",
-        body = "Drag a food card to the right when you want to edit it."
+        body = "Drag a food card to the right when you want to edit it.",
+        swipeHint = OnboardingSwipeHint.RIGHT
     ),
     OnboardingStep(
         target = OnboardingSpotlightTarget.PANTRY_ITEM,
         title = "Swipe left to delete",
-        body = "Drag a food card to the left to remove it."
+        body = "Drag a food card to the left to remove it.",
+        swipeHint = OnboardingSwipeHint.LEFT
+    ),
+    OnboardingStep(
+        target = OnboardingSpotlightTarget.PANTRY_ITEM,
+        title = "Editing items",
+        body = "Edit an item to change its name, expiry date, or category."
     ),
     OnboardingStep(
         target = OnboardingSpotlightTarget.CATEGORY_CONTROLS,
         title = "Categories",
         body = "Use these pills to filter your pantry or open category editing."
+    ),
+    OnboardingStep(
+        target = OnboardingSpotlightTarget.HISTORY_TAB,
+        title = "History",
+        body = "Open History to see food items you saved or used before."
+    ),
+    OnboardingStep(
+        target = OnboardingSpotlightTarget.AI_TAB,
+        title = "Food AI",
+        body = "Use AI to get recipe ideas and quick help from foods you already have."
+    ),
+    OnboardingStep(
+        target = OnboardingSpotlightTarget.PROFILE_TAB,
+        title = "Profile",
+        body = "Add an account here to back up your food, settings, and app data."
     )
 )
 
@@ -1366,6 +1397,34 @@ private fun FirstLaunchOnboardingOverlay(
             }
         }
 
+        if (step.swipeHint != null && targetRect != null) {
+            val arrowWidthPx = with(density) { 148.dp.toPx() }
+            val arrowHeightPx = with(density) { 46.dp.toPx() }
+            val arrowSidePaddingPx = with(density) { 10.dp.toPx() }
+            val screenWidthPx = with(density) { maxWidth.toPx() }
+            val rawArrowLeftPx =
+                if (step.swipeHint == OnboardingSwipeHint.RIGHT) {
+                    targetRect.right - arrowWidthPx - arrowSidePaddingPx
+                } else {
+                    targetRect.left + arrowSidePaddingPx
+                }
+            val arrowLeft = with(density) {
+                rawArrowLeftPx
+                    .coerceIn(arrowSidePaddingPx, screenWidthPx - arrowWidthPx - arrowSidePaddingPx)
+                    .toDp()
+            }
+            val arrowTop = with(density) {
+                ((targetRect.top + targetRect.bottom) / 2f - arrowHeightPx / 2f).toDp()
+            }
+
+            OnboardingSwipeHintPill(
+                direction = step.swipeHint,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .offset(x = arrowLeft, y = arrowTop)
+            )
+        }
+
         AnimatedContent(
             targetState = step,
             transitionSpec = {
@@ -1431,6 +1490,64 @@ private fun FirstLaunchOnboardingOverlay(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun OnboardingSwipeHintPill(
+    direction: OnboardingSwipeHint,
+    modifier: Modifier = Modifier
+) {
+    val isRight = direction == OnboardingSwipeHint.RIGHT
+    val label = if (isRight) "Swipe right" else "Swipe left"
+    val arrowIcon = if (isRight) Icons.Default.KeyboardArrowRight else Icons.Default.KeyboardArrowLeft
+
+    Surface(
+        modifier = modifier
+            .width(148.dp)
+            .height(46.dp),
+        shape = RoundedCornerShape(50.dp),
+        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.92f),
+        contentColor = MaterialTheme.colorScheme.onPrimary,
+        tonalElevation = 0.dp,
+        shadowElevation = 14.dp,
+        border = BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.22f)
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            if (!isRight) {
+                Icon(
+                    imageVector = arrowIcon,
+                    contentDescription = null,
+                    modifier = Modifier.size(32.dp)
+                )
+                Spacer(Modifier.width(2.dp))
+            }
+
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1
+            )
+
+            if (isRight) {
+                Spacer(Modifier.width(2.dp))
+                Icon(
+                    imageVector = arrowIcon,
+                    contentDescription = null,
+                    modifier = Modifier.size(32.dp)
+                )
             }
         }
     }
@@ -4312,7 +4429,9 @@ fun AppNav(
         }
     }
 
-    AskNotificationPermissionOnFirstLaunch()
+    if (!showFirstLaunchOnboarding) {
+        AskNotificationPermissionOnFirstLaunch()
+    }
     AccountCloudSyncEffect(accountSession)
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -4338,7 +4457,19 @@ fun AppNav(
                         animationSpec = tween(350)
                     )
                 ) {
-                    BottomBar(navController, currentRoute = current)
+                    BottomBar(
+                        navController = navController,
+                        currentRoute = current,
+                        tutorialActive = firstLaunchOnboardingVisible,
+                        onTutorialTargetPositioned = { target, bounds ->
+                            if (onboardingTargetBounds[target] != bounds) {
+                                onboardingTargetBounds =
+                                    onboardingTargetBounds.toMutableMap().apply {
+                                        put(target, bounds)
+                                    }
+                            }
+                        }
+                    )
                 }
             }
         ) { padding ->
@@ -7133,7 +7264,12 @@ fun NotificationsScreen(navController: NavHostController) {
 }
 
 @Composable
-fun BottomBar(navController: NavHostController, currentRoute: String?) {
+fun BottomBar(
+    navController: NavHostController,
+    currentRoute: String?,
+    tutorialActive: Boolean = false,
+    onTutorialTargetPositioned: (OnboardingSpotlightTarget, Rect) -> Unit = { _, _ -> }
+) {
     val scope = rememberCoroutineScope()
     var isTabTransitionLocked by remember { mutableStateOf(false) }
     val selectedRoute = bottomBarSelectedRoute(currentRoute)
@@ -7161,8 +7297,28 @@ fun BottomBar(navController: NavHostController, currentRoute: String?) {
                 horizontalArrangement = Arrangement.spacedBy(3.dp)
             ) {
                 bottomBarItems.forEach { item ->
+                    val tutorialTarget = when (item.route) {
+                        Route.History.r -> OnboardingSpotlightTarget.HISTORY_TAB
+                        Route.Recipe.r -> OnboardingSpotlightTarget.AI_TAB
+                        Route.Profile.r -> OnboardingSpotlightTarget.PROFILE_TAB
+                        else -> null
+                    }
+                    val tutorialModifier =
+                        if (tutorialActive && tutorialTarget != null) {
+                            Modifier.onGloballyPositioned { coordinates ->
+                                onTutorialTargetPositioned(
+                                    tutorialTarget,
+                                    coordinates.boundsInRoot()
+                                )
+                            }
+                        } else {
+                            Modifier
+                        }
+
                     PillNavItem(
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .then(tutorialModifier),
                         selected = selectedRoute == item.route,
                         label = item.label,
                         selectedIcon = item.selectedIcon,
