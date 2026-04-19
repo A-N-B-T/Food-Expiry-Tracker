@@ -1333,26 +1333,6 @@ private fun FirstLaunchOnboardingOverlay(
                 onClick = {}
             )
     ) {
-        val screenHeightPx = with(density) { maxHeight.toPx() }
-        val minCardTopPx = with(density) { 22.dp.toPx() }
-        val maxCardTopPx = max(minCardTopPx, screenHeightPx - estimatedCardHeightPx - minCardTopPx)
-        val rawCardTopPx =
-            if (targetRect == null) {
-                screenHeightPx * 0.32f
-            } else {
-                val targetCenterY = (targetRect.top + targetRect.bottom) / 2f
-                if (targetCenterY < screenHeightPx * 0.52f) {
-                    targetRect.bottom + cardGapPx
-                } else {
-                    targetRect.top - estimatedCardHeightPx - cardGapPx
-                }
-            }
-        val cardTop = with(density) {
-            rawCardTopPx
-                .coerceIn(minCardTopPx, maxCardTopPx)
-                .toDp()
-        }
-
         Canvas(
             modifier = Modifier
                 .matchParentSize()
@@ -1398,16 +1378,11 @@ private fun FirstLaunchOnboardingOverlay(
         }
 
         if (step.swipeHint != null && targetRect != null) {
-            val arrowWidthPx = with(density) { 148.dp.toPx() }
-            val arrowHeightPx = with(density) { 46.dp.toPx() }
-            val arrowSidePaddingPx = with(density) { 10.dp.toPx() }
+            val arrowWidthPx = with(density) { 116.dp.toPx() }
+            val arrowHeightPx = with(density) { 38.dp.toPx() }
+            val arrowSidePaddingPx = with(density) { 24.dp.toPx() }
             val screenWidthPx = with(density) { maxWidth.toPx() }
-            val rawArrowLeftPx =
-                if (step.swipeHint == OnboardingSwipeHint.RIGHT) {
-                    targetRect.right - arrowWidthPx - arrowSidePaddingPx
-                } else {
-                    targetRect.left + arrowSidePaddingPx
-                }
+            val rawArrowLeftPx = (targetRect.left + targetRect.right) / 2f - arrowWidthPx / 2f
             val arrowLeft = with(density) {
                 rawArrowLeftPx
                     .coerceIn(arrowSidePaddingPx, screenWidthPx - arrowWidthPx - arrowSidePaddingPx)
@@ -1417,7 +1392,7 @@ private fun FirstLaunchOnboardingOverlay(
                 ((targetRect.top + targetRect.bottom) / 2f - arrowHeightPx / 2f).toDp()
             }
 
-            OnboardingSwipeHintPill(
+            OnboardingSwipeArrow(
                 direction = step.swipeHint,
                 modifier = Modifier
                     .align(Alignment.TopStart)
@@ -1425,68 +1400,89 @@ private fun FirstLaunchOnboardingOverlay(
             )
         }
 
-        AnimatedContent(
-            targetState = step,
-            transitionSpec = {
-                (fadeIn(tween(220)) + scaleIn(tween(220), initialScale = 0.96f)) togetherWith
-                        (fadeOut(tween(120)) + scaleOut(tween(120), targetScale = 0.98f))
-            },
-            label = "firstLaunchOnboardingCard",
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .offset(y = cardTop)
-                .padding(horizontal = 22.dp)
-        ) { currentStep ->
-            ExactFrostedPillCard(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(28.dp),
-                shadowElevation = 18.dp
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(20.dp)
+        if (targetRect != null) {
+            val screenHeightPx = with(density) { maxHeight.toPx() }
+            val minCardTopPx = with(density) { 22.dp.toPx() }
+            val maxCardTopPx = max(
+                minCardTopPx,
+                screenHeightPx - estimatedCardHeightPx - minCardTopPx
+            )
+            val targetCenterY = (targetRect.top + targetRect.bottom) / 2f
+            val rawCardTopPx =
+                if (targetCenterY < screenHeightPx * 0.52f) {
+                    targetRect.bottom + cardGapPx
+                } else {
+                    targetRect.top - estimatedCardHeightPx - cardGapPx
+                }
+            val cardTop = with(density) {
+                rawCardTopPx
+                    .coerceIn(minCardTopPx, maxCardTopPx)
+                    .toDp()
+            }
+
+            AnimatedContent(
+                targetState = step,
+                transitionSpec = {
+                    (fadeIn(tween(220)) + scaleIn(tween(220), initialScale = 0.96f)) togetherWith
+                            (fadeOut(tween(120)) + scaleOut(tween(120), targetScale = 0.98f))
+                },
+                label = "firstLaunchOnboardingCard",
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .offset(y = cardTop)
+                    .padding(horizontal = 22.dp)
+            ) { currentStep ->
+                ExactFrostedPillCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(28.dp),
+                    shadowElevation = 18.dp
                 ) {
-                    Text(
-                        text = currentStep.title,
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-
-                    Spacer(Modifier.height(8.dp))
-
-                    Text(
-                        text = currentStep.body,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    Spacer(Modifier.height(16.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(20.dp)
                     ) {
                         Text(
-                            text = "${safeStepIndex + 1} of ${firstLaunchOnboardingSteps.size}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.weight(1f)
+                            text = currentStep.title,
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
                         )
 
-                        TextButton(onClick = onSkip) {
-                            Text("Skip")
-                        }
+                        Spacer(Modifier.height(8.dp))
 
-                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = currentStep.body,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
 
-                        Button(
-                            onClick = onNext,
-                            shape = RoundedCornerShape(50.dp),
-                            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp)
+                        Spacer(Modifier.height(16.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(if (safeStepIndex == firstLaunchOnboardingSteps.lastIndex) "Done" else "Next")
+                            Text(
+                                text = "${safeStepIndex + 1} of ${firstLaunchOnboardingSteps.size}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.weight(1f)
+                            )
+
+                            TextButton(onClick = onSkip) {
+                                Text("Skip")
+                            }
+
+                            Spacer(Modifier.width(6.dp))
+
+                            Button(
+                                onClick = onNext,
+                                shape = RoundedCornerShape(50.dp),
+                                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp)
+                            ) {
+                                Text(if (safeStepIndex == firstLaunchOnboardingSteps.lastIndex) "Done" else "Next")
+                            }
                         }
                     }
                 }
@@ -1496,60 +1492,53 @@ private fun FirstLaunchOnboardingOverlay(
 }
 
 @Composable
-private fun OnboardingSwipeHintPill(
+private fun OnboardingSwipeArrow(
     direction: OnboardingSwipeHint,
     modifier: Modifier = Modifier
 ) {
     val isRight = direction == OnboardingSwipeHint.RIGHT
-    val label = if (isRight) "Swipe right" else "Swipe left"
-    val arrowIcon = if (isRight) Icons.Default.KeyboardArrowRight else Icons.Default.KeyboardArrowLeft
+    val arrowColor = MaterialTheme.colorScheme.primary
 
-    Surface(
+    Canvas(
         modifier = modifier
-            .width(148.dp)
-            .height(46.dp),
-        shape = RoundedCornerShape(50.dp),
-        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.92f),
-        contentColor = MaterialTheme.colorScheme.onPrimary,
-        tonalElevation = 0.dp,
-        shadowElevation = 14.dp,
-        border = BorderStroke(
-            1.dp,
-            MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.22f)
-        )
+            .width(116.dp)
+            .height(38.dp)
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center
-        ) {
-            if (!isRight) {
-                Icon(
-                    imageVector = arrowIcon,
-                    contentDescription = null,
-                    modifier = Modifier.size(32.dp)
-                )
-                Spacer(Modifier.width(2.dp))
-            }
+        val centerY = size.height / 2f
+        val startX = if (isRight) size.width * 0.08f else size.width * 0.92f
+        val endX = if (isRight) size.width * 0.88f else size.width * 0.12f
+        val headDirection = if (isRight) -1f else 1f
+        val headLength = size.height * 0.46f
+        val headSpread = size.height * 0.34f
 
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1
-            )
-
-            if (isRight) {
-                Spacer(Modifier.width(2.dp))
-                Icon(
-                    imageVector = arrowIcon,
-                    contentDescription = null,
-                    modifier = Modifier.size(32.dp)
-                )
-            }
-        }
+        drawLine(
+            color = Color.Black.copy(alpha = 0.18f),
+            start = Offset(startX, centerY + 2.5f),
+            end = Offset(endX, centerY + 2.5f),
+            strokeWidth = 7f,
+            cap = StrokeCap.Round
+        )
+        drawLine(
+            color = arrowColor.copy(alpha = 0.95f),
+            start = Offset(startX, centerY),
+            end = Offset(endX, centerY),
+            strokeWidth = 7f,
+            cap = StrokeCap.Round
+        )
+        drawLine(
+            color = arrowColor.copy(alpha = 0.95f),
+            start = Offset(endX, centerY),
+            end = Offset(endX + (headDirection * headLength), centerY - headSpread),
+            strokeWidth = 7f,
+            cap = StrokeCap.Round
+        )
+        drawLine(
+            color = arrowColor.copy(alpha = 0.95f),
+            start = Offset(endX, centerY),
+            end = Offset(endX + (headDirection * headLength), centerY + headSpread),
+            strokeWidth = 7f,
+            cap = StrokeCap.Round
+        )
     }
 }
 
@@ -4284,6 +4273,9 @@ class MainActivity : ComponentActivity() {
         if (notifPrefs.getBoolean(DAILY_ENABLED_KEY, false)) {
             scheduleDailyExpiryWork(appCtx)
         }
+        if (shouldShowFirstLaunchOnboarding(appCtx)) {
+            seedFirstLaunchDemoFoodIfNeeded(appCtx)
+        }
 
         setContent {
             val appCtx = this@MainActivity.applicationContext
@@ -4414,19 +4406,14 @@ fun AppNav(
         mutableStateOf(emptyMap<OnboardingSpotlightTarget, Rect>())
     }
     val layoutDir = LocalLayoutDirection.current
-    val firstLaunchOnboardingVisible = showFirstLaunchOnboarding && current == Route.Home.r
+    val firstLaunchOnboardingVisible =
+        showFirstLaunchOnboarding && (current == null || current == Route.Home.r)
 
     fun finishFirstLaunchOnboarding() {
         markFirstLaunchOnboardingComplete(appContext)
         showFirstLaunchOnboarding = false
         onboardingStepIndex = 0
         onboardingTargetBounds = emptyMap()
-    }
-
-    LaunchedEffect(showFirstLaunchOnboarding, appContext) {
-        if (showFirstLaunchOnboarding) {
-            seedFirstLaunchDemoFoodIfNeeded(appContext)
-        }
     }
 
     if (!showFirstLaunchOnboarding) {
@@ -5564,11 +5551,11 @@ private fun isSingleFoodLikeRequest(
 }
 
 private fun recipePromptPlaceholder(): String {
-    return "Give me any ingredients, like eggs and rice."
+    return "Give me any food items, like eggs and rice."
 }
 
 private fun buildExpiringFoodsRequest(expiringFoods: List<ExpiringFoodHint>): String {
-    return "Give me recipe ideas using these foods that expire soon: ${
+    return "Suggest recipes using these expiring foods: ${
         expiringFoods.joinToString(", ") { it.name }
     }."
 }
@@ -5656,9 +5643,9 @@ private fun RecipeIntroCard(hasPantryFoods: Boolean) {
             Spacer(Modifier.height(6.dp))
             Text(
                 text = if (hasPantryFoods) {
-                    "Tell me your ingredients and I will turn them into recipe cards."
+                    "Tell me your food item and I will turn them into recipe cards."
                 } else {
-                    "Add foods in Home, then ask for recipes with your ingredients."
+                    "Add some foods in Home then ask for recipes."
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -6191,9 +6178,9 @@ private fun RecipeScreen(
                 if (isSingleFoodLikeRequest(trimmed, pantryIngredientNames)) {
                     "Can you give me some more foods?"
                 } else if (looksLikeFoodIngredientInput(trimmed, pantryIngredientNames)) {
-                    "Can you give me some more ingredients?"
+                    "Can you give me some more food items?"
                 } else {
-                    "I can only help with food ingredients or food-related recipe requests."
+                    "I can only help with food-related recipe requests."
                 }
             val invalidMessages = messages +
                 RecipeChatMessage(
@@ -6916,7 +6903,7 @@ fun HelpScreen(navController: NavHostController) {
         navController = navController,
         title = "Help & Support",
         headline = "Quick help",
-        body = "Home: add and manage foods.\nHistory: re-add old items.\nAI: get recipe ideas from ingredients.\nProfile: account, sync, and settings.",
+        body = "Home: add and manage foods.\nHistory: re-add old items.\nAI: get recipe ideas from food items.\nProfile: account, sync, and settings.",
         footer = "If something looks off, try closing and reopening the app."
     )
 }
