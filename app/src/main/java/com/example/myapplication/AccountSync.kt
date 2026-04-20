@@ -76,6 +76,7 @@ import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.ClearCredentialException
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.credentials.exceptions.GetCredentialException
+import androidx.credentials.exceptions.NoCredentialException
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -901,6 +902,8 @@ private suspend fun launchGoogleSignIn(context: Context): AccountSession {
         throw IllegalStateException("Google sign-in returned an unreadable ID token.")
     } catch (_: GetCredentialCancellationException) {
         throw IllegalStateException("Google sign-in was canceled.")
+    } catch (_: NoCredentialException) {
+        throw IllegalStateException("No Google account was found. Please add one on this device and try again.")
     } catch (error: GetCredentialException) {
         throw IllegalStateException(
             "Google sign-in failed: ${error.javaClass.simpleName} - ${error.message ?: "no message"}"
