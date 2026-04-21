@@ -221,6 +221,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.edit
+import androidx.core.net.toUri
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -334,7 +335,7 @@ fun loadThemeMode(context: Context): ThemeMode {
 fun saveThemeMode(context: Context, mode: ThemeMode) {
     val prefs = context.applicationContext.getSharedPreferences(THEME_PREFS,
         Context.MODE_PRIVATE)
-    prefs.edit().putString(THEME_KEY, mode.name).apply()
+    prefs.edit { putString(THEME_KEY, mode.name) }
 }
 
 fun loadCountdownFormat(context: Context): CountdownFormat {
@@ -353,7 +354,7 @@ fun loadCountdownFormat(context: Context): CountdownFormat {
 
 fun saveCountdownFormat(context: Context, format: CountdownFormat) {
     val prefs = context.applicationContext.getSharedPreferences(THEME_PREFS, Context.MODE_PRIVATE)
-    prefs.edit().putString(COUNTDOWN_FORMAT_KEY, format.name).apply()
+    prefs.edit { putString(COUNTDOWN_FORMAT_KEY, format.name) }
 }
 
 private fun loadLocalProfileName(context: Context): String {
@@ -367,9 +368,9 @@ private fun saveLocalProfileName(
     name: String
 ) {
     val prefs = context.applicationContext.getSharedPreferences(THEME_PREFS, Context.MODE_PRIVATE)
-    prefs.edit()
-        .putString(LOCAL_PROFILE_NAME_KEY, name.trim().take(LOCAL_PROFILE_NAME_MAX_LENGTH))
-        .apply()
+    prefs.edit {
+        putString(LOCAL_PROFILE_NAME_KEY, name.trim().take(LOCAL_PROFILE_NAME_MAX_LENGTH))
+    }
 }
 
 private fun loadLocalProfilePhotoUri(context: Context): String {
@@ -4328,7 +4329,7 @@ private fun AskNotificationPermissionOnFirstLaunch() {
                 ) == android.content.pm.PackageManager.PERMISSION_GRANTED
 
             if (!alreadyPrompted && !alreadyGranted) {
-                prefs.edit().putBoolean(NOTIF_FIRST_PROMPT_SHOWN_KEY, true).apply()
+                prefs.edit { putBoolean(NOTIF_FIRST_PROMPT_SHOWN_KEY, true) }
                 permissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
             }
         }
@@ -6645,7 +6646,7 @@ private fun ProfileHeaderAvatar(
                     withContext(Dispatchers.IO) {
                         runCatching {
                             context.contentResolver
-                                .openInputStream(Uri.parse(localPhotoUri))
+                                .openInputStream(localPhotoUri.toUri())
                                 ?.use(BitmapFactory::decodeStream)
                         }.getOrNull()
                     }
@@ -7121,11 +7122,11 @@ fun NotificationsScreen(navController: NavHostController) {
         rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { granted ->
             if (granted) {
                 dailyEnabled = true
-                prefs.edit().putBoolean(DAILY_ENABLED_KEY, true).apply()
+                prefs.edit { putBoolean(DAILY_ENABLED_KEY, true) }
                 scheduleDailyExpiryWork(appCtx)
             } else {
                 dailyEnabled = false
-                prefs.edit().putBoolean(DAILY_ENABLED_KEY, false).apply()
+                prefs.edit { putBoolean(DAILY_ENABLED_KEY, false) }
             }
         }
 
@@ -7141,7 +7142,7 @@ fun NotificationsScreen(navController: NavHostController) {
 
     fun saveDays(newValue: Int) {
         daysBefore = newValue.coerceIn(MIN_DAYS_BEFORE_REMINDER, MAX_DAYS_BEFORE_REMINDER)
-        prefs.edit().putInt(DAYS_BEFORE_KEY, daysBefore).apply()
+        prefs.edit { putInt(DAYS_BEFORE_KEY, daysBefore) }
 
         if (dailyEnabled) scheduleDailyExpiryWork(appCtx)
     }
@@ -7191,13 +7192,13 @@ fun NotificationsScreen(navController: NavHostController) {
                         onCheckedChange = { checked ->
                             if (!checked) {
                                 dailyEnabled = false
-                                prefs.edit().putBoolean(DAILY_ENABLED_KEY, false).apply()
+                                prefs.edit { putBoolean(DAILY_ENABLED_KEY, false) }
                                 cancelDailyExpiryWork(appCtx)
                             } else {
 
                                 if (hasNotifPermission()) {
                                     dailyEnabled = true
-                                    prefs.edit().putBoolean(DAILY_ENABLED_KEY, true).apply()
+                                    prefs.edit { putBoolean(DAILY_ENABLED_KEY, true) }
                                     scheduleDailyExpiryWork(appCtx)
                                 } else {
 

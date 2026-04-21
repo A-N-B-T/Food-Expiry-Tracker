@@ -101,7 +101,7 @@ class ExpiryReminderWorker(
         )
 
         val notification = NotificationCompat.Builder(ctx, CHANNEL_ID)
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_notification_expiry)
             .setContentTitle(title)
             .setContentText("Tap to open your pantry")
             .setStyle(inbox)

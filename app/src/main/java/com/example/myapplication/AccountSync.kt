@@ -49,6 +49,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -1073,8 +1075,8 @@ fun AccountSyncScreen(navController: NavHostController) {
     var statusIsError by rememberSaveable { mutableStateOf(true) }
     var showForgotPasswordOption by rememberSaveable { mutableStateOf(false) }
     var showLogoutDialog by rememberSaveable { mutableStateOf(false) }
-    var passwordResetCooldownUntilMs by rememberSaveable { mutableStateOf(0L) }
-    var passwordResetCooldownSecondsLeft by rememberSaveable { mutableStateOf(0) }
+    var passwordResetCooldownUntilMs by rememberSaveable { mutableLongStateOf(0L) }
+    var passwordResetCooldownSecondsLeft by rememberSaveable { mutableIntStateOf(0) }
 
     LaunchedEffect(statusMessage, statusPlacement) {
         val message = statusMessage?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
