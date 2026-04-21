@@ -132,6 +132,9 @@ private const val ACCOUNT_DAILY_ENABLED_KEY = "daily_enabled"
 private const val CLOUD_SYNC_VERSION = 1
 private const val ACCOUNT_AUTO_SYNC_WORK_NAME = "account_auto_sync_work"
 private const val EMAIL_PASSWORD_INCORRECT_MESSAGE = "Email or password is incorrect."
+private const val ENTER_EMAIL_FIRST_MESSAGE = "Enter your email first."
+private const val PASSWORD_RESET_SENT_MESSAGE =
+    "If an account exists for this email, a reset link has been sent."
 
 private val accountGson = Gson()
 private val accountAuthPillShape = RoundedCornerShape(30.dp)
@@ -505,6 +508,18 @@ private fun friendlyIdentityError(body: String?): String {
     }
 }
 
+private fun friendlyPasswordResetError(body: String?): String {
+    val code = parseIdentityErrorCode(body)
+
+    return when (code) {
+        "INVALID_EMAIL" -> "Enter a valid email address."
+        "MISSING_EMAIL" -> ENTER_EMAIL_FIRST_MESSAGE
+        "TOO_MANY_ATTEMPTS_TRY_LATER" -> "Too many attempts right now. Try again in a moment."
+        "OPERATION_NOT_ALLOWED" -> "Enable Email/Password in Firebase Authentication first."
+        else -> "Password reset failed. Try again."
+    }
+}
+
 private fun friendlyCloudSyncError(body: String?): String {
     val code = runCatching {
         accountGson.fromJson(body, ServiceErrorEnvelope::class.java).error?.message
@@ -616,6 +631,27 @@ private suspend fun signInWithEmailPassword(
             .toAccountSession(AccountProvider.EMAIL)
     } catch (error: IOException) {
         throw IllegalStateException(friendlyIdentityError(error.message))
+    }
+}
+
+private suspend fun sendPasswordResetEmail(email: String) {
+    requireCloudSetup()
+    val url =
+        "https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=${BuildConfig.FIREBASE_API_KEY}"
+    val body = accountGson.toJson(
+        mapOf(
+            "requestType" to "PASSWORD_RESET",
+            "email" to email
+        )
+    )
+
+    try {
+        executeJsonRequest(url = url, method = "POST", bodyJson = body)
+    } catch (error: IOException) {
+        if (parseIdentityErrorCode(error.message) == "EMAIL_NOT_FOUND") {
+            return
+        }
+        throw IllegalStateException(friendlyPasswordResetError(error.message))
     }
 }
 
@@ -1032,6 +1068,8 @@ fun AccountSyncScreen(navController: NavHostController) {
     var busyAction by rememberSaveable { mutableStateOf<String?>(null) }
     var statusMessage by rememberSaveable { mutableStateOf<String?>(null) }
     var statusPlacement by rememberSaveable { mutableStateOf<AccountStatusPlacement?>(null) }
+    var statusIsError by rememberSaveable { mutableStateOf(true) }
+    var showForgotPasswordOption by rememberSaveable { mutableStateOf(false) }
     var showLogoutDialog by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(statusMessage, statusPlacement) {
@@ -1044,6 +1082,7 @@ fun AccountSyncScreen(navController: NavHostController) {
         if (statusMessage == message) {
             statusMessage = null
             statusPlacement = null
+            statusIsError = true
         }
     }
 
@@ -1066,6 +1105,7 @@ fun AccountSyncScreen(navController: NavHostController) {
             }.onFailure { failure ->
                 statusMessage = failure.message
                 statusPlacement = AccountStatusPlacement.EMAIL_AUTH
+                statusIsError = true
             }
             busyAction = null
         }
@@ -1083,6 +1123,36 @@ fun AccountSyncScreen(navController: NavHostController) {
             }.onFailure { failure ->
                 statusMessage = failure.message
                 statusPlacement = AccountStatusPlacement.EMAIL_AUTH
+                statusIsError = true
+                showForgotPasswordOption = true
+            }
+            busyAction = null
+        }
+    }
+
+    fun resetPassword() {
+        statusMessage = null
+        statusPlacement = null
+        statusIsError = true
+        val trimmedEmail = email.trim()
+        if (trimmedEmail.isBlank()) {
+            statusMessage = ENTER_EMAIL_FIRST_MESSAGE
+            statusPlacement = AccountStatusPlacement.EMAIL_AUTH
+            return
+        }
+
+        busyAction = "reset"
+        scope.launch {
+            runCatching {
+                sendPasswordResetEmail(trimmedEmail)
+            }.onSuccess {
+                statusMessage = PASSWORD_RESET_SENT_MESSAGE
+                statusPlacement = AccountStatusPlacement.EMAIL_AUTH
+                statusIsError = false
+            }.onFailure { failure ->
+                statusMessage = failure.message
+                statusPlacement = AccountStatusPlacement.EMAIL_AUTH
+                statusIsError = true
             }
             busyAction = null
         }
@@ -1091,6 +1161,7 @@ fun AccountSyncScreen(navController: NavHostController) {
     fun continueWithGoogle() {
         statusMessage = null
         statusPlacement = null
+        statusIsError = true
         busyAction = "google"
         scope.launch {
             runCatching {
@@ -1100,6 +1171,7 @@ fun AccountSyncScreen(navController: NavHostController) {
             }.onFailure { failure ->
                 statusMessage = failure.message
                 statusPlacement = AccountStatusPlacement.GOOGLE_AUTH
+                statusIsError = true
             }
             busyAction = null
         }
@@ -1108,6 +1180,7 @@ fun AccountSyncScreen(navController: NavHostController) {
     fun syncNow() {
         statusMessage = null
         statusPlacement = null
+        statusIsError = true
         busyAction = "sync"
         scope.launch {
             runCatching {
@@ -1117,6 +1190,7 @@ fun AccountSyncScreen(navController: NavHostController) {
             }.onFailure { failure ->
                 statusMessage = failure.message
                 statusPlacement = AccountStatusPlacement.SYNC_ACTION
+                statusIsError = true
             }
             busyAction = null
         }
@@ -1125,6 +1199,7 @@ fun AccountSyncScreen(navController: NavHostController) {
     fun restoreCloud() {
         statusMessage = null
         statusPlacement = null
+        statusIsError = true
         busyAction = "restore"
         scope.launch {
             runCatching {
@@ -1134,6 +1209,7 @@ fun AccountSyncScreen(navController: NavHostController) {
             }.onFailure { failure ->
                 statusMessage = failure.message
                 statusPlacement = AccountStatusPlacement.SYNC_ACTION
+                statusIsError = true
             }
             busyAction = null
         }
@@ -1151,6 +1227,7 @@ fun AccountSyncScreen(navController: NavHostController) {
         if (statusPlacement == AccountStatusPlacement.EMAIL_AUTH) {
             statusMessage = null
             statusPlacement = null
+            statusIsError = true
         }
     }
 
@@ -1189,17 +1266,21 @@ fun AccountSyncScreen(navController: NavHostController) {
                         },
                         canUseEmailPassword = canUseEmailPassword,
                         canUseGoogle = canUseGoogle,
+                        canResetPassword = busyAction == null && isCloudAccountConfigured(),
+                        showForgotPassword = showForgotPasswordOption,
                         showSetupHint = !isCloudAccountConfigured(),
                         busyAction = busyAction,
                         emailAuthMessage = statusMessage?.takeIf {
                             statusPlacement == AccountStatusPlacement.EMAIL_AUTH
                         },
+                        emailAuthMessageIsError = statusIsError,
                         googleAuthMessage = statusMessage?.takeIf {
                             statusPlacement == AccountStatusPlacement.GOOGLE_AUTH
                         },
                         onContinueWithGoogle = ::continueWithGoogle,
                         onLogIn = ::signIn,
-                        onSignUp = ::createAccount
+                        onSignUp = ::createAccount,
+                        onForgotPassword = ::resetPassword
                     )
                 } else {
                     SignedInAccountContent(
@@ -1265,15 +1346,20 @@ private fun SignedOutAccountContent(
     onPasswordChange: (String) -> Unit,
     canUseEmailPassword: Boolean,
     canUseGoogle: Boolean,
+    canResetPassword: Boolean,
+    showForgotPassword: Boolean,
     showSetupHint: Boolean,
     busyAction: String?,
     emailAuthMessage: String?,
+    emailAuthMessageIsError: Boolean,
     googleAuthMessage: String?,
     onContinueWithGoogle: () -> Unit,
     onLogIn: () -> Unit,
-    onSignUp: () -> Unit
+    onSignUp: () -> Unit,
+    onForgotPassword: () -> Unit
 ) {
-    val hasEmailAuthError = !emailAuthMessage.isNullOrBlank()
+    val hasEmailAuthMessage = !emailAuthMessage.isNullOrBlank()
+    val hasEmailAuthError = hasEmailAuthMessage && emailAuthMessageIsError
     var displayedEmailAuthMessage by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(emailAuthMessage) {
@@ -1282,7 +1368,8 @@ private fun SignedOutAccountContent(
         }
     }
 
-    val showSignUpHint = displayedEmailAuthMessage == EMAIL_PASSWORD_INCORRECT_MESSAGE
+    val showSignUpHint =
+        emailAuthMessageIsError && displayedEmailAuthMessage == EMAIL_PASSWORD_INCORRECT_MESSAGE
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.Top,
@@ -1338,10 +1425,38 @@ private fun SignedOutAccountContent(
             )
         )
 
-        Spacer(Modifier.height(14.dp))
+        AnimatedVisibility(
+            visible = showForgotPassword,
+            enter = expandVertically(expandFrom = Alignment.Top),
+            exit = shrinkVertically(shrinkTowards = Alignment.Top)
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.End
+            ) {
+                Spacer(Modifier.height(6.dp))
+
+                TextButton(
+                    onClick = onForgotPassword,
+                    enabled = canResetPassword,
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                ) {
+                    ActionLabel(
+                        text = if (busyAction == "reset") "Sending..." else "Forgot password?",
+                        busy = busyAction == "reset"
+                    )
+                }
+
+                Spacer(Modifier.height(8.dp))
+            }
+        }
+
+        if (!showForgotPassword) {
+            Spacer(Modifier.height(14.dp))
+        }
 
         AnimatedVisibility(
-            visible = hasEmailAuthError,
+            visible = hasEmailAuthMessage,
             enter = expandVertically(expandFrom = Alignment.Top),
             exit = shrinkVertically(shrinkTowards = Alignment.Top)
         ) {
@@ -1354,7 +1469,7 @@ private fun SignedOutAccountContent(
                 displayedEmailAuthMessage?.takeIf { it.isNotBlank() }?.let { message ->
                     AccountInlineStatusMessage(
                         message = message,
-                        isError = true
+                        isError = emailAuthMessageIsError
                     )
                 }
 
@@ -1472,11 +1587,25 @@ private fun SignedInAccountContent(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                lastSyncedAt.takeIf { it > 0L }?.let {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Text(
-                        text = "Last synced ${formatSyncTime(it)}",
+                        text = lastSyncedAt.takeIf { it > 0L }
+                            ?.let { "Last synced ${formatSyncTime(it)}" }
+                            ?: "Not synced yet",
+                        modifier = Modifier.weight(1f),
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+
+                    AccountLogoutButton(
+                        enabled = busyAction == null,
+                        onLogOut = onLogOut
                     )
                 }
             }
@@ -1540,65 +1669,32 @@ private fun SignedInAccountContent(
                 )
             }
         }
-
-        AccountLogoutCard(
-            enabled = busyAction == null,
-            onLogOut = onLogOut
-        )
     }
 }
 
 @Composable
-private fun AccountLogoutCard(
+private fun AccountLogoutButton(
     enabled: Boolean,
     onLogOut: () -> Unit
 ) {
-    MatchingPillCard(
-        modifier = Modifier.fillMaxWidth(),
+    OutlinedButton(
+        onClick = onLogOut,
+        enabled = enabled,
         shape = accountAuthPillShape,
-        shadowElevation = 2.dp
+        border = BorderStroke(
+            width = 1.dp,
+            color = MaterialTheme.colorScheme.error.copy(alpha = if (enabled) 0.42f else 0.18f)
+        ),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+        colors = ButtonDefaults.outlinedButtonColors(
+            contentColor = MaterialTheme.colorScheme.error,
+            disabledContentColor = MaterialTheme.colorScheme.error.copy(alpha = 0.42f)
+        )
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 18.dp, vertical = 14.dp),
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "Account",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = "Sign out of this device.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
-            OutlinedButton(
-                onClick = onLogOut,
-                enabled = enabled,
-                shape = accountAuthPillShape,
-                border = BorderStroke(
-                    width = 1.dp,
-                    color = MaterialTheme.colorScheme.error.copy(alpha = if (enabled) 0.42f else 0.18f)
-                ),
-                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp),
-                colors = ButtonDefaults.outlinedButtonColors(
-                    contentColor = MaterialTheme.colorScheme.error,
-                    disabledContentColor = MaterialTheme.colorScheme.error.copy(alpha = 0.42f)
-                )
-            ) {
-                Text(
-                    text = "Log out",
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
-        }
+        Text(
+            text = "Log out",
+            fontWeight = FontWeight.SemiBold
+        )
     }
 }
 
