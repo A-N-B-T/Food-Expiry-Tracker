@@ -134,7 +134,7 @@ private const val ACCOUNT_AUTO_SYNC_WORK_NAME = "account_auto_sync_work"
 private const val EMAIL_PASSWORD_INCORRECT_MESSAGE = "Email or password is incorrect."
 private const val ENTER_EMAIL_FIRST_MESSAGE = "Enter your email first."
 private const val PASSWORD_RESET_SENT_MESSAGE =
-    "If an account exists for this email, a reset link has been sent."
+    "A reset link has been sent. Please check your email."
 private const val PASSWORD_RESET_COOLDOWN_SECONDS = 30
 private const val PASSWORD_RESET_COOLDOWN_MILLIS = PASSWORD_RESET_COOLDOWN_SECONDS * 1_000L
 
@@ -1467,35 +1467,7 @@ private fun SignedOutAccountContent(
             )
         )
 
-        AnimatedVisibility(
-            visible = showForgotPassword,
-            enter = expandVertically(expandFrom = Alignment.Top),
-            exit = shrinkVertically(shrinkTowards = Alignment.Top)
-        ) {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.End
-            ) {
-                Spacer(Modifier.height(6.dp))
-
-                TextButton(
-                    onClick = onForgotPassword,
-                    enabled = canResetPassword,
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
-                ) {
-                    ActionLabel(
-                        text = forgotPasswordButtonText,
-                        busy = busyAction == "reset"
-                    )
-                }
-
-                Spacer(Modifier.height(8.dp))
-            }
-        }
-
-        if (!showForgotPassword) {
-            Spacer(Modifier.height(14.dp))
-        }
+        Spacer(Modifier.height(14.dp))
 
         AnimatedVisibility(
             visible = hasEmailAuthMessage,
@@ -1546,7 +1518,31 @@ private fun SignedOutAccountContent(
             )
         }
 
-        Spacer(Modifier.height(14.dp))
+        AnimatedVisibility(
+            visible = showForgotPassword,
+            enter = expandVertically(expandFrom = Alignment.Top),
+            exit = shrinkVertically(shrinkTowards = Alignment.Top)
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.Start
+            ) {
+                Spacer(Modifier.height(6.dp))
+
+                TextButton(
+                    onClick = onForgotPassword,
+                    enabled = canResetPassword,
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                ) {
+                    ActionLabel(
+                        text = forgotPasswordButtonText,
+                        busy = busyAction == "reset"
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(if (showForgotPassword) 8.dp else 14.dp))
 
         AccountSectionDivider()
 
