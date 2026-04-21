@@ -135,6 +135,8 @@ private const val EMAIL_PASSWORD_INCORRECT_MESSAGE = "Email or password is incor
 private const val ENTER_EMAIL_FIRST_MESSAGE = "Enter your email first."
 private const val PASSWORD_RESET_SENT_MESSAGE =
     "If an account exists for this email, a reset link has been sent."
+private const val PASSWORD_RESET_COOLDOWN_SECONDS = 30
+private const val PASSWORD_RESET_COOLDOWN_MILLIS = PASSWORD_RESET_COOLDOWN_SECONDS * 1_000L
 
 private val accountGson = Gson()
 private val accountAuthPillShape = RoundedCornerShape(30.dp)
@@ -1071,6 +1073,8 @@ fun AccountSyncScreen(navController: NavHostController) {
     var statusIsError by rememberSaveable { mutableStateOf(true) }
     var showForgotPasswordOption by rememberSaveable { mutableStateOf(false) }
     var showLogoutDialog by rememberSaveable { mutableStateOf(false) }
+    var passwordResetCooldownUntilMs by rememberSaveable { mutableStateOf(0L) }
+    var passwordResetCooldownSecondsLeft by rememberSaveable { mutableStateOf(0) }
 
     LaunchedEffect(statusMessage, statusPlacement) {
         val message = statusMessage?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
@@ -1086,6 +1090,26 @@ fun AccountSyncScreen(navController: NavHostController) {
         }
     }
 
+    LaunchedEffect(passwordResetCooldownUntilMs) {
+        if (passwordResetCooldownUntilMs <= 0L) {
+            passwordResetCooldownSecondsLeft = 0
+            return@LaunchedEffect
+        }
+
+        while (true) {
+            val remainingMs = passwordResetCooldownUntilMs - System.currentTimeMillis()
+            if (remainingMs <= 0L) {
+                passwordResetCooldownUntilMs = 0L
+                passwordResetCooldownSecondsLeft = 0
+                break
+            }
+
+            passwordResetCooldownSecondsLeft = ((remainingMs + 999L) / 1_000L).toInt()
+            delay(250L)
+        }
+    }
+
+    val isPasswordResetCoolingDown = passwordResetCooldownSecondsLeft > 0
     val canUseEmailPassword =
         email.isNotBlank() &&
                 password.length >= 6 &&
@@ -1140,12 +1164,21 @@ fun AccountSyncScreen(navController: NavHostController) {
             statusPlacement = AccountStatusPlacement.EMAIL_AUTH
             return
         }
+        if (isPasswordResetCoolingDown) {
+            statusMessage = "Please wait ${passwordResetCooldownSecondsLeft}s before trying again."
+            statusPlacement = AccountStatusPlacement.EMAIL_AUTH
+            statusIsError = true
+            return
+        }
 
         busyAction = "reset"
         scope.launch {
             runCatching {
                 sendPasswordResetEmail(trimmedEmail)
             }.onSuccess {
+                passwordResetCooldownUntilMs =
+                    System.currentTimeMillis() + PASSWORD_RESET_COOLDOWN_MILLIS
+                passwordResetCooldownSecondsLeft = PASSWORD_RESET_COOLDOWN_SECONDS
                 statusMessage = PASSWORD_RESET_SENT_MESSAGE
                 statusPlacement = AccountStatusPlacement.EMAIL_AUTH
                 statusIsError = false
@@ -1266,8 +1299,11 @@ fun AccountSyncScreen(navController: NavHostController) {
                         },
                         canUseEmailPassword = canUseEmailPassword,
                         canUseGoogle = canUseGoogle,
-                        canResetPassword = busyAction == null && isCloudAccountConfigured(),
+                        canResetPassword = busyAction == null &&
+                                isCloudAccountConfigured() &&
+                                !isPasswordResetCoolingDown,
                         showForgotPassword = showForgotPasswordOption,
+                        forgotPasswordCooldownSecondsLeft = passwordResetCooldownSecondsLeft,
                         showSetupHint = !isCloudAccountConfigured(),
                         busyAction = busyAction,
                         emailAuthMessage = statusMessage?.takeIf {
@@ -1348,6 +1384,7 @@ private fun SignedOutAccountContent(
     canUseGoogle: Boolean,
     canResetPassword: Boolean,
     showForgotPassword: Boolean,
+    forgotPasswordCooldownSecondsLeft: Int,
     showSetupHint: Boolean,
     busyAction: String?,
     emailAuthMessage: String?,
@@ -1360,6 +1397,11 @@ private fun SignedOutAccountContent(
 ) {
     val hasEmailAuthMessage = !emailAuthMessage.isNullOrBlank()
     val hasEmailAuthError = hasEmailAuthMessage && emailAuthMessageIsError
+    val forgotPasswordButtonText = when {
+        busyAction == "reset" -> "Sending..."
+        forgotPasswordCooldownSecondsLeft > 0 -> "Try again in ${forgotPasswordCooldownSecondsLeft}s"
+        else -> "Forgot password?"
+    }
     var displayedEmailAuthMessage by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(emailAuthMessage) {
@@ -1442,7 +1484,7 @@ private fun SignedOutAccountContent(
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
                 ) {
                     ActionLabel(
-                        text = if (busyAction == "reset") "Sending..." else "Forgot password?",
+                        text = forgotPasswordButtonText,
                         busy = busyAction == "reset"
                     )
                 }
