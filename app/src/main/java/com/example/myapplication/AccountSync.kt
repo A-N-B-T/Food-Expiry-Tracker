@@ -10,7 +10,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.border
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.foundation.layout.imePadding
@@ -1073,7 +1072,6 @@ fun AccountSyncScreen(navController: NavHostController) {
     var statusMessage by rememberSaveable { mutableStateOf<String?>(null) }
     var statusPlacement by rememberSaveable { mutableStateOf<AccountStatusPlacement?>(null) }
     var statusIsError by rememberSaveable { mutableStateOf(true) }
-    var showForgotPasswordOption by rememberSaveable { mutableStateOf(false) }
     var showLogoutDialog by rememberSaveable { mutableStateOf(false) }
     var passwordResetCooldownUntilMs by rememberSaveable { mutableLongStateOf(0L) }
     var passwordResetCooldownSecondsLeft by rememberSaveable { mutableIntStateOf(0) }
@@ -1150,7 +1148,6 @@ fun AccountSyncScreen(navController: NavHostController) {
                 statusMessage = failure.message
                 statusPlacement = AccountStatusPlacement.EMAIL_AUTH
                 statusIsError = true
-                showForgotPasswordOption = true
             }
             busyAction = null
         }
@@ -1273,7 +1270,7 @@ fun AccountSyncScreen(navController: NavHostController) {
                 .imePadding()
                 .navigationBarsPadding()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 18.dp),
+                .padding(horizontal = 20.dp, vertical = 10.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
@@ -1304,7 +1301,6 @@ fun AccountSyncScreen(navController: NavHostController) {
                         canResetPassword = busyAction == null &&
                                 isCloudAccountConfigured() &&
                                 !isPasswordResetCoolingDown,
-                        showForgotPassword = showForgotPasswordOption,
                         forgotPasswordCooldownSecondsLeft = passwordResetCooldownSecondsLeft,
                         showSetupHint = !isCloudAccountConfigured(),
                         busyAction = busyAction,
@@ -1385,7 +1381,6 @@ private fun SignedOutAccountContent(
     canUseEmailPassword: Boolean,
     canUseGoogle: Boolean,
     canResetPassword: Boolean,
-    showForgotPassword: Boolean,
     forgotPasswordCooldownSecondsLeft: Int,
     showSetupHint: Boolean,
     busyAction: String?,
@@ -1412,8 +1407,6 @@ private fun SignedOutAccountContent(
         }
     }
 
-    val showSignUpHint =
-        emailAuthMessageIsError && displayedEmailAuthMessage == EMAIL_PASSWORD_INCORRECT_MESSAGE
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.Top,
@@ -1426,7 +1419,8 @@ private fun SignedOutAccountContent(
             Text(
                 text = "Sync your pantry",
                 style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.SemiBold
+                fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center
             )
             Spacer(Modifier.height(6.dp))
             Text(
@@ -1437,17 +1431,17 @@ private fun SignedOutAccountContent(
             )
         }
 
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(12.dp))
 
         if (showSetupHint) {
             AccountSetupHint()
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(16.dp))
         }
 
         AccountPillTextField(
             value = email,
             onValueChange = onEmailChange,
-            placeholder = "Email",
+            label = "Email",
             isError = hasEmailAuthError,
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Email,
@@ -1455,12 +1449,12 @@ private fun SignedOutAccountContent(
             )
         )
 
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(10.dp))
 
         AccountPillTextField(
             value = password,
             onValueChange = onPasswordChange,
-            placeholder = "Password",
+            label = "Password",
             isError = hasEmailAuthError,
             visualTransformation = PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(
@@ -1469,7 +1463,7 @@ private fun SignedOutAccountContent(
             )
         )
 
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(8.dp))
 
         AnimatedVisibility(
             visible = hasEmailAuthMessage,
@@ -1489,66 +1483,36 @@ private fun SignedOutAccountContent(
                     )
                 }
 
-                if (showSignUpHint) {
-                    Text(
-                        text = "Don't have an account? Sign Up.",
-                        modifier = Modifier.fillMaxWidth(),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
             }
         }
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        TextButton(
+            onClick = onForgotPassword,
+            enabled = canResetPassword,
+            contentPadding = PaddingValues(horizontal = 2.dp, vertical = 0.dp),
+            modifier = Modifier.align(Alignment.Start)
         ) {
-            PrimaryPillButton(
-                text = "Log in",
-                busy = busyAction == "signin",
-                enabled = canUseEmailPassword,
-                onClick = onLogIn,
-                modifier = Modifier.weight(1f)
-            )
-            SecondaryPillButton(
-                text = "Sign up",
-                busy = busyAction == "create",
-                enabled = canUseEmailPassword,
-                onClick = onSignUp,
-                modifier = Modifier.weight(1f)
+            ActionLabel(
+                text = forgotPasswordButtonText,
+                busy = busyAction == "reset"
             )
         }
 
-        AnimatedVisibility(
-            visible = showForgotPassword,
-            enter = expandVertically(expandFrom = Alignment.Top),
-            exit = shrinkVertically(shrinkTowards = Alignment.Top)
-        ) {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.Start
-            ) {
-                Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(4.dp))
 
-                TextButton(
-                    onClick = onForgotPassword,
-                    enabled = canResetPassword,
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
-                ) {
-                    ActionLabel(
-                        text = forgotPasswordButtonText,
-                        busy = busyAction == "reset"
-                    )
-                }
-            }
-        }
+        PrimaryPillButton(
+            text = "Log in",
+            busy = busyAction == "signin",
+            enabled = canUseEmailPassword,
+            onClick = onLogIn,
+            modifier = Modifier.fillMaxWidth()
+        )
 
-        Spacer(Modifier.height(if (showForgotPassword) 8.dp else 14.dp))
+        Spacer(Modifier.height(10.dp))
 
         AccountSectionDivider()
 
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(10.dp))
 
         GooglePillButton(
             text = "Continue with Google",
@@ -1574,6 +1538,28 @@ private fun SignedOutAccountContent(
                         isError = true
                     )
                 }
+            }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Don't have an account?",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            TextButton(
+                onClick = onSignUp,
+                enabled = canUseEmailPassword,
+                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
+            ) {
+                ActionLabel(
+                    text = "Sign up",
+                    busy = busyAction == "create"
+                )
             }
         }
     }
@@ -1984,32 +1970,28 @@ private fun AccountInlineStatusMessage(
 private fun AccountPillTextField(
     value: String,
     onValueChange: (String) -> Unit,
-    placeholder: String,
+    label: String,
     isError: Boolean = false,
     keyboardOptions: KeyboardOptions,
     visualTransformation: VisualTransformation = VisualTransformation.None
 ) {
     val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
-    val fieldContainerColor =
-        MaterialTheme.colorScheme.surface.copy(alpha = if (isDarkTheme) 0.48f else 0.92f)
-    val errorBorderColor =
-        MaterialTheme.colorScheme.error.copy(alpha = if (isDarkTheme) 0.74f else 0.62f)
     val textColor = MaterialTheme.colorScheme.onSurface
-    val placeholderColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val outlineColor = MaterialTheme.colorScheme.outline.copy(
+        alpha = if (isDarkTheme) 0.62f else 0.48f
+    )
+    val focusedOutlineColor = MaterialTheme.colorScheme.primary.copy(
+        alpha = if (isDarkTheme) 0.86f else 0.92f
+    )
 
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
-        modifier = Modifier
-            .fillMaxWidth()
-            .border(
-                width = 1.dp,
-                color = if (isError) errorBorderColor else Color.Transparent,
-                shape = accountAuthPillShape
-            ),
+        modifier = Modifier.fillMaxWidth(),
         singleLine = true,
-        placeholder = { Text(placeholder) },
-        shape = accountAuthPillShape,
+        label = { Text(label) },
+        shape = RoundedCornerShape(12.dp),
         isError = isError,
         visualTransformation = visualTransformation,
         keyboardOptions = keyboardOptions,
@@ -2018,19 +2000,19 @@ private fun AccountPillTextField(
             focusedTextColor = textColor,
             unfocusedTextColor = textColor,
             errorTextColor = textColor,
-            focusedPlaceholderColor = placeholderColor,
-            unfocusedPlaceholderColor = placeholderColor,
-            errorPlaceholderColor = placeholderColor,
-            focusedContainerColor = fieldContainerColor,
-            unfocusedContainerColor = fieldContainerColor,
-            errorContainerColor = fieldContainerColor,
-            disabledContainerColor = fieldContainerColor.copy(alpha = 0.72f),
-            focusedBorderColor = Color.Transparent,
-            unfocusedBorderColor = Color.Transparent,
-            errorBorderColor = Color.Transparent,
-            disabledBorderColor = Color.Transparent,
-            cursorColor = MaterialTheme.colorScheme.primary,
-            errorCursorColor = MaterialTheme.colorScheme.primary
+            focusedLabelColor = focusedOutlineColor,
+            unfocusedLabelColor = labelColor,
+            errorLabelColor = MaterialTheme.colorScheme.error,
+            focusedContainerColor = Color.Transparent,
+            unfocusedContainerColor = Color.Transparent,
+            errorContainerColor = Color.Transparent,
+            disabledContainerColor = Color.Transparent,
+            focusedBorderColor = focusedOutlineColor,
+            unfocusedBorderColor = outlineColor,
+            errorBorderColor = MaterialTheme.colorScheme.error,
+            disabledBorderColor = outlineColor.copy(alpha = 0.28f),
+            cursorColor = focusedOutlineColor,
+            errorCursorColor = focusedOutlineColor
         )
     )
 }
@@ -2127,12 +2109,32 @@ private fun GooglePillButton(
 
 @Composable
 private fun AccountSectionDivider() {
-    Box(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(1.dp)
-            .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.18f))
-    )
+            .height(20.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .height(1.dp)
+                .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.18f))
+        )
+        Text(
+            text = "or",
+            modifier = Modifier.padding(horizontal = 14.dp),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .height(1.dp)
+                .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.18f))
+        )
+    }
 }
 
 @Composable

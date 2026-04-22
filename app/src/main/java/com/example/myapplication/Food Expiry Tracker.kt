@@ -209,6 +209,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
@@ -1313,7 +1314,7 @@ private fun FirstLaunchOnboardingOverlay(
 
     val safeStepIndex = stepIndex.coerceIn(firstLaunchOnboardingSteps.indices)
     val step = firstLaunchOnboardingSteps[safeStepIndex]
-    val targetRect = targetBounds[step.target]
+    val targetRect = targetBounds[step.target] ?: return
     val density = LocalDensity.current
     val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
     val blockerInteraction = remember { MutableInteractionSource() }
@@ -1347,42 +1348,40 @@ private fun FirstLaunchOnboardingOverlay(
         ) {
             drawRect(color = scrimColor)
 
-            targetRect?.let { rect ->
-                val spotlightRect = rect.expandedBy(spotlightPaddingPx)
+            val spotlightRect = targetRect.expandedBy(spotlightPaddingPx)
 
-                drawRoundRect(
-                    color = Color.Transparent,
-                    topLeft = Offset(spotlightRect.left, spotlightRect.top),
-                    size = Size(spotlightRect.width, spotlightRect.height),
-                    cornerRadius = CornerRadius(spotlightCornerPx, spotlightCornerPx),
-                    blendMode = BlendMode.Clear
-                )
+            drawRoundRect(
+                color = Color.Transparent,
+                topLeft = Offset(spotlightRect.left, spotlightRect.top),
+                size = Size(spotlightRect.width, spotlightRect.height),
+                cornerRadius = CornerRadius(spotlightCornerPx, spotlightCornerPx),
+                blendMode = BlendMode.Clear
+            )
 
-                drawRoundRect(
-                    color = spotlightBorderColor,
-                    topLeft = Offset(spotlightRect.left, spotlightRect.top),
-                    size = Size(spotlightRect.width, spotlightRect.height),
-                    cornerRadius = CornerRadius(spotlightCornerPx, spotlightCornerPx),
-                    style = Stroke(width = spotlightStrokePx)
-                )
+            drawRoundRect(
+                color = spotlightBorderColor,
+                topLeft = Offset(spotlightRect.left, spotlightRect.top),
+                size = Size(spotlightRect.width, spotlightRect.height),
+                cornerRadius = CornerRadius(spotlightCornerPx, spotlightCornerPx),
+                style = Stroke(width = spotlightStrokePx)
+            )
 
-                drawRoundRect(
-                    color = spotlightHaloColor,
-                    topLeft = Offset(spotlightRect.left - spotlightPaddingPx, spotlightRect.top - spotlightPaddingPx),
-                    size = Size(
-                        spotlightRect.width + spotlightPaddingPx * 2f,
-                        spotlightRect.height + spotlightPaddingPx * 2f
-                    ),
-                    cornerRadius = CornerRadius(
-                        spotlightCornerPx + spotlightPaddingPx,
-                        spotlightCornerPx + spotlightPaddingPx
-                    ),
-                    style = Stroke(width = spotlightStrokePx)
-                )
-            }
+            drawRoundRect(
+                color = spotlightHaloColor,
+                topLeft = Offset(spotlightRect.left - spotlightPaddingPx, spotlightRect.top - spotlightPaddingPx),
+                size = Size(
+                    spotlightRect.width + spotlightPaddingPx * 2f,
+                    spotlightRect.height + spotlightPaddingPx * 2f
+                ),
+                cornerRadius = CornerRadius(
+                    spotlightCornerPx + spotlightPaddingPx,
+                    spotlightCornerPx + spotlightPaddingPx
+                ),
+                style = Stroke(width = spotlightStrokePx)
+            )
         }
 
-        if (step.swipeHint != null && targetRect != null) {
+        if (step.swipeHint != null) {
             val arrowWidthPx = with(density) { 116.dp.toPx() }
             val arrowHeightPx = with(density) { 38.dp.toPx() }
             val arrowSidePaddingPx = with(density) { 24.dp.toPx() }
@@ -1405,89 +1404,87 @@ private fun FirstLaunchOnboardingOverlay(
             )
         }
 
-        if (targetRect != null) {
-            val screenHeightPx = with(density) { maxHeight.toPx() }
-            val minCardTopPx = with(density) { 22.dp.toPx() }
-            val maxCardTopPx = max(
-                minCardTopPx,
-                screenHeightPx - estimatedCardHeightPx - minCardTopPx
-            )
-            val targetCenterY = (targetRect.top + targetRect.bottom) / 2f
-            val rawCardTopPx =
-                if (targetCenterY < screenHeightPx * 0.52f) {
-                    targetRect.bottom + cardGapPx
-                } else {
-                    targetRect.top - estimatedCardHeightPx - cardGapPx
-                }
-            val cardTop = with(density) {
-                rawCardTopPx
-                    .coerceIn(minCardTopPx, maxCardTopPx)
-                    .toDp()
+        val screenHeightPx = with(density) { maxHeight.toPx() }
+        val minCardTopPx = with(density) { 22.dp.toPx() }
+        val maxCardTopPx = max(
+            minCardTopPx,
+            screenHeightPx - estimatedCardHeightPx - minCardTopPx
+        )
+        val targetCenterY = (targetRect.top + targetRect.bottom) / 2f
+        val rawCardTopPx =
+            if (targetCenterY < screenHeightPx * 0.52f) {
+                targetRect.bottom + cardGapPx
+            } else {
+                targetRect.top - estimatedCardHeightPx - cardGapPx
             }
+        val cardTop = with(density) {
+            rawCardTopPx
+                .coerceIn(minCardTopPx, maxCardTopPx)
+                .toDp()
+        }
 
-            AnimatedContent(
-                targetState = step,
-                transitionSpec = {
-                    (fadeIn(tween(220)) + scaleIn(tween(220), initialScale = 0.96f)) togetherWith
-                            (fadeOut(tween(120)) + scaleOut(tween(120), targetScale = 0.98f))
-                },
-                label = "firstLaunchOnboardingCard",
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .offset(y = cardTop)
-                    .padding(horizontal = 22.dp)
-            ) { currentStep ->
-                ExactFrostedPillCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(28.dp),
-                    shadowElevation = 18.dp
+        AnimatedContent(
+            targetState = step,
+            transitionSpec = {
+                (fadeIn(tween(220)) + scaleIn(tween(220), initialScale = 0.96f)) togetherWith
+                        (fadeOut(tween(120)) + scaleOut(tween(120), targetScale = 0.98f))
+            },
+            label = "firstLaunchOnboardingCard",
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .offset(y = cardTop)
+                .padding(horizontal = 22.dp)
+        ) { currentStep ->
+            ExactFrostedPillCard(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(28.dp),
+                shadowElevation = 18.dp
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(20.dp)
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(20.dp)
+                    Text(
+                        text = currentStep.title,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+
+                    Spacer(Modifier.height(8.dp))
+
+                    Text(
+                        text = currentStep.body,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Spacer(Modifier.height(16.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = currentStep.title,
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface
+                            text = "${safeStepIndex + 1} of ${firstLaunchOnboardingSteps.size}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f)
                         )
 
-                        Spacer(Modifier.height(8.dp))
+                        TextButton(onClick = onSkip) {
+                            Text("Skip")
+                        }
 
-                        Text(
-                            text = currentStep.body,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        Spacer(Modifier.width(6.dp))
 
-                        Spacer(Modifier.height(16.dp))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
+                        Button(
+                            onClick = onNext,
+                            shape = RoundedCornerShape(50.dp),
+                            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp)
                         ) {
-                            Text(
-                                text = "${safeStepIndex + 1} of ${firstLaunchOnboardingSteps.size}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.weight(1f)
-                            )
-
-                            TextButton(onClick = onSkip) {
-                                Text("Skip")
-                            }
-
-                            Spacer(Modifier.width(6.dp))
-
-                            Button(
-                                onClick = onNext,
-                                shape = RoundedCornerShape(50.dp),
-                                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp)
-                            ) {
-                                Text(if (safeStepIndex == firstLaunchOnboardingSteps.lastIndex) "Done" else "Next")
-                            }
+                            Text(if (safeStepIndex == firstLaunchOnboardingSteps.lastIndex) "Done" else "Next")
                         }
                     }
                 }
@@ -1862,6 +1859,7 @@ private const val SWIPE_ITEM_PLACEMENT_DURATION_MS = 320
 private const val BOTTOM_TAB_TRANSITION_GUARD_MS = 460L
 private const val EDIT_CATEGORIES_SHEET_EXIT_DURATION_MS = 250
 private const val EDIT_CATEGORIES_SHEET_ENTER_DURATION_MS = 260
+private const val AI_EXPIRING_FOOD_WINDOW_DAYS = 3
 
 private const val BARCODE_CACHE_KEY = "barcode_cache"
 private const val EXTRA_SCANNED_BARCODE = "extra_scanned_barcode"
@@ -2400,6 +2398,7 @@ private fun formatExpiryDate(date: LocalDate): String {
 private fun seedFirstLaunchDemoFoodIfNeeded(context: Context) {
     val appContext = context.applicationContext
     val prefs = appContext.getSharedPreferences(FOOD_PREFS, Context.MODE_PRIVATE)
+    if (prefs.getBoolean(ONBOARDING_DEMO_SEEDED_KEY, false)) return
 
     val gson = Gson()
     val demoKey = normalizeFoodName(ONBOARDING_DEMO_FOOD_NAME)
@@ -5490,6 +5489,36 @@ private fun looksFoodRelatedRecipeRequest(
     return ingredientLikeSegments >= 2
 }
 
+private fun wantsRecipesFromPantryList(request: String): Boolean {
+    val normalized = request.trim().lowercase(Locale.US)
+    if (normalized.isBlank()) return false
+
+    val recipeIntent = listOf(
+        "recipe", "recipes", "cook", "meal", "meals", "make", "what can i make",
+        "easy", "quick", "dinner", "lunch", "breakfast", "snack"
+    ).any(normalized::contains)
+
+    if (!recipeIntent) return false
+
+    return listOf(
+        "my list",
+        "food list",
+        "foods in my list",
+        "food in my list",
+        "my pantry",
+        "pantry list",
+        "saved foods",
+        "available foods",
+        "foods i have",
+        "food i have",
+        "what i have",
+        "from my foods",
+        "using my foods",
+        "foods in home",
+        "home list"
+    ).any(normalized::contains)
+}
+
 private fun looksLikeFoodIngredientInput(
     request: String,
     pantryIngredients: List<String>
@@ -5556,7 +5585,7 @@ private fun isSingleFoodLikeRequest(
 }
 
 private fun recipePromptPlaceholder(): String {
-    return "Give me any food items, like eggs and rice."
+    return "Ask me to make recipes using foods in my list."
 }
 
 private fun buildExpiringFoodsRequest(expiringFoods: List<ExpiringFoodHint>): String {
@@ -5648,7 +5677,7 @@ private fun RecipeIntroCard(hasPantryFoods: Boolean) {
             Spacer(Modifier.height(6.dp))
             Text(
                 text = if (hasPantryFoods) {
-                    "Tell me your food item and I will turn them into recipe cards."
+                    "Ask me to make recipes using foods in your list, or type a few ingredients."
                 } else {
                     "Add some foods in Home then ask for recipes."
                 },
@@ -5785,82 +5814,96 @@ private fun RecipeSuggestionCard(recipe: RecipeSuggestion) {
     val cardShape = RoundedCornerShape(22.dp)
     val recipeCardOverlay =
         if (isDarkTheme) {
-            Color.Transparent
+            scheme.surfaceContainerHigh.copy(alpha = 0.38f)
         } else {
-            scheme.surface.copy(alpha = 0.24f)
+            scheme.surface.copy(alpha = 0.26f)
         }
     val recipeCardBorder =
         if (isDarkTheme) {
-            Color.Transparent
+            scheme.primary.copy(alpha = 0.22f)
         } else {
             scheme.outlineVariant.copy(alpha = 0.26f)
         }
+    val titleColor =
+        if (isDarkTheme) scheme.primary.copy(alpha = 0.96f) else scheme.onSurface
+    val usesLabelColor =
+        if (isDarkTheme) scheme.primary.copy(alpha = 0.94f) else scheme.primary
+    val addLabelColor =
+        if (isDarkTheme) scheme.tertiary.copy(alpha = 0.92f) else scheme.tertiary
+    val howLabelColor =
+        if (isDarkTheme) scheme.primary.copy(alpha = 0.95f) else scheme.primary
+    val mainTextColor =
+        if (isDarkTheme) scheme.onSurface.copy(alpha = 0.94f) else scheme.onSurface
+    val secondaryTextColor =
+        if (isDarkTheme) scheme.onSurfaceVariant.copy(alpha = 0.90f) else scheme.onSurfaceVariant
 
     ExactFrostedPillCard(
         modifier = Modifier.fillMaxWidth(),
         shape = cardShape,
-        shadowElevation = 2.dp
+        shadowElevation = if (isDarkTheme) 0.dp else 2.dp
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
         ) {
-            if (!isDarkTheme) {
-                Box(
-                    modifier = Modifier
-                        .matchParentSize()
-                        .clip(cardShape)
-                        .background(recipeCardOverlay)
-                        .border(1.dp, recipeCardBorder, cardShape)
-                )
-            }
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .clip(cardShape)
+                    .background(recipeCardOverlay)
+                    .border(1.dp, recipeCardBorder, cardShape)
+            )
 
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(14.dp)
+                    .padding(15.dp)
             ) {
                 Text(
                     text = recipe.title,
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
+                    fontWeight = FontWeight.SemiBold,
+                    color = titleColor
                 )
 
                 val usesLine = compactIngredientSummary(recipe.usedIngredients, maxVisible = 5)
                 if (usesLine.isNotBlank()) {
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = "Uses: $usesLine",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurface
+                    Spacer(Modifier.height(10.dp))
+                    RecipeInfoLine(
+                        label = "Uses",
+                        text = usesLine,
+                        labelColor = usesLabelColor,
+                        textColor = mainTextColor
                     )
                 }
 
                 val addLine = compactIngredientSummary(recipe.missedIngredients, maxVisible = 3)
                 if (addLine.isNotBlank()) {
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        text = "Add: $addLine",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    Spacer(Modifier.height(6.dp))
+                    RecipeInfoLine(
+                        label = "Add",
+                        text = addLine,
+                        labelColor = addLabelColor,
+                        textColor = secondaryTextColor
                     )
                 }
 
                 if (recipe.quickGuide.isNotEmpty()) {
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = "How:",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        fontWeight = FontWeight.SemiBold
+                    Spacer(Modifier.height(12.dp))
+                    RecipeInfoLine(
+                        label = "How",
+                        text = "Quick steps",
+                        labelColor = howLabelColor,
+                        textColor = mainTextColor
                     )
-                    Spacer(Modifier.height(4.dp))
-                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Spacer(Modifier.height(8.dp))
+                    Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
                         recipe.quickGuide.forEachIndexed { index, step ->
-                            Text(
-                                text = "${index + 1}. $step",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            RecipeStepLine(
+                                index = index + 1,
+                                text = step,
+                                accentColor = howLabelColor,
+                                textColor = secondaryTextColor
                             )
                         }
                     }
@@ -5871,7 +5914,87 @@ private fun RecipeSuggestionCard(recipe: RecipeSuggestion) {
 }
 
 @Composable
+private fun RecipeInfoLine(
+    label: String,
+    text: String,
+    labelColor: Color,
+    textColor: Color
+) {
+    Row(
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Surface(
+            shape = RoundedCornerShape(50.dp),
+            color = labelColor.copy(alpha = 0.14f),
+            contentColor = labelColor,
+            border = BorderStroke(1.dp, labelColor.copy(alpha = 0.22f))
+        ) {
+            Text(
+                text = label,
+                modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp),
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+
+        Text(
+            text = text,
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 24.sp),
+            color = textColor
+        )
+    }
+}
+
+@Composable
+private fun RecipeStepLine(
+    index: Int,
+    text: String,
+    accentColor: Color,
+    textColor: Color
+) {
+    Row(
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(9.dp)
+    ) {
+        Surface(
+            modifier = Modifier.padding(top = 2.dp),
+            shape = RoundedCornerShape(50.dp),
+            color = accentColor.copy(alpha = 0.13f),
+            contentColor = accentColor
+        ) {
+            Text(
+                text = index.toString(),
+                modifier = Modifier
+                    .width(24.dp)
+                    .padding(vertical = 2.dp),
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center
+            )
+        }
+
+        Text(
+            text = text,
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 22.sp),
+            color = textColor
+        )
+    }
+}
+
+@Composable
 private fun RecipeAssistantMessageCard(message: RecipeChatMessage) {
+    val scheme = MaterialTheme.colorScheme
+    val isDarkTheme = scheme.background.luminance() < 0.5f
+    val headlineColor =
+        if (!message.isError && isDarkTheme) {
+            scheme.primary.copy(alpha = 0.94f)
+        } else {
+            LocalContentColor.current
+        }
+
     RecipeChatMessageRow(isUser = false) { bubbleModifier ->
         if (message.recipes.isNotEmpty()) {
             Column(
@@ -5885,7 +6008,9 @@ private fun RecipeAssistantMessageCard(message: RecipeChatMessage) {
                 ) {
                     Text(
                         text = message.text,
-                        style = MaterialTheme.typography.bodyLarge
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = headlineColor,
+                        fontWeight = if (message.isError) FontWeight.Normal else FontWeight.Medium
                     )
                 }
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -5902,7 +6027,9 @@ private fun RecipeAssistantMessageCard(message: RecipeChatMessage) {
             ) {
                 Text(
                     text = message.text,
-                    style = MaterialTheme.typography.bodyLarge
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = headlineColor,
+                    fontWeight = if (message.isError) FontWeight.Normal else FontWeight.Medium
                 )
             }
         }
@@ -6060,9 +6187,6 @@ private fun RecipeScreen(
     val sharedPrefs = remember(appCtx) {
         appCtx.getSharedPreferences(FOOD_PREFS, Context.MODE_PRIVATE)
     }
-    val notifPrefs = remember(appCtx) {
-        appCtx.getSharedPreferences(NOTIF_PREFS, Context.MODE_PRIVATE)
-    }
     val scope = rememberCoroutineScope()
     val keyboard = LocalSoftwareKeyboardController.current
     val listState = rememberLazyListState()
@@ -6083,12 +6207,6 @@ private fun RecipeScreen(
         }
     }
 
-    var soonExpiryWindowDays by remember {
-        mutableIntStateOf(
-            notifPrefs.getInt(DAYS_BEFORE_KEY, 3)
-                .coerceIn(MIN_DAYS_BEFORE_REMINDER, MAX_DAYS_BEFORE_REMINDER)
-        )
-    }
     var promptText by rememberSaveable { mutableStateOf("") }
     var isLoading by rememberSaveable { mutableStateOf(false) }
     val expiringPromptDismissed = sessionState.expiringPromptDismissed
@@ -6107,12 +6225,12 @@ private fun RecipeScreen(
     val pantryIngredientNames by remember {
         derivedStateOf { pantryFoods.map { it.name } }
     }
-    val soonExpiringFoods by remember(pantryFoods, soonExpiryWindowDays) {
+    val soonExpiringFoods by remember(pantryFoods) {
         derivedStateOf {
             pantryFoods
                 .mapNotNull { food ->
                     val daysLeft = daysUntil(food.expiry)
-                    if (daysLeft != null && daysLeft in 0..soonExpiryWindowDays) {
+                    if (daysLeft != null && daysLeft in 0..AI_EXPIRING_FOOD_WINDOW_DAYS) {
                         ExpiringFoodHint(food.name, daysLeft)
                     } else {
                         null
@@ -6121,7 +6239,6 @@ private fun RecipeScreen(
                 .sortedWith(
                     compareBy<ExpiringFoodHint>({ it.daysLeft }, { it.name.lowercase(Locale.US) })
                 )
-                .take(8)
         }
     }
     val showExpiringPrompt = soonExpiringFoods.isNotEmpty() && !expiringPromptDismissed
@@ -6142,19 +6259,6 @@ private fun RecipeScreen(
 
         sharedPrefs.registerOnSharedPreferenceChangeListener(listener)
         onDispose { sharedPrefs.unregisterOnSharedPreferenceChangeListener(listener) }
-    }
-
-    DisposableEffect(notifPrefs) {
-        val listener =
-            android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-                if (key == DAYS_BEFORE_KEY) {
-                    soonExpiryWindowDays = notifPrefs.getInt(DAYS_BEFORE_KEY, 3)
-                        .coerceIn(MIN_DAYS_BEFORE_REMINDER, MAX_DAYS_BEFORE_REMINDER)
-                }
-            }
-
-        notifPrefs.registerOnSharedPreferenceChangeListener(listener)
-        onDispose { notifPrefs.unregisterOnSharedPreferenceChangeListener(listener) }
     }
 
     LaunchedEffect(totalVisibleItems, messagesJson, isLoading) {
@@ -6203,10 +6307,31 @@ private fun RecipeScreen(
             return
         }
 
-        val frozenExpiringFoods = soonExpiringFoods.take(8)
-        val frozenPantryIngredients = pantryIngredientNames.take(16)
+        val frozenExpiringFoods = soonExpiringFoods
+        val frozenPantryIngredients = pantryIngredientNames
+        val useFullPantryList = !useExpiringFoods && wantsRecipesFromPantryList(trimmed)
+
+        if (useFullPantryList && frozenPantryIngredients.isEmpty()) {
+            val emptyPantryMessages = messages +
+                RecipeChatMessage(
+                    role = RecipeChatRole.USER,
+                    text = trimmed
+                ) +
+                RecipeChatMessage(
+                    role = RecipeChatRole.ASSISTANT,
+                    text = "Add foods in Home first, then ask me to make recipes from your list.",
+                    isError = true
+                )
+            persistMessages(emptyPantryMessages)
+            promptText = ""
+            keyboard?.hide()
+            return
+        }
+
         val requestText = if (useExpiringFoods) {
             buildExpiringFoodsRequest(frozenExpiringFoods)
+        } else if (useFullPantryList) {
+            "Please suggest 3 easy and quick recipes using foods from my pantry list."
         } else {
             trimmed
         }
@@ -6297,7 +6422,7 @@ private fun RecipeScreen(
                     item {
                         ExpiringFoodsPromptCard(
                             foods = soonExpiringFoods,
-                            windowDays = soonExpiryWindowDays,
+                            windowDays = AI_EXPIRING_FOOD_WINDOW_DAYS,
                             isLoading = isLoading,
                             onUseExpiringFoods = {
                                 sendRecipePrompt(

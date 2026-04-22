@@ -16,6 +16,8 @@ private const val GEMINI_TIMEOUT_MS = 9000
 private const val DEFAULT_RECIPE_LIMIT = 3
 private const val MAX_RECIPE_LIMIT = 3
 private const val MAX_RECIPE_STEPS = 5
+private const val MAX_PANTRY_INGREDIENT_CONTEXT = 30
+private const val MAX_DIRECT_INGREDIENT_CONTEXT = 14
 
 internal data class RecipeSuggestion(
     val title: String,
@@ -46,7 +48,8 @@ internal object RecipeAiService {
             throw RecipeAiException("Ask for a recipe first.")
         }
 
-        val cleanedPantryIngredients = sanitizeIngredients(pantryIngredients).take(12)
+        val cleanedPantryIngredients = sanitizeIngredients(pantryIngredients)
+            .take(MAX_PANTRY_INGREDIENT_CONTEXT)
         val cleanedPreviousIngredients = sanitizeIngredients(previousIngredients).take(8)
         val explicitRequestIngredients = extractExplicitRequestIngredients(trimmedRequest).take(8)
         val effectivePantryIngredients =
@@ -86,7 +89,7 @@ internal object RecipeAiService {
             .map { it.trim() }
             .filter { it.isNotBlank() }
             .distinctBy { it.lowercase(Locale.US) }
-            .take(8)
+            .take(MAX_DIRECT_INGREDIENT_CONTEXT)
 
         if (cleanedIngredients.isEmpty()) return@withContext emptyList()
 
@@ -209,6 +212,7 @@ internal object RecipeAiService {
             - Never offer storage tips, nutrition advice, pantry tips, or anything outside recipe suggestions.
             - If the current request ingredients are not "none", use only those current request ingredients as the main ingredient set.
             - If the current request ingredients are not "none", ignore previous recipe ingredients and ignore unrelated pantry ingredients.
+            - If the user asks for recipes from their pantry, list, food list, saved foods, available foods, or foods they have, use the pantry ingredients as the main ingredient set.
             - If the user says "more", "another", "same ingredients", "those ingredients", or "previous ingredients" and the current request ingredients are "none", reuse the previous recipe ingredients.
             - If the user gives only a meal style like dinner, breakfast, snack, quick, or easy and the current request ingredients are "none", combine that preference with the previous recipe ingredients when available.
             - If no ingredients are named in the request and there are no previous recipe ingredients, use the pantry ingredients.
@@ -274,6 +278,12 @@ internal object RecipeAiService {
                 ),
                 " "
             )
+            .replace(
+                Regex(
+                    "\\b(my|the|a|an|in|inside|saved|available|list|lists|pantry|home|items|item|foods|food|things|stuff|have|has|already)\\b"
+                ),
+                " "
+            )
             .replace(Regex("\\s+"), " ")
             .trim(' ', ',', ';', ':')
 
@@ -318,7 +328,7 @@ internal object RecipeAiService {
         return """
             You are FoodExpiryTracker's recipe generator.
             
-            Use these pantry ingredients that are expiring soon:
+            Use these pantry ingredients:
             $ingredientList
             
             Return only valid JSON with this exact shape:
