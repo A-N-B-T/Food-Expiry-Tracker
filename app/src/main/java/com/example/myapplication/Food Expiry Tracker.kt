@@ -161,6 +161,7 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -277,6 +278,12 @@ enum class ThemeMode { SYSTEM, LIGHT, DARK }
 enum class CountdownFormat { DAYS_ONLY, MONTHS_AND_DAYS, YEARS_MONTHS_DAYS }
 
 enum class SelectionPurpose { DELETE, CATEGORY }
+
+private data class HistoryRetentionOption(
+    val days: Long,
+    val label: String,
+    val description: String
+)
 
 private suspend fun LazyListState.animateScrollToTopSlowly(
     fallbackItemSizePx: Float,
@@ -406,6 +413,10 @@ private fun countdownFormatDescription(format: CountdownFormat): String {
         CountdownFormat.MONTHS_AND_DAYS -> "Show a shorter format like 2m or 2m 5d."
         CountdownFormat.YEARS_MONTHS_DAYS -> "Show longer countdowns like 2y 3m 7d."
     }
+}
+
+private fun historyRetentionLabel(days: Long): String {
+    return historyRetentionOptions.firstOrNull { it.days == days }?.label ?: "1 month"
 }
 
 @Composable
@@ -1843,12 +1854,14 @@ private const val FOOD_PREFS = "food_prefs"
 private const val FOOD_LIST_KEY = "food_list"
 private const val HISTORY_LIST_KEY = "history_list"
 private const val CATEGORIES_LIST_KEY = "categories_list"
+private const val HISTORY_AUTO_DELETE_ENABLED_KEY = "history_auto_delete_enabled"
+private const val HISTORY_RETENTION_DAYS_KEY = "history_retention_days"
 private const val ONBOARDING_COMPLETED_KEY = "first_launch_onboarding_completed"
 private const val ONBOARDING_DEMO_SEEDED_KEY = "first_launch_demo_seeded"
 private const val ONBOARDING_DEMO_FOOD_NAME = "Example"
 private const val ONBOARDING_DEMO_CATEGORY_NAME = "Example"
 private const val NOTIF_FIRST_PROMPT_SHOWN_KEY = "notif_first_prompt_shown"
-private const val HISTORY_RETENTION_DAYS = 30L
+private const val DEFAULT_HISTORY_RETENTION_DAYS = 30L
 private const val DAY_IN_MILLIS = 86_400_000L
 private const val SWIPE_DELETE_EXIT_DURATION_MS = 420
 private const val SWIPE_DELETE_REMOVE_DELAY_MS = 420L
@@ -1859,6 +1872,13 @@ private const val BOTTOM_TAB_TRANSITION_GUARD_MS = 460L
 private const val EDIT_CATEGORIES_SHEET_EXIT_DURATION_MS = 250
 private const val EDIT_CATEGORIES_SHEET_ENTER_DURATION_MS = 260
 private const val AI_EXPIRING_FOOD_WINDOW_DAYS = 3
+
+private val historyRetentionOptions = listOf(
+    HistoryRetentionOption(7L, "1 week", "Delete history not used for 1 week."),
+    HistoryRetentionOption(14L, "2 weeks", "Delete history not used for 2 weeks."),
+    HistoryRetentionOption(21L, "3 weeks", "Delete history not used for 3 weeks."),
+    HistoryRetentionOption(DEFAULT_HISTORY_RETENTION_DAYS, "1 month", "Delete history not used for 1 month.")
+)
 
 private const val BARCODE_CACHE_KEY = "barcode_cache"
 private const val EXTRA_SCANNED_BARCODE = "extra_scanned_barcode"
@@ -2249,15 +2269,58 @@ private fun <T> replaceListContentsIfChanged(
     target.addAll(updated)
 }
 
-private fun historyCutoffMillis(now: Long = System.currentTimeMillis()): Long {
-    return now - (HISTORY_RETENTION_DAYS * DAY_IN_MILLIS)
+private fun loadHistoryAutoDeleteEnabled(prefs: android.content.SharedPreferences): Boolean {
+    return prefs.getBoolean(HISTORY_AUTO_DELETE_ENABLED_KEY, true)
+}
+
+private fun loadHistoryRetentionDays(prefs: android.content.SharedPreferences): Long {
+    val stored = runCatching {
+        prefs.getLong(HISTORY_RETENTION_DAYS_KEY, DEFAULT_HISTORY_RETENTION_DAYS)
+    }.getOrElse {
+        prefs.getInt(HISTORY_RETENTION_DAYS_KEY, DEFAULT_HISTORY_RETENTION_DAYS.toInt()).toLong()
+    }
+
+    return historyRetentionOptions.firstOrNull { it.days == stored }?.days
+        ?: DEFAULT_HISTORY_RETENTION_DAYS
+}
+
+private fun saveHistoryAutoDeleteEnabled(
+    prefs: android.content.SharedPreferences,
+    enabled: Boolean
+) {
+    prefs.edit { putBoolean(HISTORY_AUTO_DELETE_ENABLED_KEY, enabled) }
+}
+
+private fun saveHistoryRetentionDays(
+    prefs: android.content.SharedPreferences,
+    days: Long
+) {
+    val safeDays = historyRetentionOptions.firstOrNull { it.days == days }?.days
+        ?: DEFAULT_HISTORY_RETENTION_DAYS
+    prefs.edit { putLong(HISTORY_RETENTION_DAYS_KEY, safeDays) }
+}
+
+private fun activeHistoryRetentionDays(prefs: android.content.SharedPreferences): Long? {
+    return if (loadHistoryAutoDeleteEnabled(prefs)) {
+        loadHistoryRetentionDays(prefs)
+    } else {
+        null
+    }
+}
+
+private fun historyCutoffMillis(
+    now: Long = System.currentTimeMillis(),
+    retentionDays: Long
+): Long {
+    return now - (retentionDays * DAY_IN_MILLIS)
 }
 
 private fun normalizeHistoryEntries(
     entries: List<HistoryEntry>,
-    now: Long = System.currentTimeMillis()
+    now: Long = System.currentTimeMillis(),
+    retentionDays: Long? = DEFAULT_HISTORY_RETENTION_DAYS
 ): MutableList<HistoryEntry> {
-    val cutoff = historyCutoffMillis(now)
+    val cutoff = retentionDays?.let { historyCutoffMillis(now, it) }
     val deduped = LinkedHashMap<String, HistoryEntry>()
 
     entries.forEach { entry ->
@@ -2272,7 +2335,7 @@ private fun normalizeHistoryEntries(
             lastUsedAt = entry.lastUsedAt.takeIf { it > 0L } ?: now
         )
 
-        if (sanitized.lastUsedAt < cutoff) return@forEach
+        if (cutoff != null && sanitized.lastUsedAt < cutoff) return@forEach
 
         val existing = deduped[normalizedKey]
         if (existing == null || sanitized.lastUsedAt > existing.lastUsedAt) {
@@ -2298,7 +2361,7 @@ private fun loadHistoryEntries(
     }.getOrNull()
 
     if (savedEntries != null) {
-        return normalizeHistoryEntries(savedEntries, now)
+        return normalizeHistoryEntries(savedEntries, now, activeHistoryRetentionDays(prefs))
     }
 
     val legacyType = object : TypeToken<MutableList<String>>() {}.type
@@ -2313,7 +2376,7 @@ private fun loadHistoryEntries(
         )
     }
 
-    return normalizeHistoryEntries(migratedEntries, now)
+    return normalizeHistoryEntries(migratedEntries, now, activeHistoryRetentionDays(prefs))
 }
 
 private fun saveHistoryEntries(
@@ -2359,7 +2422,11 @@ private fun recordFoodNameInHistory(
             )
         }
 
-    val normalizedEntries = normalizeHistoryEntries(updatedEntries, now)
+    val normalizedEntries = normalizeHistoryEntries(
+        entries = updatedEntries,
+        now = now,
+        retentionDays = activeHistoryRetentionDays(prefs)
+    )
     history.clear()
     history.addAll(normalizedEntries)
     saveHistoryEntries(prefs, gson, normalizedEntries)
@@ -4590,7 +4657,11 @@ fun HistoryScreen(
         val listener =
             android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
                 when (key) {
-                    HISTORY_LIST_KEY -> replaceListContentsIfChanged(history, loadHistoryEntries(prefs, gson))
+                    HISTORY_LIST_KEY,
+                    HISTORY_AUTO_DELETE_ENABLED_KEY,
+                    HISTORY_RETENTION_DAYS_KEY ->
+                        replaceListContentsIfChanged(history, loadHistoryEntries(prefs, gson))
+
                     FOOD_LIST_KEY -> replaceListContentsIfChanged(pantryFoods, loadFoodList(prefs, gson))
                     CATEGORIES_LIST_KEY -> replaceListContentsIfChanged(
                         categories,
@@ -4622,11 +4693,9 @@ fun HistoryScreen(
     var quickAddExpiry by remember { mutableStateOf("") }
     var quickAddCategory by remember { mutableStateOf<String?>(null) }
     var quickAddError by remember { mutableStateOf<String?>(null) }
-    var historyNoticeMessage by remember { mutableStateOf<String?>(null) }
     var pendingDeleteHistoryEntry by remember { mutableStateOf<HistoryEntry?>(null) }
     val shouldBlurBackground =
         quickAddName != null ||
-                historyNoticeMessage != null ||
                 pendingDeleteHistoryEntry != null
 
     SideEffect {
@@ -4713,7 +4782,7 @@ fun HistoryScreen(
                         overscrollEffect = null,
                         contentPadding = PaddingValues(
                             top = historyContentTopPadding,
-                            bottom = historyBottomSafePadding
+                            bottom = 80.dp
                         )
                     ) {
                         items(
@@ -4732,19 +4801,10 @@ fun HistoryScreen(
                                 ),
                                 name = entry.name,
                                 onQuickAdd = {
-                                    val existsInPantry = pantryFoods.any {
-                                        normalizeFoodName(it.name) == normalizeFoodName(entry.name)
-                                    }
-
-                                    if (existsInPantry) {
-                                        historyNoticeMessage =
-                                            "\"${entry.name}\" is already in your food list."
-                                    } else {
-                                        quickAddName = entry.name
-                                        quickAddExpiry = ""
-                                        quickAddCategory = null
-                                        quickAddError = null
-                                    }
+                                    quickAddName = entry.name
+                                    quickAddExpiry = ""
+                                    quickAddCategory = null
+                                    quickAddError = null
                                 },
                                 onDelete = {
                                     pendingDeleteHistoryEntry = entry
@@ -4777,19 +4837,6 @@ fun HistoryScreen(
                 )
             }
         }
-    }
-
-    historyNoticeMessage?.let { message ->
-        GlassAlertDialog(
-            onDismissRequest = { historyNoticeMessage = null },
-            title = { Text("Already Added") },
-            text = { Text(message) },
-            confirmButton = {
-                TextButton(onClick = { historyNoticeMessage = null }) {
-                    Text("OK")
-                }
-            }
-        )
     }
 
     pendingDeleteHistoryEntry?.let { entry ->
@@ -7106,7 +7153,25 @@ fun PrivacyScreen(navController: NavHostController) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(navController: NavHostController) {
+    val context = LocalContext.current
+    val appCtx = context.applicationContext
     val countdownFormat = rememberCountdownFormatPreference()
+    val historyPrefs = remember(appCtx) {
+        appCtx.getSharedPreferences(FOOD_PREFS, Context.MODE_PRIVATE)
+    }
+    val historyGson = remember { Gson() }
+    var historyAutoDeleteEnabled by rememberSaveable {
+        mutableStateOf(loadHistoryAutoDeleteEnabled(historyPrefs))
+    }
+    var historyRetentionDays by rememberSaveable {
+        mutableLongStateOf(loadHistoryRetentionDays(historyPrefs))
+    }
+
+    fun pruneHistoryWithCurrentSettings() {
+        if (historyAutoDeleteEnabled) {
+            loadAndSyncHistoryEntries(historyPrefs, historyGson)
+        }
+    }
 
     Scaffold(
         containerColor = Color.Transparent,
@@ -7122,6 +7187,7 @@ fun SettingsScreen(navController: NavHostController) {
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .verticalScroll(rememberScrollState())
                 .padding(16.dp)
         ) {
             SettingRow(
@@ -7139,6 +7205,63 @@ fun SettingsScreen(navController: NavHostController) {
                 title = "Notifications"
             ) {
                 navController.navigate(Route.Notifications.r)
+            }
+
+            MatchingPillCard(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp),
+                shadowElevation = 6.dp
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("History auto-delete", style = MaterialTheme.typography.bodyLarge)
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = if (historyAutoDeleteEnabled) {
+                                "Deletes history not used for ${historyRetentionLabel(historyRetentionDays)}."
+                            } else {
+                                "Keeps history until you delete it."
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    Switch(
+                        checked = historyAutoDeleteEnabled,
+                        onCheckedChange = { checked ->
+                            historyAutoDeleteEnabled = checked
+                            saveHistoryAutoDeleteEnabled(historyPrefs, checked)
+                            pruneHistoryWithCurrentSettings()
+                        }
+                    )
+                }
+            }
+
+            AnimatedVisibility(visible = historyAutoDeleteEnabled) {
+                Column {
+                    Text(
+                        text = "Delete history after",
+                        modifier = Modifier.padding(start = 4.dp, top = 8.dp, bottom = 2.dp),
+                        style = MaterialTheme.typography.titleMedium
+                    )
+
+                    historyRetentionOptions.forEach { option ->
+                        ThemeOption(
+                            title = option.label,
+                            subtitle = option.description,
+                            selected = historyRetentionDays == option.days
+                        ) {
+                            historyRetentionDays = option.days
+                            saveHistoryRetentionDays(historyPrefs, option.days)
+                            pruneHistoryWithCurrentSettings()
+                        }
+                    }
+                }
             }
         }
     }
