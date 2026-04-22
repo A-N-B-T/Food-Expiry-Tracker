@@ -7430,9 +7430,9 @@ fun AutoDeleteScreen(navController: NavHostController) {
             AutoDeleteSectionCard(
                 title = "Auto-remove expired foods",
                 description = if (expiredFoodsEnabled) {
-                    "Remove from Home after expired for ${autoDeleteDurationLabel(expiredFoodDays)}."
+                    "Remove from List after expired for ${autoDeleteDurationLabel(expiredFoodDays)}."
                 } else {
-                    "Expired foods stay in Home until you remove them."
+                    "Expired foods stay until you remove them."
                 },
                 enabled = expiredFoodsEnabled,
                 selectedDays = expiredFoodDays,
