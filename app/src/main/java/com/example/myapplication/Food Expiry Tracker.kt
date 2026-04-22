@@ -209,6 +209,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -279,11 +280,16 @@ enum class CountdownFormat { DAYS_ONLY, MONTHS_AND_DAYS, YEARS_MONTHS_DAYS }
 
 enum class SelectionPurpose { DELETE, CATEGORY }
 
-private data class HistoryRetentionOption(
+private data class AutoDeletePreset(
     val days: Long,
-    val label: String,
-    val description: String
+    val label: String
 )
+
+private enum class AutoDeleteUnit(val label: String, val daysMultiplier: Long) {
+    DAYS("Days", 1L),
+    WEEKS("Weeks", 7L),
+    MONTHS("Months", 30L)
+}
 
 private suspend fun LazyListState.animateScrollToTopSlowly(
     fallbackItemSizePx: Float,
@@ -415,8 +421,21 @@ private fun countdownFormatDescription(format: CountdownFormat): String {
     }
 }
 
-private fun historyRetentionLabel(days: Long): String {
-    return historyRetentionOptions.firstOrNull { it.days == days }?.label ?: "1 month"
+private fun autoDeleteDurationLabel(days: Long): String {
+    return when (days) {
+        1L -> "1 day"
+        7L -> "1 week"
+        14L -> "2 weeks"
+        30L -> "1 month"
+        90L -> "3 months"
+        180L -> "6 months"
+        360L -> "12 months"
+        else -> when {
+            days % 30L == 0L -> "${days / 30L} months"
+            days % 7L == 0L -> "${days / 7L} weeks"
+            else -> "$days days"
+        }
+    }
 }
 
 @Composable
@@ -1856,12 +1875,19 @@ private const val HISTORY_LIST_KEY = "history_list"
 private const val CATEGORIES_LIST_KEY = "categories_list"
 private const val HISTORY_AUTO_DELETE_ENABLED_KEY = "history_auto_delete_enabled"
 private const val HISTORY_RETENTION_DAYS_KEY = "history_retention_days"
+private const val EXPIRED_FOOD_AUTO_REMOVE_ENABLED_KEY = "expired_food_auto_remove_enabled"
+private const val EXPIRED_FOOD_AUTO_REMOVE_DAYS_KEY = "expired_food_auto_remove_days"
 private const val ONBOARDING_COMPLETED_KEY = "first_launch_onboarding_completed"
 private const val ONBOARDING_DEMO_SEEDED_KEY = "first_launch_demo_seeded"
 private const val ONBOARDING_DEMO_FOOD_NAME = "Example"
 private const val ONBOARDING_DEMO_CATEGORY_NAME = "Example"
 private const val NOTIF_FIRST_PROMPT_SHOWN_KEY = "notif_first_prompt_shown"
 private const val DEFAULT_HISTORY_RETENTION_DAYS = 30L
+private const val MIN_HISTORY_RETENTION_DAYS = 30L
+private const val MAX_HISTORY_RETENTION_DAYS = 360L
+private const val DEFAULT_EXPIRED_FOOD_AUTO_REMOVE_DAYS = 7L
+private const val MIN_EXPIRED_FOOD_AUTO_REMOVE_DAYS = 1L
+private const val MAX_EXPIRED_FOOD_AUTO_REMOVE_DAYS = 180L
 private const val DAY_IN_MILLIS = 86_400_000L
 private const val SWIPE_DELETE_EXIT_DURATION_MS = 420
 private const val SWIPE_DELETE_REMOVE_DELAY_MS = 420L
@@ -1873,11 +1899,15 @@ private const val EDIT_CATEGORIES_SHEET_EXIT_DURATION_MS = 250
 private const val EDIT_CATEGORIES_SHEET_ENTER_DURATION_MS = 260
 private const val AI_EXPIRING_FOOD_WINDOW_DAYS = 3
 
-private val historyRetentionOptions = listOf(
-    HistoryRetentionOption(7L, "1 week", "Delete history not used for 1 week."),
-    HistoryRetentionOption(14L, "2 weeks", "Delete history not used for 2 weeks."),
-    HistoryRetentionOption(21L, "3 weeks", "Delete history not used for 3 weeks."),
-    HistoryRetentionOption(DEFAULT_HISTORY_RETENTION_DAYS, "1 month", "Delete history not used for 1 month.")
+private val historyAutoDeletePresets = listOf(
+    AutoDeletePreset(30L, "1 month"),
+    AutoDeletePreset(90L, "3 months")
+)
+
+private val expiredFoodAutoRemovePresets = listOf(
+    AutoDeletePreset(3L, "3 days"),
+    AutoDeletePreset(7L, "1 week"),
+    AutoDeletePreset(30L, "1 month")
 )
 
 private const val BARCODE_CACHE_KEY = "barcode_cache"
@@ -2191,16 +2221,105 @@ private fun cleanHistoryName(raw: String): String {
     return raw.trim().replace(Regex("\\s+"), " ")
 }
 
-private fun loadFoodList(prefs: android.content.SharedPreferences, gson: Gson): MutableList<FoodItem> {
+private fun loadFoodListRaw(prefs: android.content.SharedPreferences, gson: Gson): MutableList<FoodItem> {
     val json = prefs.getString(FOOD_LIST_KEY, null) ?: return mutableListOf()
     val type = object : TypeToken<MutableList<FoodItem>>() {}.type
     return runCatching { gson.fromJson<MutableList<FoodItem>>(json, type) }.getOrElse { mutableListOf() }
 }
 
-private fun saveFoodList(prefs: android.content.SharedPreferences, gson: Gson, list: List<FoodItem>) {
+private fun loadExpiredFoodAutoRemoveEnabled(prefs: android.content.SharedPreferences): Boolean {
+    return prefs.getBoolean(EXPIRED_FOOD_AUTO_REMOVE_ENABLED_KEY, false)
+}
+
+private fun clampHistoryRetentionDays(days: Long): Long {
+    return days.coerceIn(MIN_HISTORY_RETENTION_DAYS, MAX_HISTORY_RETENTION_DAYS)
+}
+
+private fun clampExpiredFoodAutoRemoveDays(days: Long): Long {
+    return days.coerceIn(MIN_EXPIRED_FOOD_AUTO_REMOVE_DAYS, MAX_EXPIRED_FOOD_AUTO_REMOVE_DAYS)
+}
+
+private fun readLongPreference(
+    prefs: android.content.SharedPreferences,
+    key: String,
+    defaultValue: Long
+): Long {
+    return runCatching {
+        prefs.getLong(key, defaultValue)
+    }.getOrElse {
+        prefs.getInt(key, defaultValue.toInt()).toLong()
+    }
+}
+
+private fun loadExpiredFoodAutoRemoveDays(prefs: android.content.SharedPreferences): Long {
+    return clampExpiredFoodAutoRemoveDays(
+        readLongPreference(
+            prefs = prefs,
+            key = EXPIRED_FOOD_AUTO_REMOVE_DAYS_KEY,
+            defaultValue = DEFAULT_EXPIRED_FOOD_AUTO_REMOVE_DAYS
+        )
+    )
+}
+
+private fun saveExpiredFoodAutoRemoveEnabled(
+    prefs: android.content.SharedPreferences,
+    enabled: Boolean
+) {
+    prefs.edit { putBoolean(EXPIRED_FOOD_AUTO_REMOVE_ENABLED_KEY, enabled) }
+}
+
+private fun saveExpiredFoodAutoRemoveDays(
+    prefs: android.content.SharedPreferences,
+    days: Long
+) {
+    prefs.edit { putLong(EXPIRED_FOOD_AUTO_REMOVE_DAYS_KEY, clampExpiredFoodAutoRemoveDays(days)) }
+}
+
+private fun foodExpiryDate(food: FoodItem): LocalDate? {
+    return runCatching {
+        LocalDate.parse(food.expiry, DateTimeFormatter.ofPattern("dd/MM/yyyy"))
+    }.getOrNull()
+}
+
+private fun isExpiredLongerThan(
+    food: FoodItem,
+    now: LocalDate,
+    thresholdDays: Long
+): Boolean {
+    val expiryDate = foodExpiryDate(food) ?: return false
+    return ChronoUnit.DAYS.between(expiryDate, now) > thresholdDays
+}
+
+private fun filterExpiredFoodsIfNeeded(
+    prefs: android.content.SharedPreferences,
+    list: List<FoodItem>,
+    now: LocalDate = LocalDate.now()
+): List<FoodItem> {
+    if (!loadExpiredFoodAutoRemoveEnabled(prefs)) return list
+
+    val thresholdDays = loadExpiredFoodAutoRemoveDays(prefs)
+    return list.filterNot { food ->
+        isExpiredLongerThan(food, now, thresholdDays)
+    }
+}
+
+private fun saveFoodListRaw(prefs: android.content.SharedPreferences, gson: Gson, list: List<FoodItem>) {
     val json = gson.toJson(list)
     if (prefs.getString(FOOD_LIST_KEY, null) == json) return
     prefs.edit { putString(FOOD_LIST_KEY, json) }
+}
+
+private fun loadFoodList(prefs: android.content.SharedPreferences, gson: Gson): MutableList<FoodItem> {
+    val foods = loadFoodListRaw(prefs, gson)
+    val filteredFoods = filterExpiredFoodsIfNeeded(prefs, foods)
+    if (filteredFoods.size != foods.size) {
+        saveFoodListRaw(prefs, gson, filteredFoods)
+    }
+    return filteredFoods.toMutableList()
+}
+
+private fun saveFoodList(prefs: android.content.SharedPreferences, gson: Gson, list: List<FoodItem>) {
+    saveFoodListRaw(prefs, gson, filterExpiredFoodsIfNeeded(prefs, list))
 }
 
 private fun loadStringList(
@@ -2229,7 +2348,9 @@ private suspend fun saveFoodListAsync(
     gson: Gson,
     list: List<FoodItem>
 ) {
-    val json = withContext(Dispatchers.Default) { gson.toJson(list) }
+    val json = withContext(Dispatchers.Default) {
+        gson.toJson(filterExpiredFoodsIfNeeded(prefs, list))
+    }
     withContext(Dispatchers.IO) {
         if (prefs.getString(FOOD_LIST_KEY, null) != json) {
             prefs.edit { putString(FOOD_LIST_KEY, json) }
@@ -2270,18 +2391,17 @@ private fun <T> replaceListContentsIfChanged(
 }
 
 private fun loadHistoryAutoDeleteEnabled(prefs: android.content.SharedPreferences): Boolean {
-    return prefs.getBoolean(HISTORY_AUTO_DELETE_ENABLED_KEY, true)
+    return prefs.getBoolean(HISTORY_AUTO_DELETE_ENABLED_KEY, false)
 }
 
 private fun loadHistoryRetentionDays(prefs: android.content.SharedPreferences): Long {
-    val stored = runCatching {
-        prefs.getLong(HISTORY_RETENTION_DAYS_KEY, DEFAULT_HISTORY_RETENTION_DAYS)
-    }.getOrElse {
-        prefs.getInt(HISTORY_RETENTION_DAYS_KEY, DEFAULT_HISTORY_RETENTION_DAYS.toInt()).toLong()
-    }
-
-    return historyRetentionOptions.firstOrNull { it.days == stored }?.days
-        ?: DEFAULT_HISTORY_RETENTION_DAYS
+    return clampHistoryRetentionDays(
+        readLongPreference(
+            prefs = prefs,
+            key = HISTORY_RETENTION_DAYS_KEY,
+            defaultValue = DEFAULT_HISTORY_RETENTION_DAYS
+        )
+    )
 }
 
 private fun saveHistoryAutoDeleteEnabled(
@@ -2295,9 +2415,7 @@ private fun saveHistoryRetentionDays(
     prefs: android.content.SharedPreferences,
     days: Long
 ) {
-    val safeDays = historyRetentionOptions.firstOrNull { it.days == days }?.days
-        ?: DEFAULT_HISTORY_RETENTION_DAYS
-    prefs.edit { putLong(HISTORY_RETENTION_DAYS_KEY, safeDays) }
+    prefs.edit { putLong(HISTORY_RETENTION_DAYS_KEY, clampHistoryRetentionDays(days)) }
 }
 
 private fun activeHistoryRetentionDays(prefs: android.content.SharedPreferences): Long? {
@@ -2318,7 +2436,7 @@ private fun historyCutoffMillis(
 private fun normalizeHistoryEntries(
     entries: List<HistoryEntry>,
     now: Long = System.currentTimeMillis(),
-    retentionDays: Long? = DEFAULT_HISTORY_RETENTION_DAYS
+    retentionDays: Long? = null
 ): MutableList<HistoryEntry> {
     val cutoff = retentionDays?.let { historyCutoffMillis(now, it) }
     val deduped = LinkedHashMap<String, HistoryEntry>()
@@ -2439,6 +2557,21 @@ private fun addFoodNameToHistory(
 ) {
     val history = loadHistoryEntries(prefs, gson)
     recordFoodNameInHistory(prefs, gson, history, name)
+}
+
+private suspend fun applyAutoDeleteRulesOnAppLoad(context: Context) {
+    withContext(Dispatchers.IO) {
+        val prefs = context.applicationContext.getSharedPreferences(FOOD_PREFS, Context.MODE_PRIVATE)
+        val gson = Gson()
+
+        if (loadHistoryAutoDeleteEnabled(prefs) && prefs.contains(HISTORY_LIST_KEY)) {
+            loadAndSyncHistoryEntries(prefs, gson)
+        }
+
+        if (loadExpiredFoodAutoRemoveEnabled(prefs)) {
+            loadFoodList(prefs, gson)
+        }
+    }
 }
 
 private fun shouldShowFirstLaunchOnboarding(context: Context): Boolean {
@@ -4490,6 +4623,9 @@ fun AppNav(
         AskNotificationPermissionOnFirstLaunch()
     }
     AccountCloudSyncEffect(accountSession)
+    LaunchedEffect(appContext) {
+        applyAutoDeleteRulesOnAppLoad(appContext)
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
@@ -4601,6 +4737,10 @@ fun AppNav(
                 composable(Route.Notifications.r) {
                     NotificationsScreen(navController)
                 }
+
+                composable(Route.AutoDelete.r) {
+                    AutoDeleteScreen(navController)
+                }
             }
         }
 
@@ -4662,7 +4802,11 @@ fun HistoryScreen(
                     HISTORY_RETENTION_DAYS_KEY ->
                         replaceListContentsIfChanged(history, loadHistoryEntries(prefs, gson))
 
-                    FOOD_LIST_KEY -> replaceListContentsIfChanged(pantryFoods, loadFoodList(prefs, gson))
+                    FOOD_LIST_KEY,
+                    EXPIRED_FOOD_AUTO_REMOVE_ENABLED_KEY,
+                    EXPIRED_FOOD_AUTO_REMOVE_DAYS_KEY ->
+                        replaceListContentsIfChanged(pantryFoods, loadFoodList(prefs, gson))
+
                     CATEGORIES_LIST_KEY -> replaceListContentsIfChanged(
                         categories,
                         loadStringList(prefs, gson, CATEGORIES_LIST_KEY)
@@ -6351,8 +6495,11 @@ private fun RecipeScreen(
     DisposableEffect(sharedPrefs, gson) {
         val listener =
             android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-                if (key == FOOD_LIST_KEY) {
-                    replaceListContentsIfChanged(pantryFoods, loadFoodList(sharedPrefs, gson))
+                when (key) {
+                    FOOD_LIST_KEY,
+                    EXPIRED_FOOD_AUTO_REMOVE_ENABLED_KEY,
+                    EXPIRED_FOOD_AUTO_REMOVE_DAYS_KEY ->
+                        replaceListContentsIfChanged(pantryFoods, loadFoodList(sharedPrefs, gson))
                 }
             }
 
@@ -7153,25 +7300,7 @@ fun PrivacyScreen(navController: NavHostController) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(navController: NavHostController) {
-    val context = LocalContext.current
-    val appCtx = context.applicationContext
     val countdownFormat = rememberCountdownFormatPreference()
-    val historyPrefs = remember(appCtx) {
-        appCtx.getSharedPreferences(FOOD_PREFS, Context.MODE_PRIVATE)
-    }
-    val historyGson = remember { Gson() }
-    var historyAutoDeleteEnabled by rememberSaveable {
-        mutableStateOf(loadHistoryAutoDeleteEnabled(historyPrefs))
-    }
-    var historyRetentionDays by rememberSaveable {
-        mutableLongStateOf(loadHistoryRetentionDays(historyPrefs))
-    }
-
-    fun pruneHistoryWithCurrentSettings() {
-        if (historyAutoDeleteEnabled) {
-            loadAndSyncHistoryEntries(historyPrefs, historyGson)
-        }
-    }
 
     Scaffold(
         containerColor = Color.Transparent,
@@ -7206,60 +7335,534 @@ fun SettingsScreen(navController: NavHostController) {
             ) {
                 navController.navigate(Route.Notifications.r)
             }
-
-            MatchingPillCard(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 8.dp),
-                shadowElevation = 6.dp
+            SettingRow(
+                title = "Auto delete",
+                subtitle = "History and expired foods"
             ) {
+                navController.navigate(Route.AutoDelete.r)
+            }
+        }
+    }
+}
+
+@Composable
+fun AutoDeleteScreen(navController: NavHostController) {
+    val context = LocalContext.current
+    val appCtx = context.applicationContext
+    val prefs = remember(appCtx) {
+        appCtx.getSharedPreferences(FOOD_PREFS, Context.MODE_PRIVATE)
+    }
+    val gson = remember { Gson() }
+
+    var historyEnabled by rememberSaveable {
+        mutableStateOf(loadHistoryAutoDeleteEnabled(prefs))
+    }
+    var historyDays by rememberSaveable {
+        mutableLongStateOf(loadHistoryRetentionDays(prefs))
+    }
+    var expiredFoodsEnabled by rememberSaveable {
+        mutableStateOf(loadExpiredFoodAutoRemoveEnabled(prefs))
+    }
+    var expiredFoodDays by rememberSaveable {
+        mutableLongStateOf(loadExpiredFoodAutoRemoveDays(prefs))
+    }
+    var customTarget by remember {
+        mutableStateOf<AutoDeleteCustomTarget?>(null)
+    }
+
+    fun applyHistoryCleanup() {
+        if (historyEnabled) {
+            loadAndSyncHistoryEntries(prefs, gson)
+        }
+    }
+
+    fun applyExpiredFoodCleanup() {
+        if (expiredFoodsEnabled) {
+            loadFoodList(prefs, gson)
+        }
+    }
+
+    Scaffold(
+        containerColor = Color.Transparent,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        topBar = {
+            SlimTopBar(
+                title = "Auto delete",
+                onBack = { navController.popBackStack() }
+            )
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 16.dp)
+                .padding(bottom = 96.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            AutoDeleteSectionCard(
+                title = "History auto-delete",
+                description = if (historyEnabled) {
+                    "Remove history entries not used for ${autoDeleteDurationLabel(historyDays)}."
+                } else {
+                    "Keep history until you remove it."
+                },
+                enabled = historyEnabled,
+                selectedDays = historyDays,
+                presets = historyAutoDeletePresets,
+                selectedSummary = "Older than ${autoDeleteDurationLabel(historyDays)}",
+                onEnabledChange = { checked ->
+                    historyEnabled = checked
+                    saveHistoryAutoDeleteEnabled(prefs, checked)
+                    applyHistoryCleanup()
+                },
+                onPresetSelected = { days ->
+                    historyDays = days
+                    saveHistoryRetentionDays(prefs, days)
+                    applyHistoryCleanup()
+                },
+                onCustomClick = {
+                    customTarget = AutoDeleteCustomTarget.HISTORY
+                }
+            )
+
+            AutoDeleteSectionCard(
+                title = "Auto-remove expired foods",
+                description = if (expiredFoodsEnabled) {
+                    "Remove from Home after expired for ${autoDeleteDurationLabel(expiredFoodDays)}."
+                } else {
+                    "Expired foods stay in Home until you remove them."
+                },
+                enabled = expiredFoodsEnabled,
+                selectedDays = expiredFoodDays,
+                presets = expiredFoodAutoRemovePresets,
+                selectedSummary = "Expired for ${autoDeleteDurationLabel(expiredFoodDays)}",
+                onEnabledChange = { checked ->
+                    expiredFoodsEnabled = checked
+                    saveExpiredFoodAutoRemoveEnabled(prefs, checked)
+                    applyExpiredFoodCleanup()
+                },
+                onPresetSelected = { days ->
+                    expiredFoodDays = days
+                    saveExpiredFoodAutoRemoveDays(prefs, days)
+                    applyExpiredFoodCleanup()
+                },
+                onCustomClick = {
+                    customTarget = AutoDeleteCustomTarget.EXPIRED_FOODS
+                }
+            )
+        }
+    }
+
+    customTarget?.let { target ->
+        val isHistoryTarget = target == AutoDeleteCustomTarget.HISTORY
+        AutoDeleteCustomDialog(
+            title = if (isHistoryTarget) "Custom history cleanup" else "Custom expired foods cleanup",
+            initialDays = if (isHistoryTarget) historyDays else expiredFoodDays,
+            minDays = if (isHistoryTarget) MIN_HISTORY_RETENTION_DAYS else MIN_EXPIRED_FOOD_AUTO_REMOVE_DAYS,
+            maxDays = if (isHistoryTarget) MAX_HISTORY_RETENTION_DAYS else MAX_EXPIRED_FOOD_AUTO_REMOVE_DAYS,
+            onDismiss = { customTarget = null },
+            onConfirm = { days ->
+                if (isHistoryTarget) {
+                    historyDays = days
+                    saveHistoryRetentionDays(prefs, days)
+                    applyHistoryCleanup()
+                } else {
+                    expiredFoodDays = days
+                    saveExpiredFoodAutoRemoveDays(prefs, days)
+                    applyExpiredFoodCleanup()
+                }
+                customTarget = null
+            }
+        )
+    }
+}
+
+private enum class AutoDeleteCustomTarget {
+    HISTORY,
+    EXPIRED_FOODS
+}
+
+@Composable
+private fun AutoDeleteSectionCard(
+    title: String,
+    description: String,
+    enabled: Boolean,
+    selectedDays: Long,
+    presets: List<AutoDeletePreset>,
+    selectedSummary: String,
+    onEnabledChange: (Boolean) -> Unit,
+    onPresetSelected: (Long) -> Unit,
+    onCustomClick: () -> Unit
+) {
+    MatchingPillCard(
+        modifier = Modifier.fillMaxWidth(),
+        shadowElevation = 4.dp
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        text = description,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                Switch(
+                    checked = enabled,
+                    onCheckedChange = onEnabledChange
+                )
+            }
+
+            AnimatedVisibility(
+                visible = enabled,
+                enter = expandVertically(
+                    animationSpec = tween(
+                        durationMillis = 300,
+                        easing = FastOutSlowInEasing
+                    ),
+                    expandFrom = Alignment.Top,
+                    clip = false
+                ) + slideInVertically(
+                    animationSpec = tween(
+                        durationMillis = 300,
+                        easing = FastOutSlowInEasing
+                    ),
+                    initialOffsetY = { -it / 5 }
+                ) + fadeIn(
+                    animationSpec = tween(
+                        durationMillis = 160,
+                        delayMillis = 70,
+                        easing = LinearOutSlowInEasing
+                    )
+                ),
+                exit = fadeOut(
+                    animationSpec = tween(
+                        durationMillis = 90,
+                        easing = FastOutLinearInEasing
+                    )
+                ) + slideOutVertically(
+                    animationSpec = tween(
+                        durationMillis = 220,
+                        easing = FastOutLinearInEasing
+                    ),
+                    targetOffsetY = { -it / 6 }
+                ) + shrinkVertically(
+                    animationSpec = tween(
+                        durationMillis = 240,
+                        easing = FastOutSlowInEasing
+                    ),
+                    shrinkTowards = Alignment.Top,
+                    clip = false
+                )
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Spacer(Modifier.height(14.dp))
+                    Text(
+                        text = selectedSummary,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    AutoDeletePresetPicker(
+                        selectedDays = selectedDays,
+                        presets = presets,
+                        onSelected = onPresetSelected,
+                        onCustomClick = onCustomClick
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AutoDeletePresetPicker(
+    selectedDays: Long,
+    presets: List<AutoDeletePreset>,
+    onSelected: (Long) -> Unit,
+    onCustomClick: () -> Unit
+) {
+    val customSelected = presets.none { it.days == selectedDays }
+
+    LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(end = 2.dp)
+    ) {
+        items(presets, key = { it.label }) { option ->
+            AutoDeleteChoiceChip(
+                label = option.label,
+                selected = option.days == selectedDays,
+                onClick = { onSelected(option.days) }
+            )
+        }
+        item {
+            AutoDeleteChoiceChip(
+                label = "Custom",
+                selected = customSelected,
+                onClick = onCustomClick
+            )
+        }
+    }
+}
+
+@Composable
+private fun AutoDeleteChoiceChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    val scheme = MaterialTheme.colorScheme
+    val shape = RoundedCornerShape(50.dp)
+
+    Box(
+        modifier = Modifier
+            .height(40.dp)
+            .clip(shape)
+            .background(
+                if (selected) {
+                    scheme.primary.copy(alpha = 0.18f)
+                } else {
+                    scheme.surfaceVariant.copy(alpha = 0.18f)
+                }
+            )
+            .border(
+                width = 1.dp,
+                color = if (selected) {
+                    scheme.primary.copy(alpha = 0.48f)
+                } else {
+                    scheme.outlineVariant.copy(alpha = 0.42f)
+                },
+                shape = shape
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 15.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+            color = if (selected) scheme.primary else scheme.onSurfaceVariant,
+            maxLines = 1
+        )
+    }
+}
+
+private fun preferredAutoDeleteUnit(days: Long): AutoDeleteUnit {
+    return when {
+        days % AutoDeleteUnit.MONTHS.daysMultiplier == 0L -> AutoDeleteUnit.MONTHS
+        days % AutoDeleteUnit.WEEKS.daysMultiplier == 0L -> AutoDeleteUnit.WEEKS
+        else -> AutoDeleteUnit.DAYS
+    }
+}
+
+private fun minimumAmountForUnit(minDays: Long, unit: AutoDeleteUnit): Int {
+    return ((minDays + unit.daysMultiplier - 1L) / unit.daysMultiplier).toInt().coerceAtLeast(1)
+}
+
+private fun maximumAmountForUnit(maxDays: Long, unit: AutoDeleteUnit): Int {
+    return (maxDays / unit.daysMultiplier).toInt().coerceAtLeast(1)
+}
+
+private fun amountForDays(
+    days: Long,
+    unit: AutoDeleteUnit,
+    minDays: Long,
+    maxDays: Long
+): Int {
+    val unitMin = minimumAmountForUnit(minDays, unit)
+    val unitMax = maximumAmountForUnit(maxDays, unit)
+    val roundedUp = ((days + unit.daysMultiplier - 1L) / unit.daysMultiplier).toInt()
+    return roundedUp.coerceIn(unitMin, unitMax)
+}
+
+@Composable
+private fun AutoDeleteCustomDialog(
+    title: String,
+    initialDays: Long,
+    minDays: Long,
+    maxDays: Long,
+    onDismiss: () -> Unit,
+    onConfirm: (Long) -> Unit
+) {
+    var unit by rememberSaveable { mutableStateOf(preferredAutoDeleteUnit(initialDays)) }
+    var amount by rememberSaveable {
+        mutableIntStateOf(amountForDays(initialDays, unit, minDays, maxDays))
+    }
+    var amountText by rememberSaveable { mutableStateOf(amount.toString()) }
+
+    val minAmount = minimumAmountForUnit(minDays, unit)
+    val maxAmount = maximumAmountForUnit(maxDays, unit)
+    val parsedAmount = amountText.toIntOrNull()
+    val effectiveAmount = parsedAmount?.coerceIn(minAmount, maxAmount)
+    val selectedDays = effectiveAmount
+        ?.let { (it.toLong() * unit.daysMultiplier).coerceIn(minDays, maxDays) }
+
+    fun updateAmount(nextAmount: Int) {
+        val safeAmount = nextAmount.coerceIn(minAmount, maxAmount)
+        amount = safeAmount
+        amountText = safeAmount.toString()
+    }
+
+    fun updateAmountText(raw: String) {
+        val digitsOnly = raw.filter { it.isDigit() }.take(3)
+        val typedAmount = digitsOnly.toIntOrNull()
+
+        if (typedAmount == null) {
+            amountText = digitsOnly
+            return
+        }
+
+        val safeAmount = typedAmount.coerceIn(minAmount, maxAmount)
+        amount = safeAmount
+        amountText = safeAmount.toString()
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        MatchingPillCard(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(24.dp)
+                .widthIn(max = 420.dp),
+            shadowElevation = 8.dp
+        ) {
+            Column(
+                modifier = Modifier.padding(18.dp)
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = "Choose when cleanup should happen.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Spacer(Modifier.height(18.dp))
+
                 Row(
-                    modifier = Modifier.padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("History auto-delete", style = MaterialTheme.typography.bodyLarge)
-                        Spacer(Modifier.height(4.dp))
+                    IconButton(
+                        enabled = (effectiveAmount ?: amount) > minAmount,
+                        onClick = { updateAmount((effectiveAmount ?: amount) - 1) }
+                    ) {
+                        Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Decrease")
+                    }
+
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Box(
+                            modifier = Modifier
+                                .widthIn(min = 76.dp, max = 112.dp)
+                                .height(52.dp)
+                                .clip(RoundedCornerShape(18.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.18f))
+                                .border(
+                                    width = 1.dp,
+                                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.42f),
+                                    shape = RoundedCornerShape(18.dp)
+                                )
+                                .padding(horizontal = 10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            BasicTextField(
+                                value = amountText,
+                                onValueChange = ::updateAmountText,
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(
+                                    keyboardType = KeyboardType.Number,
+                                    imeAction = ImeAction.Done
+                                ),
+                                textStyle = MaterialTheme.typography.headlineMedium.copy(
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    fontWeight = FontWeight.SemiBold,
+                                    textAlign = TextAlign.Center
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
                         Text(
-                            text = if (historyAutoDeleteEnabled) {
-                                "Deletes history not used for ${historyRetentionLabel(historyRetentionDays)}."
-                            } else {
-                                "Keeps history until you delete it."
-                            },
-                            style = MaterialTheme.typography.bodyMedium,
+                            text = unit.label.lowercase(Locale.US),
+                            style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
 
-                    Switch(
-                        checked = historyAutoDeleteEnabled,
-                        onCheckedChange = { checked ->
-                            historyAutoDeleteEnabled = checked
-                            saveHistoryAutoDeleteEnabled(historyPrefs, checked)
-                            pruneHistoryWithCurrentSettings()
-                        }
-                    )
+                    IconButton(
+                        enabled = (effectiveAmount ?: amount) < maxAmount,
+                        onClick = { updateAmount((effectiveAmount ?: amount) + 1) }
+                    ) {
+                        Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Increase")
+                    }
                 }
-            }
 
-            AnimatedVisibility(visible = historyAutoDeleteEnabled) {
-                Column {
-                    Text(
-                        text = "Delete history after",
-                        modifier = Modifier.padding(start = 4.dp, top = 8.dp, bottom = 2.dp),
-                        style = MaterialTheme.typography.titleMedium
-                    )
+                Spacer(Modifier.height(14.dp))
 
-                    historyRetentionOptions.forEach { option ->
-                        ThemeOption(
-                            title = option.label,
-                            subtitle = option.description,
-                            selected = historyRetentionDays == option.days
-                        ) {
-                            historyRetentionDays = option.days
-                            saveHistoryRetentionDays(historyPrefs, option.days)
-                            pruneHistoryWithCurrentSettings()
-                        }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    AutoDeleteUnit.entries.forEach { option ->
+                        AutoDeleteChoiceChip(
+                            label = option.label,
+                            selected = unit == option,
+                            onClick = {
+                                val currentDays = selectedDays ?: initialDays
+                                val nextAmount = amountForDays(currentDays, option, minDays, maxDays)
+                                unit = option
+                                amount = nextAmount
+                                amountText = nextAmount.toString()
+                            }
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    text = selectedDays?.let {
+                        "Selected: ${autoDeleteDurationLabel(it)}"
+                    } ?: "Type a number from $minAmount to $maxAmount.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Spacer(Modifier.height(18.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text("Cancel")
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Button(
+                        enabled = selectedDays != null,
+                        onClick = { selectedDays?.let(onConfirm) },
+                        shape = RoundedCornerShape(50.dp)
+                    ) {
+                        Text("Save")
                     }
                 }
             }
@@ -8045,7 +8648,11 @@ fun FoodEntryScreen(
         val listener =
             android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
                 when (key) {
-                    FOOD_LIST_KEY -> replaceListContentsIfChanged(foodList, loadFoodList(sharedPrefs, gson))
+                    FOOD_LIST_KEY,
+                    EXPIRED_FOOD_AUTO_REMOVE_ENABLED_KEY,
+                    EXPIRED_FOOD_AUTO_REMOVE_DAYS_KEY ->
+                        replaceListContentsIfChanged(foodList, loadFoodList(sharedPrefs, gson))
+
                     CATEGORIES_LIST_KEY -> replaceListContentsIfChanged(
                         categories,
                         loadStringList(sharedPrefs, gson, CATEGORIES_LIST_KEY).ifEmpty { initialCategories }

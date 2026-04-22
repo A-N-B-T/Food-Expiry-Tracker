@@ -13,6 +13,7 @@ sealed class Route(val r: String) {
     data object Theme : Route("profile/settings/theme")
     data object CountdownFormat : Route("profile/settings/countdown-format")
     data object Notifications : Route("profile/settings/notifications")
+    data object AutoDelete : Route("profile/settings/auto-delete")
 
     object History : Route("history")
     object Recipe : Route("recipe")
