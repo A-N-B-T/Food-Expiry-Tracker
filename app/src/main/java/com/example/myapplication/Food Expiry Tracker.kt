@@ -46,7 +46,6 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -2942,8 +2941,8 @@ private fun ExpiryWheelPickerDialog(
 
                     AnimatedVisibility(
                         visible = isInvalidSelectedDate,
-                        enter = fadeIn(tween(180)) + expandVertically(tween(180)),
-                        exit = fadeOut(tween(140)) + shrinkVertically(tween(140))
+                        enter = smoothVerticalRevealEnter(),
+                        exit = smoothVerticalRevealExit()
                     ) {
                         Column {
                             Spacer(modifier = Modifier.height(12.dp))
@@ -3533,7 +3532,6 @@ private fun HistoryTopBar(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .animateContentSize()
                     .padding(horizontal = 16.dp, vertical = 14.dp)
             ) {
                 Row(
@@ -3557,8 +3555,8 @@ private fun HistoryTopBar(
 
                 AnimatedVisibility(
                     visible = showSearchBar,
-                    enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(tween(350)),
-                    exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut(tween(350))
+                    enter = smoothVerticalRevealEnter(),
+                    exit = smoothVerticalRevealExit()
                 ) {
                     Column {
                         Spacer(Modifier.height(10.dp))
@@ -4052,7 +4050,6 @@ fun MyPantryTopBar(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .animateContentSize()
                     .padding(horizontal = 16.dp, vertical = 14.dp)
             ) {
                 if (isSelecting) {
@@ -4140,8 +4137,8 @@ fun MyPantryTopBar(
 
                 AnimatedVisibility(
                     visible = !isSelecting && showSearchBar,
-                    enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(tween(350)),
-                    exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut(tween(350))
+                    enter = smoothVerticalRevealEnter(),
+                    exit = smoothVerticalRevealExit()
                 ) {
                     Column {
                         Spacer(Modifier.height(10.dp))
@@ -4159,8 +4156,8 @@ fun MyPantryTopBar(
 
                 AnimatedVisibility(
                     visible = !isSelecting,
-                    enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(tween(350)),
-                    exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut(tween(350))
+                    enter = smoothVerticalRevealEnter(),
+                    exit = smoothVerticalRevealExit()
                 ) {
                     Column {
                         if (!showSearchBar) {
@@ -7528,45 +7525,8 @@ private fun AutoDeleteSectionCard(
 
             AnimatedVisibility(
                 visible = enabled,
-                enter = expandVertically(
-                    animationSpec = tween(
-                        durationMillis = 300,
-                        easing = FastOutSlowInEasing
-                    ),
-                    expandFrom = Alignment.Top,
-                    clip = false
-                ) + slideInVertically(
-                    animationSpec = tween(
-                        durationMillis = 300,
-                        easing = FastOutSlowInEasing
-                    ),
-                    initialOffsetY = { -it / 5 }
-                ) + fadeIn(
-                    animationSpec = tween(
-                        durationMillis = 160,
-                        delayMillis = 70,
-                        easing = LinearOutSlowInEasing
-                    )
-                ),
-                exit = fadeOut(
-                    animationSpec = tween(
-                        durationMillis = 90,
-                        easing = FastOutLinearInEasing
-                    )
-                ) + slideOutVertically(
-                    animationSpec = tween(
-                        durationMillis = 220,
-                        easing = FastOutLinearInEasing
-                    ),
-                    targetOffsetY = { -it / 6 }
-                ) + shrinkVertically(
-                    animationSpec = tween(
-                        durationMillis = 240,
-                        easing = FastOutSlowInEasing
-                    ),
-                    shrinkTowards = Alignment.Top,
-                    clip = false
-                )
+                enter = smoothVerticalRevealEnter(),
+                exit = smoothVerticalRevealExit()
             ) {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Spacer(Modifier.height(14.dp))
