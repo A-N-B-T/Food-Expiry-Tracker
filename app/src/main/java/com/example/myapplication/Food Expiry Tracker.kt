@@ -4833,10 +4833,25 @@ fun HistoryScreen(
 
                     ExpiryDateInputField(
                         value = quickAddExpiry,
-                        onValueChange = { quickAddExpiry = it },
+                        onValueChange = {
+                            quickAddExpiry = it
+                            val duplicate =
+                                quickAddName != null &&
+                                        pantryFoods.any { food ->
+                                            normalizeFoodName(food.name) == normalizeFoodName(quickAddName.orEmpty()) &&
+                                                    food.expiry.trim() == it.trim()
+                                        }
+                            quickAddError = if (duplicate) "Same food and date already exists." else null
+                        },
                         onCalendarClick = {
                             openExpiryDatePicker(context) { pickedDate ->
                                 quickAddExpiry = pickedDate
+                                val duplicate =
+                                    pantryFoods.any { food ->
+                                        normalizeFoodName(food.name) == normalizeFoodName(quickAddName.orEmpty()) &&
+                                                food.expiry.trim() == pickedDate.trim()
+                                    }
+                                quickAddError = if (duplicate) "Same food and date already exists." else null
                             }
                         }
                     )
@@ -4904,9 +4919,12 @@ fun HistoryScreen(
                         }
 
                         val exists =
-                            pantryFoods.any { normalizeFoodName(it.name) == normalizeFoodName(name) }
+                            pantryFoods.any {
+                                normalizeFoodName(it.name) == normalizeFoodName(name) &&
+                                        it.expiry.trim() == quickAddExpiry.trim()
+                            }
                         if (exists) {
-                            quickAddError = "This food is already in your food list."
+                            quickAddError = "Same food and date already exists."
                             return@TextButton
                         }
 
@@ -7932,12 +7950,15 @@ fun FoodEntryScreen(
         isSelecting = false
     }
 
-    fun isDuplicateName(input: String): Boolean {
-        val cleaned = input.trim()
-        if (cleaned.isBlank()) return false
+    fun isDuplicateFood(inputName: String, inputExpiry: String): Boolean {
+        val cleanedName = inputName.trim()
+        val cleanedExpiry = inputExpiry.trim()
+        if (cleanedName.isBlank() || cleanedExpiry.isBlank()) return false
 
         return foodList.any { item ->
-            item != editingItem && item.name.trim().equals(cleaned, ignoreCase = true)
+            item != editingItem &&
+                    item.name.trim().equals(cleanedName, ignoreCase = true) &&
+                    item.expiry.trim() == cleanedExpiry
         }
     }
 
@@ -8007,7 +8028,7 @@ fun FoodEntryScreen(
         val invalidDate = expiryDate.isNotBlank() && !isValidFutureExpiryDate(expiryDate)
 
         showError = missing || invalidDate
-        nameExistsError = !missing && !invalidDate && isDuplicateName(foodName)
+        nameExistsError = !missing && !invalidDate && isDuplicateFood(foodName, expiryDate)
 
         if (missing || invalidDate || nameExistsError) return false
 
@@ -8065,7 +8086,7 @@ fun FoodEntryScreen(
                     }
 
                     showError = false
-                    nameExistsError = isDuplicateName(foodName)
+                    nameExistsError = isDuplicateFood(foodName, expiryDate)
                 }
             } else if (scanMessage.isNotBlank()) {
                 isLookingUpBarcode = false
@@ -8871,7 +8892,7 @@ fun FoodEntryScreen(
                                         if (it.length <= 50) {
                                             foodName = it
                                             if (showError) showError = false
-                                            nameExistsError = isDuplicateName(foodName)
+                                            nameExistsError = isDuplicateFood(foodName, expiryDate)
                                         }
                                     },
                                     label = { Text("Food Name") },
@@ -8928,11 +8949,13 @@ fun FoodEntryScreen(
                                 onValueChange = {
                                     expiryDate = it
                                     if (showError) showError = false
+                                    nameExistsError = isDuplicateFood(foodName, it)
                                 },
                                 onCalendarClick = {
                                     openExpiryDatePicker(context) { pickedDate ->
                                         expiryDate = pickedDate
                                         if (showError) showError = false
+                                        nameExistsError = isDuplicateFood(foodName, pickedDate)
                                     }
                                 }
                             )
@@ -8984,7 +9007,7 @@ fun FoodEntryScreen(
 
                             if(nameExistsError) {
                                 Text(
-                                    "Food already exists!",
+                                    "Same food and date already exists.",
                                     color = MaterialTheme.colorScheme.error
                                 )
                             }else if (showError) {
