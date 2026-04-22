@@ -5584,7 +5584,7 @@ private fun isSingleFoodLikeRequest(
 }
 
 private fun recipePromptPlaceholder(): String {
-    return "Ask me to make recipes using foods in my list."
+    return "Give any food like eggs, rice, milk..."
 }
 
 private fun buildExpiringFoodsRequest(expiringFoods: List<ExpiringFoodHint>): String {
@@ -5984,6 +5984,40 @@ private fun RecipeStepLine(
 }
 
 @Composable
+private fun RecipeFollowUpHint() {
+    val scheme = MaterialTheme.colorScheme
+    val isDarkTheme = scheme.background.luminance() < 0.5f
+    val hintColor = scheme.primary.copy(alpha = if (isDarkTheme) 0.92f else 0.78f)
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        color = hintColor.copy(alpha = if (isDarkTheme) 0.12f else 0.08f),
+        contentColor = hintColor,
+        border = BorderStroke(1.dp, hintColor.copy(alpha = if (isDarkTheme) 0.24f else 0.18f))
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Default.AutoAwesome,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp)
+            )
+
+            Spacer(Modifier.width(8.dp))
+
+            Text(
+                text = "You can ask me to make recipes using foods in your list.",
+                style = MaterialTheme.typography.bodySmall,
+                color = hintColor
+            )
+        }
+    }
+}
+
+@Composable
 private fun RecipeAssistantMessageCard(message: RecipeChatMessage) {
     val scheme = MaterialTheme.colorScheme
     val isDarkTheme = scheme.background.luminance() < 0.5f
@@ -6017,6 +6051,7 @@ private fun RecipeAssistantMessageCard(message: RecipeChatMessage) {
                         RecipeSuggestionCard(recipe)
                     }
                 }
+                RecipeFollowUpHint()
             }
         } else {
             RecipeChatBubble(
@@ -6246,7 +6281,7 @@ private fun RecipeScreen(
         (if (messages.isEmpty()) 1 else 0) +
         messages.size +
         (if (isLoading) 1 else 0)
-    val recipeListBottomPadding = 138.dp
+    val recipeListBottomPadding = 176.dp
 
     DisposableEffect(sharedPrefs, gson) {
         val listener =
