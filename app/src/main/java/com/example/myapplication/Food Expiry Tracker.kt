@@ -6799,14 +6799,17 @@ private fun RecipeScreen(
             return
         }
 
-        val wantsMoreFromPrevious =
-            !useExpiringFoods && previousIngredients.isNotEmpty() && wantsMoreRecipeIdeas(trimmed)
         val ingredientEditFollowUp =
             !useExpiringFoods && looksLikeIngredientEditFollowUp(
                 request = trimmed,
                 pantryIngredients = pantryIngredientNames,
                 previousIngredients = previousIngredients
             )
+        val wantsMoreFromPrevious =
+            !useExpiringFoods &&
+                previousIngredients.isNotEmpty() &&
+                !ingredientEditFollowUp &&
+                wantsMoreRecipeIdeas(trimmed)
 
         if (
             !useExpiringFoods &&

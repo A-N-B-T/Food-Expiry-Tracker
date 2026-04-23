@@ -119,16 +119,13 @@ internal fun looksLikeIngredientEditFollowUp(
 
     if (ingredientMentions.isEmpty()) return false
 
-    val followUpCueTokens = setOf(
-        "add", "include", "plus", "also", "with", "without", "remove",
-        "drop", "replace", "swap", "instead", "too", "and", "same",
-        "previous", "it", "them", "that", "those"
-    )
-    val hasFollowUpCue =
-        tokens.any { it in followUpCueTokens } ||
-            normalized.startsWith("with ") ||
-            normalized.startsWith("and ")
+    val hasFollowUpCue = hasReferentialIngredientEditCue(normalized, tokens)
     val isShortIngredientReply = tokens.size <= 4
+    val isExplicitFreshRecipeRequest =
+        ingredientMentions.isNotEmpty() &&
+            looksLikeFreshRecipeIngredientRequest(normalized, tokens)
+
+    if (isExplicitFreshRecipeRequest && !hasFollowUpCue) return false
 
     return hasFollowUpCue || isShortIngredientReply
 }
@@ -141,6 +138,51 @@ private fun normalizeFollowUpMatchToken(token: String): String {
         token.endsWith("s") && token.length > 4 -> token.dropLast(1)
         else -> token
     }
+}
+
+private fun hasReferentialIngredientEditCue(
+    normalized: String,
+    tokens: List<String> = normalized
+        .split(Regex("[^a-z0-9]+"))
+        .filter { it.isNotBlank() }
+): Boolean {
+    val followUpCueTokens = setOf(
+        "add", "include", "plus", "also", "without", "remove",
+        "drop", "replace", "swap", "instead", "too", "same",
+        "previous", "it", "them", "that", "those"
+    )
+
+    return tokens.any { it in followUpCueTokens } ||
+        normalized.startsWith("add ") ||
+        normalized.startsWith("with ") ||
+        normalized.startsWith("and ") ||
+        normalized.startsWith("without ") ||
+        normalized.startsWith("remove ") ||
+        normalized.contains(" to that") ||
+        normalized.contains(" to it") ||
+        normalized.contains(" with that") ||
+        normalized.contains(" with it") ||
+        normalized.contains(" same ingredients") ||
+        normalized.contains(" previous ingredients") ||
+        normalized.contains(" those ingredients")
+}
+
+private fun looksLikeFreshRecipeIngredientRequest(
+    normalized: String,
+    tokens: List<String>
+): Boolean {
+    val freshRecipeCueTokens = setOf(
+        "recipe", "recipes", "make", "cook", "meal", "meals",
+        "breakfast", "lunch", "dinner", "snack", "using"
+    )
+
+    return tokens.any { it in freshRecipeCueTokens } ||
+        normalized.startsWith("can you make") ||
+        normalized.startsWith("make ") ||
+        normalized.startsWith("cook ") ||
+        normalized.startsWith("give me ") ||
+        normalized.contains(" recipe with ") ||
+        normalized.contains(" recipes with ")
 }
 
 internal fun requestedRecipeLimit(request: String): Int? {
@@ -285,35 +327,63 @@ internal object RecipeAiService {
         val cleanedPantryIngredients = sanitizeIngredients(pantryIngredients)
             .take(MAX_PANTRY_INGREDIENT_CONTEXT)
         val cleanedPreviousIngredients = sanitizeIngredients(previousIngredients).take(8)
+        val ingredientEditFollowUp =
+            looksLikeIngredientEditFollowUp(
+                request = trimmedRequest,
+                pantryIngredients = cleanedPantryIngredients,
+                previousIngredients = cleanedPreviousIngredients
+            )
         val wantsMoreFromPrevious =
-            cleanedPreviousIngredients.isNotEmpty() && wantsMoreRecipeIdeas(trimmedRequest)
-        val conversationalIngredientUpdate =
+            cleanedPreviousIngredients.isNotEmpty() &&
+                !ingredientEditFollowUp &&
+                wantsMoreRecipeIdeas(trimmedRequest)
+        val rawExplicitRequestIngredients =
             if (wantsMoreFromPrevious) {
+                emptyList()
+            } else {
+                extractExplicitRequestIngredients(trimmedRequest).take(8)
+            }
+        val conversationalIngredientUpdate =
+            if (
+                wantsMoreFromPrevious ||
+                rawExplicitRequestIngredients.isEmpty() &&
+                    cleanedPreviousIngredients.isEmpty()
+            ) {
                 null
             } else {
-                resolveConversationalIngredientUpdate(
-                    request = trimmedRequest,
-                    pantryIngredients = cleanedPantryIngredients,
-                    previousIngredients = cleanedPreviousIngredients
-                )?.take(8)
+                val shouldUseConversationalUpdate =
+                    cleanedPreviousIngredients.isNotEmpty() && ingredientEditFollowUp
+
+                if (shouldUseConversationalUpdate) {
+                    resolveConversationalIngredientUpdate(
+                        request = trimmedRequest,
+                        pantryIngredients = cleanedPantryIngredients,
+                        previousIngredients = cleanedPreviousIngredients
+                    )?.take(8)
+                } else {
+                    null
+                }
             }
         val explicitRequestIngredients =
             when {
                 wantsMoreFromPrevious -> emptyList()
                 conversationalIngredientUpdate != null -> conversationalIngredientUpdate
-                else -> extractExplicitRequestIngredients(trimmedRequest).take(8)
+                else -> rawExplicitRequestIngredients
             }
         val effectivePantryIngredients =
             when {
-                wantsMoreFromPrevious -> cleanedPreviousIngredients
-                conversationalIngredientUpdate != null -> conversationalIngredientUpdate
-                else -> explicitRequestIngredients.ifEmpty { cleanedPantryIngredients }
+                wantsMoreFromPrevious -> emptyList()
+                conversationalIngredientUpdate != null -> emptyList()
+                explicitRequestIngredients.isNotEmpty() -> emptyList()
+                else -> cleanedPantryIngredients
             }
         val effectivePreviousIngredients =
             if (explicitRequestIngredients.isNotEmpty()) {
                 emptyList()
-            } else {
+            } else if (wantsMoreFromPrevious) {
                 cleanedPreviousIngredients
+            } else {
+                emptyList()
             }
         val effectiveRequest =
             when {
@@ -342,7 +412,9 @@ internal object RecipeAiService {
         val parsedBatch = parseRecipeSuggestionBatch(
             responseBody = responseBody,
             fallbackIngredients = explicitRequestIngredients.ifEmpty {
-                effectivePreviousIngredients.ifEmpty { effectivePantryIngredients }
+                effectivePreviousIngredients.ifEmpty {
+                    effectivePantryIngredients.ifEmpty { cleanedPantryIngredients }
+                }
             }
         )
 
