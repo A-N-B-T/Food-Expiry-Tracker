@@ -14,6 +14,7 @@ private const val GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v
 private const val GEMINI_MODEL = "gemini-3.1-flash-lite-preview"
 private const val GEMINI_TIMEOUT_MS = 30000
 private const val DEFAULT_RECIPE_LIMIT = 3
+private const val MIN_RECIPE_LIMIT = 1
 private const val MAX_RECIPE_LIMIT = 3
 private const val MAX_RECIPE_STEPS = 5
 private const val MAX_PANTRY_INGREDIENT_CONTEXT = 30
@@ -33,7 +34,7 @@ internal fun wantsMoreRecipeIdeas(request: String): Boolean {
 
     val compact = tokens.joinToString("")
     val hasMoreIntent = tokens.any { token ->
-        token in setOf("more", "another", "again", "next", "extra", "same", "previous", "those")
+        token in setOf("more", "another", "again", "next", "extra", "same", "previous", "those","same","similar")
     } || compact.contains("somemore") ||
             compact.contains("givemore") ||
             compact.contains("needmore") ||
@@ -52,6 +53,111 @@ internal fun wantsMoreRecipeIdeas(request: String): Boolean {
             compact.contains("wouldyou")
 
     return hasRecipeFollowUpTone || tokens.size <= 4
+}
+
+internal fun requestedRecipeLimit(request: String): Int? {
+    val normalized = request
+        .trim()
+        .lowercase(Locale.US)
+        .replace(Regex("\\s+"), " ")
+
+    if (normalized.isBlank()) return null
+
+    val matchedNumber = findRequestedRecipeCountToken(normalized) ?: return null
+
+    return recipeCountValue(matchedNumber)
+        ?.takeIf { it in MIN_RECIPE_LIMIT..MAX_RECIPE_LIMIT }
+}
+
+internal fun requestedRecipeLimitTooHigh(request: String): Boolean {
+    val normalized = request
+        .trim()
+        .lowercase(Locale.US)
+        .replace(Regex("\\s+"), " ")
+
+    if (normalized.isBlank()) return false
+
+    val tokens = normalized
+        .split(Regex("[^a-z0-9]+"))
+        .filter { it.isNotBlank() }
+    val recipeWords = setOf("recipe", "recipes", "idea", "ideas", "meal", "meals")
+    val countIndexes = tokens.mapIndexedNotNull { index, token ->
+        recipeCountValue(token)?.let { count -> index to count }
+    }
+
+    val overLimitPattern = recipeCountTokenPattern()
+    val moreThanMatch = Regex("\\b(?:more\\s+than|over|above)\\s+$overLimitPattern\\b")
+        .find(normalized)
+        ?.groupValues
+        ?.getOrNull(1)
+        ?.let(::recipeCountValue)
+
+    if (moreThanMatch != null) {
+        return moreThanMatch >= MAX_RECIPE_LIMIT
+    }
+
+    if (countIndexes.any { (index, count) ->
+            count > MAX_RECIPE_LIMIT &&
+                    tokens.indices.any { otherIndex ->
+                        tokens[otherIndex] in recipeWords &&
+                                kotlin.math.abs(otherIndex - index) <= 3
+                    }
+        }
+    ) {
+        return true
+    }
+
+    if (countIndexes.any { (index, count) ->
+            count > MAX_RECIPE_LIMIT &&
+                    tokens.getOrNull(index + 1) in setOf("more", "another", "extra")
+        }
+    ) {
+        return true
+    }
+
+    val requestedCount = findRequestedRecipeCountToken(normalized)
+        ?.let(::recipeCountValue)
+
+    return requestedCount != null && requestedCount > MAX_RECIPE_LIMIT
+}
+
+private fun findRequestedRecipeCountToken(normalizedRequest: String): String? {
+    val numberPattern = recipeCountTokenPattern()
+    val recipeWords = "(recipe|recipes|idea|ideas|meal|meals)"
+
+    val directCountPatterns = listOf(
+        Regex("\\b(?:only|just|exactly)?\\s*$numberPattern\\s+(?:more\\s+)?$recipeWords\\b"),
+        Regex("\\b(?:give|show|make|suggest|need|want)\\s+(?:me\\s+)?(?:only\\s+|just\\s+|exactly\\s+)?$numberPattern\\s+(?:more\\s+)?$recipeWords\\b"),
+        Regex("\\b(?:only|just|exactly)\\s+$numberPattern\\b"),
+        Regex("\\b$numberPattern\\s+more\\b")
+    )
+
+    val matchedNumber = directCountPatterns
+        .asSequence()
+        .mapNotNull { pattern -> pattern.find(normalizedRequest)?.groupValues?.getOrNull(1) }
+        .firstOrNull()
+
+    return matchedNumber
+}
+
+private fun recipeCountTokenPattern(): String {
+    return "([0-9]+|one|two|three|four|five|six|seven|eight|nine|ten|single|couple)"
+}
+
+private fun recipeCountValue(token: String): Int? {
+    return token.toIntOrNull() ?: when (token) {
+        "one", "single" -> 1
+        "two", "couple" -> 2
+        "three" -> 3
+        "four" -> 4
+        "five" -> 5
+        "six" -> 6
+        "seven" -> 7
+        "eight" -> 8
+        "nine" -> 9
+        "ten" -> 10
+        else -> null
+    }
 }
 
 internal data class RecipeSuggestion(
@@ -82,6 +188,11 @@ internal object RecipeAiService {
         if (trimmedRequest.isBlank()) {
             throw RecipeAiException("Ask for a recipe first.")
         }
+        if (requestedRecipeLimitTooHigh(trimmedRequest)) {
+            throw RecipeAiException("Sorry, I can only give 1, 2, or 3 recipes at a time.")
+        }
+        val effectiveLimit = requestedRecipeLimit(trimmedRequest)
+            ?: limit.coerceIn(1, MAX_RECIPE_LIMIT)
 
         val cleanedPantryIngredients = sanitizeIngredients(pantryIngredients)
             .take(MAX_PANTRY_INGREDIENT_CONTEXT)
@@ -108,7 +219,9 @@ internal object RecipeAiService {
             }
         val effectiveRequest =
             if (wantsMoreFromPrevious) {
-                "Please suggest 3 more easy and quick recipes using the same food products as before."
+                "Please suggest $effectiveLimit more easy and quick ${
+                    if (effectiveLimit == 1) "recipe" else "recipes"
+                } using the same food products as before."
             } else {
                 trimmedRequest
             }
@@ -120,23 +233,26 @@ internal object RecipeAiService {
                 previousIngredients = effectivePreviousIngredients,
                 explicitRequestIngredients = explicitRequestIngredients,
                 contextId = contextId,
-                limit = limit.coerceIn(1, MAX_RECIPE_LIMIT)
+                limit = effectiveLimit
             ),
             responseMimeType = "application/json"
         )
 
-        parseRecipeSuggestionBatch(
+        val parsedBatch = parseRecipeSuggestionBatch(
             responseBody = responseBody,
             fallbackIngredients = explicitRequestIngredients.ifEmpty {
                 effectivePreviousIngredients.ifEmpty { effectivePantryIngredients }
             }
         )
+
+        parsedBatch.copy(recipes = parsedBatch.recipes.take(effectiveLimit))
     }
 
     suspend fun findRecipesByIngredients(
         ingredients: List<String>,
         limit: Int = DEFAULT_RECIPE_LIMIT
     ): List<RecipeSuggestion> = withContext(Dispatchers.IO) {
+        val effectiveLimit = limit.coerceIn(1, MAX_RECIPE_LIMIT)
         val cleanedIngredients = ingredients
             .map { it.trim() }
             .filter { it.isNotBlank() }
@@ -148,12 +264,12 @@ internal object RecipeAiService {
         val responseBody = generateContent(
             prompt = buildRecipeIdeasPrompt(
                 ingredients = cleanedIngredients,
-                limit = limit.coerceIn(1, MAX_RECIPE_LIMIT)
+                limit = effectiveLimit
             ),
             responseMimeType = "application/json"
         )
 
-        parseRecipeSuggestions(responseBody)
+        parseRecipeSuggestions(responseBody).take(effectiveLimit)
     }
 
     private fun generateContent(

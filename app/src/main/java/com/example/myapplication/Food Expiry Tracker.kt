@@ -97,6 +97,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -5976,7 +5977,7 @@ private fun RecipeChatBubble(
 ) {
     if (!isUser && !isError) {
         PantryListGlassCard(
-            modifier = modifier.animateContentSize(),
+            modifier = modifier,
             shape = RoundedCornerShape(25.dp)
         ) {
             Column(
@@ -6022,7 +6023,7 @@ private fun RecipeChatBubble(
         }
 
     Surface(
-        modifier = modifier.animateContentSize(),
+        modifier = modifier,
         shape = recipeChatBubbleShape(isUser),
         color = containerColor,
         contentColor = contentColor,
@@ -6039,7 +6040,10 @@ private fun RecipeChatBubble(
 }
 
 @Composable
-private fun RecipeSuggestionCard(recipe: RecipeSuggestion) {
+private fun RecipeSuggestionCard(
+    recipe: RecipeSuggestion,
+    modifier: Modifier = Modifier.fillMaxWidth()
+) {
     val scheme = MaterialTheme.colorScheme
     val isDarkTheme = scheme.background.luminance() < 0.5f
     val cardShape = RoundedCornerShape(22.dp)
@@ -6067,76 +6071,90 @@ private fun RecipeSuggestionCard(recipe: RecipeSuggestion) {
         if (isDarkTheme) scheme.onSurface.copy(alpha = 0.94f) else scheme.onSurface
     val secondaryTextColor =
         if (isDarkTheme) scheme.onSurfaceVariant.copy(alpha = 0.90f) else scheme.onSurfaceVariant
-
-    ExactFrostedPillCard(
-        modifier = Modifier.fillMaxWidth(),
-        shape = cardShape,
-        shadowElevation = if (isDarkTheme) 0.dp else 2.dp
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-        ) {
-            Box(
-                modifier = Modifier
-                    .matchParentSize()
-                    .clip(cardShape)
-                    .background(recipeCardOverlay)
-                    .border(1.dp, recipeCardBorder, cardShape)
+    val recipeCardBase =
+        if (isDarkTheme) {
+            listOf(
+                scheme.surfaceContainerHigh.copy(alpha = 0.98f),
+                scheme.surfaceContainer.copy(alpha = 0.92f)
             )
+        } else {
+            listOf(
+                Color.White.copy(alpha = 0.98f),
+                scheme.surfaceContainerLowest.copy(alpha = 0.92f)
+            )
+        }
+    val recipeCardGlow = scheme.primary.copy(alpha = if (isDarkTheme) 0.055f else 0.04f)
 
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(15.dp)
-            ) {
-                Text(
-                    text = recipe.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = titleColor
+    Box(
+        modifier = modifier
+            .clip(cardShape)
+            .drawWithCache {
+                val baseBrush = Brush.verticalGradient(recipeCardBase)
+                val glowBrush = Brush.linearGradient(
+                    colors = listOf(recipeCardGlow, Color.Transparent),
+                    start = Offset.Zero,
+                    end = Offset(size.width * 0.92f, size.height * 0.72f)
                 )
 
-                val usesLine = compactIngredientSummary(recipe.usedIngredients, maxVisible = 5)
-                if (usesLine.isNotBlank()) {
-                    Spacer(Modifier.height(10.dp))
-                    RecipeInfoLine(
-                        label = "Uses",
-                        text = usesLine,
-                        labelColor = usesLabelColor,
-                        textColor = mainTextColor
-                    )
+                onDrawBehind {
+                    drawRect(baseBrush)
+                    drawRect(glowBrush)
                 }
+            }
+            .background(recipeCardOverlay, cardShape)
+            .border(1.dp, recipeCardBorder, cardShape)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(15.dp)
+        ) {
+            Text(
+                text = recipe.title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = titleColor
+            )
 
-                val addLine = compactIngredientSummary(recipe.missedIngredients, maxVisible = 3)
-                if (addLine.isNotBlank()) {
-                    Spacer(Modifier.height(6.dp))
-                    RecipeInfoLine(
-                        label = "Add",
-                        text = addLine,
-                        labelColor = addLabelColor,
-                        textColor = secondaryTextColor
-                    )
-                }
+            val usesLine = compactIngredientSummary(recipe.usedIngredients, maxVisible = 5)
+            if (usesLine.isNotBlank()) {
+                Spacer(Modifier.height(10.dp))
+                RecipeInfoLine(
+                    label = "Uses",
+                    text = usesLine,
+                    labelColor = usesLabelColor,
+                    textColor = mainTextColor
+                )
+            }
 
-                if (recipe.quickGuide.isNotEmpty()) {
-                    Spacer(Modifier.height(12.dp))
-                    RecipeInfoLine(
-                        label = "How",
-                        text = "Quick steps",
-                        labelColor = howLabelColor,
-                        textColor = mainTextColor
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                        recipe.quickGuide.forEachIndexed { index, step ->
-                            RecipeStepLine(
-                                index = index + 1,
-                                text = step,
-                                accentColor = howLabelColor,
-                                textColor = secondaryTextColor
-                            )
-                        }
+            val addLine = compactIngredientSummary(recipe.missedIngredients, maxVisible = 3)
+            if (addLine.isNotBlank()) {
+                Spacer(Modifier.height(6.dp))
+                RecipeInfoLine(
+                    label = "Add",
+                    text = addLine,
+                    labelColor = addLabelColor,
+                    textColor = secondaryTextColor
+                )
+            }
+
+            if (recipe.quickGuide.isNotEmpty()) {
+                Spacer(Modifier.height(12.dp))
+                RecipeInfoLine(
+                    label = "How",
+                    text = "Quick steps",
+                    labelColor = howLabelColor,
+                    textColor = mainTextColor
+                )
+                Spacer(Modifier.height(8.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    recipe.quickGuide.forEachIndexed { index, step ->
+                        RecipeStepLine(
+                            index = index + 1,
+                            text = step,
+                            accentColor = howLabelColor,
+                            textColor = secondaryTextColor
+                        )
                     }
                 }
             }
@@ -6155,17 +6173,18 @@ private fun RecipeInfoLine(
         verticalAlignment = Alignment.Top,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Surface(
-            shape = RoundedCornerShape(50.dp),
-            color = labelColor.copy(alpha = 0.14f),
-            contentColor = labelColor,
-            border = BorderStroke(1.dp, labelColor.copy(alpha = 0.22f))
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(50.dp))
+                .background(labelColor.copy(alpha = 0.14f))
+                .border(1.dp, labelColor.copy(alpha = 0.22f), RoundedCornerShape(50.dp))
         ) {
             Text(
                 text = label,
                 modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp),
                 style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.SemiBold
+                fontWeight = FontWeight.SemiBold,
+                color = labelColor
             )
         }
 
@@ -6189,20 +6208,22 @@ private fun RecipeStepLine(
         verticalAlignment = Alignment.Top,
         horizontalArrangement = Arrangement.spacedBy(9.dp)
     ) {
-        Surface(
-            modifier = Modifier.padding(top = 2.dp),
-            shape = RoundedCornerShape(50.dp),
-            color = accentColor.copy(alpha = 0.13f),
-            contentColor = accentColor
+        Box(
+            modifier = Modifier
+                .padding(top = 2.dp)
+                .width(24.dp)
+                .clip(RoundedCornerShape(50.dp))
+                .background(accentColor.copy(alpha = 0.13f)),
+            contentAlignment = Alignment.Center
         ) {
             Text(
                 text = index.toString(),
                 modifier = Modifier
-                    .width(24.dp)
                     .padding(vertical = 2.dp),
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.SemiBold,
-                textAlign = TextAlign.Center
+                textAlign = TextAlign.Center,
+                color = accentColor
             )
         }
 
@@ -6216,20 +6237,27 @@ private fun RecipeStepLine(
 }
 
 @Composable
-private fun RecipeFollowUpHint() {
+private fun RecipeFollowUpHint(
+    modifier: Modifier = Modifier.fillMaxWidth()
+) {
     val scheme = MaterialTheme.colorScheme
     val isDarkTheme = scheme.background.luminance() < 0.5f
     val hintColor = scheme.primary.copy(alpha = if (isDarkTheme) 0.92f else 0.78f)
 
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
-        color = hintColor.copy(alpha = if (isDarkTheme) 0.12f else 0.08f),
-        contentColor = hintColor,
-        border = BorderStroke(1.dp, hintColor.copy(alpha = if (isDarkTheme) 0.24f else 0.18f))
+    Box(
+        modifier = modifier,
+        contentAlignment = Alignment.CenterStart
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+            modifier = Modifier
+                .clip(RoundedCornerShape(18.dp))
+                .background(hintColor.copy(alpha = if (isDarkTheme) 0.12f else 0.08f))
+                .border(
+                    1.dp,
+                    hintColor.copy(alpha = if (isDarkTheme) 0.24f else 0.18f),
+                    RoundedCornerShape(18.dp)
+                )
+                .padding(horizontal = 12.dp, vertical = 9.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
@@ -6250,7 +6278,10 @@ private fun RecipeFollowUpHint() {
 }
 
 @Composable
-private fun RecipeAssistantMessageCard(message: RecipeChatMessage) {
+private fun RecipeAssistantTextCard(
+    message: RecipeChatMessage,
+    modifier: Modifier = Modifier
+) {
     val scheme = MaterialTheme.colorScheme
     val isDarkTheme = scheme.background.luminance() < 0.5f
     val headlineColor =
@@ -6258,48 +6289,44 @@ private fun RecipeAssistantMessageCard(message: RecipeChatMessage) {
             scheme.primary.copy(alpha = 0.94f)
         } else {
             LocalContentColor.current
-        }
+    }
 
     RecipeChatMessageRow(isUser = false) { bubbleModifier ->
-        if (message.recipes.isNotEmpty()) {
-            Column(
-                modifier = bubbleModifier.animateContentSize(),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                RecipeChatBubble(
-                    modifier = Modifier.fillMaxWidth(),
-                    isUser = false,
-                    isError = message.isError
-                ) {
-                    Text(
-                        text = message.text,
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = headlineColor,
-                        fontWeight = if (message.isError) FontWeight.Normal else FontWeight.Medium
-                    )
-                }
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    message.recipes.forEach { recipe ->
-                        RecipeSuggestionCard(recipe)
-                    }
-                }
-                RecipeFollowUpHint()
-            }
-        } else {
-            RecipeChatBubble(
-                modifier = bubbleModifier,
-                isUser = false,
-                isError = message.isError
-            ) {
-                Text(
-                    text = message.text,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = headlineColor,
-                    fontWeight = if (message.isError) FontWeight.Normal else FontWeight.Medium
-                )
-            }
+        RecipeChatBubble(
+            modifier = bubbleModifier.then(modifier),
+            isUser = false,
+            isError = message.isError
+        ) {
+            Text(
+                text = message.text,
+                style = MaterialTheme.typography.bodyLarge,
+                color = headlineColor,
+                fontWeight = if (message.isError) FontWeight.Normal else FontWeight.Medium
+            )
         }
     }
+}
+
+@Composable
+private fun RecipeAssistantRecipeCard(recipe: RecipeSuggestion) {
+    RecipeChatMessageRow(isUser = false) { bubbleModifier ->
+        RecipeSuggestionCard(
+            recipe = recipe,
+            modifier = bubbleModifier
+        )
+    }
+}
+
+@Composable
+private fun RecipeAssistantFollowUpHintCard() {
+    RecipeChatMessageRow(isUser = false) { bubbleModifier ->
+        RecipeFollowUpHint(modifier = bubbleModifier)
+    }
+}
+
+@Composable
+private fun RecipeAssistantMessageCard(message: RecipeChatMessage) {
+    RecipeAssistantTextCard(message)
 }
 
 @Composable
@@ -6322,6 +6349,95 @@ private fun RecipeLoadingCard() {
                     style = MaterialTheme.typography.bodyLarge
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun RecipeJumpToBottomButton(
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    val scheme = MaterialTheme.colorScheme
+    val isDarkTheme = scheme.background.luminance() < 0.5f
+    val containerColor =
+        if (isDarkTheme) {
+            scheme.surfaceContainerHighest.copy(alpha = 0.88f)
+        } else {
+            Color.White.copy(alpha = 0.94f)
+        }
+    val borderColor = scheme.outlineVariant.copy(alpha = if (isDarkTheme) 0.78f else 0.58f)
+
+    GlassSurface(
+        modifier = modifier
+            .size(42.dp)
+            .clip(RoundedCornerShape(50))
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(50),
+        tone = GlassTone.CHROME,
+        containerColor = containerColor,
+        borderColor = borderColor,
+        showDecorativeOverlays = false,
+        shadowElevation = 2.dp
+    ) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.KeyboardArrowDown,
+                contentDescription = "Go to latest recipe message",
+                tint = scheme.onSurface.copy(alpha = 0.86f),
+                modifier = Modifier.size(22.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun RecipeNewChatButton(
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    val scheme = MaterialTheme.colorScheme
+    val isDarkTheme = scheme.background.luminance() < 0.5f
+    val containerColor =
+        if (isDarkTheme) {
+            scheme.surfaceContainerHighest.copy(alpha = 0.86f)
+        } else {
+            Color.White.copy(alpha = 0.92f)
+        }
+    val borderColor = scheme.outlineVariant.copy(alpha = if (isDarkTheme) 0.72f else 0.54f)
+
+    GlassSurface(
+        modifier = modifier
+            .clip(RoundedCornerShape(50.dp))
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(50.dp),
+        tone = GlassTone.CHROME,
+        containerColor = containerColor,
+        borderColor = borderColor,
+        showDecorativeOverlays = false,
+        shadowElevation = 2.dp
+    ) {
+        Row(
+            modifier = Modifier
+                .padding(horizontal = 12.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Add,
+                contentDescription = "Start new AI chat",
+                tint = scheme.primary.copy(alpha = 0.88f),
+                modifier = Modifier.size(17.dp)
+            )
+            Text(
+                text = "New chat",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = scheme.onSurface.copy(alpha = 0.88f)
+            )
         }
     }
 }
@@ -6423,20 +6539,12 @@ private fun RecipePromptBar(
                     .clickable(enabled = sendEnabled, onClick = onSend),
                 contentAlignment = Alignment.Center
             ) {
-                if (isLoading) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(14.dp),
-                        strokeWidth = 2.dp,
-                        color = sendButtonContentColor
-                    )
-                } else {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                        contentDescription = "Send recipe request",
-                        tint = sendButtonContentColor,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                    contentDescription = "Send recipe request",
+                    tint = sendButtonContentColor,
+                    modifier = Modifier.size(18.dp)
+                )
             }
         }
     }
@@ -6475,6 +6583,10 @@ private fun RecipeScreen(
 
     var promptText by rememberSaveable { mutableStateOf("") }
     var isLoading by rememberSaveable { mutableStateOf(false) }
+    var pendingLatestMessageScroll by remember { mutableIntStateOf(0) }
+    var aiRequestVersion by remember { mutableIntStateOf(0) }
+    var showJumpToBottom by remember { mutableStateOf(false) }
+    var showNewChatDialog by rememberSaveable { mutableStateOf(false) }
     val expiringPromptDismissed = sessionState.expiringPromptDismissed
     val messagesJson = sessionState.messagesJson
     val previousIngredientsJson = sessionState.previousIngredientsJson
@@ -6508,10 +6620,17 @@ private fun RecipeScreen(
         }
     }
     val showExpiringPrompt = soonExpiringFoods.isNotEmpty() && !expiringPromptDismissed
+    val visibleMessageItemCount = messages.sumOf { message ->
+        if (message.role == RecipeChatRole.ASSISTANT && message.recipes.isNotEmpty()) {
+            message.recipes.size + 2
+        } else {
+            1
+        }
+    }
     val totalVisibleItems =
         (if (showExpiringPrompt) 1 else 0) +
         (if (messages.isEmpty()) 1 else 0) +
-        messages.size +
+        visibleMessageItemCount +
         (if (isLoading) 1 else 0)
     val recipeListBottomPadding = 176.dp
 
@@ -6530,9 +6649,30 @@ private fun RecipeScreen(
         onDispose { sharedPrefs.unregisterOnSharedPreferenceChangeListener(listener) }
     }
 
-    LaunchedEffect(totalVisibleItems, messagesJson, isLoading) {
-        if (messages.isNotEmpty() || isLoading) {
-            listState.animateScrollToItem((totalVisibleItems - 1).coerceAtLeast(0))
+    LaunchedEffect(pendingLatestMessageScroll) {
+        if (pendingLatestMessageScroll > 0) {
+            val measuredLastItemIndex = listState.layoutInfo.totalItemsCount - 1
+            val lastItemIndex = if (measuredLastItemIndex >= 0) {
+                measuredLastItemIndex
+            } else {
+                (totalVisibleItems - 1).coerceAtLeast(0)
+            }
+            listState.scrollToItem(lastItemIndex, Int.MAX_VALUE)
+        }
+    }
+
+    LaunchedEffect(listState) {
+        snapshotFlow {
+            listState.isScrollInProgress to listState.canScrollForward
+        }.collectLatest { (isScrolling, canJumpToBottom) ->
+            when {
+                !canJumpToBottom -> showJumpToBottom = false
+                isScrolling -> showJumpToBottom = true
+                else -> {
+                    delay(1600)
+                    showJumpToBottom = false
+                }
+            }
         }
     }
 
@@ -6544,12 +6684,45 @@ private fun RecipeScreen(
         sessionState.previousIngredientsJson = gson.toJson(updated)
     }
 
+    fun resetRecipeAi() {
+        aiRequestVersion += 1
+        isLoading = false
+        promptText = ""
+        showJumpToBottom = false
+        sessionState.messagesJson = "[]"
+        sessionState.previousIngredientsJson = "[]"
+        sessionState.expiringPromptDismissed = false
+        sessionState.conversationId = "recipe-session-${System.currentTimeMillis()}"
+        keyboard?.hide()
+        scope.launch {
+            listState.scrollToItem(0)
+        }
+    }
+
     fun sendRecipePrompt(
         rawRequest: String,
         useExpiringFoods: Boolean = false
     ) {
         val trimmed = rawRequest.trim()
         if (trimmed.isBlank() || isLoading) return
+
+        if (!useExpiringFoods && requestedRecipeLimitTooHigh(trimmed)) {
+            val tooManyRecipeMessages = messages +
+                RecipeChatMessage(
+                    role = RecipeChatRole.USER,
+                    text = trimmed
+                ) +
+                RecipeChatMessage(
+                    role = RecipeChatRole.ASSISTANT,
+                    text = "Sorry, I can only give 1, 2, or 3 recipes at a time.",
+                    isError = true
+                )
+            persistMessages(tooManyRecipeMessages)
+            promptText = ""
+            keyboard?.hide()
+            pendingLatestMessageScroll += 1
+            return
+        }
 
         val wantsMoreFromPrevious =
             !useExpiringFoods && previousIngredients.isNotEmpty() && wantsMoreRecipeIdeas(trimmed)
@@ -6580,12 +6753,15 @@ private fun RecipeScreen(
             persistMessages(invalidMessages)
             promptText = ""
             keyboard?.hide()
+            pendingLatestMessageScroll += 1
             return
         }
 
         val frozenExpiringFoods = soonExpiringFoods
         val frozenPantryIngredients = pantryIngredientNames
         val useFullPantryList = !useExpiringFoods && wantsRecipesFromPantryList(trimmed)
+        val requestedLimit = requestedRecipeLimit(trimmed) ?: 3
+        val requestedRecipeWord = if (requestedLimit == 1) "recipe" else "recipes"
 
         if (useFullPantryList && frozenPantryIngredients.isEmpty()) {
             val emptyPantryMessages = messages +
@@ -6601,15 +6777,16 @@ private fun RecipeScreen(
             persistMessages(emptyPantryMessages)
             promptText = ""
             keyboard?.hide()
+            pendingLatestMessageScroll += 1
             return
         }
 
         val requestText = if (useExpiringFoods) {
             buildExpiringFoodsRequest(frozenExpiringFoods)
         } else if (useFullPantryList) {
-            "Please suggest 3 easy and quick recipes using foods from my pantry list."
+            "Please suggest $requestedLimit easy and quick $requestedRecipeWord using foods from my pantry list."
         } else if (wantsMoreFromPrevious) {
-            "Please suggest 3 more easy and quick recipes using the same food products as before."
+            "Please suggest $requestedLimit more easy and quick $requestedRecipeWord using the same food products as before."
         } else {
             trimmed
         }
@@ -6633,13 +6810,16 @@ private fun RecipeScreen(
         }
 
         isLoading = true
+        aiRequestVersion += 1
+        val requestVersion = aiRequestVersion
+        pendingLatestMessageScroll += 1
 
         scope.launch {
             val result = runCatching {
                 if (useExpiringFoods) {
                     val recipes = RecipeAiService.findRecipesByIngredients(
                         ingredients = frozenExpiringFoods.map { it.name },
-                        limit = 3
+                        limit = requestedLimit
                     )
                     RecipeSuggestionBatch(
                         resolvedIngredients = frozenExpiringFoods.map { it.name },
@@ -6651,7 +6831,7 @@ private fun RecipeScreen(
                         pantryIngredients = frozenPantryIngredients,
                         previousIngredients = previousIngredients,
                         contextId = conversationId,
-                        limit = 3
+                        limit = requestedLimit
                     )
                 }
             }
@@ -6672,6 +6852,8 @@ private fun RecipeScreen(
                     )
                 }
             )
+
+            if (requestVersion != aiRequestVersion) return@launch
 
             persistMessages(baselineMessages + assistantMessage)
             isLoading = false
@@ -6697,7 +6879,10 @@ private fun RecipeScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 if (showExpiringPrompt) {
-                    item {
+                    item(
+                        key = "ai-expiring-prompt",
+                        contentType = "ai-expiring-prompt"
+                    ) {
                         ExpiringFoodsPromptCard(
                             foods = soonExpiringFoods,
                             windowDays = AI_EXPIRING_FOOD_WINDOW_DAYS,
@@ -6713,22 +6898,129 @@ private fun RecipeScreen(
                 }
 
                 if (messages.isEmpty()) {
-                    item {
+                    item(
+                        key = "ai-intro-card",
+                        contentType = "ai-intro-card"
+                    ) {
                         RecipeIntroCard(hasPantryFoods = pantryFoods.isNotEmpty())
                     }
                 }
 
-                items(messages) { message ->
+                messages.forEachIndexed { messageIndex, message ->
                     when (message.role) {
-                        RecipeChatRole.USER -> RecipeUserMessageCard(message.text)
-                        RecipeChatRole.ASSISTANT -> RecipeAssistantMessageCard(message)
+                        RecipeChatRole.USER -> {
+                            item(
+                                key = "recipe-message-$messageIndex-${message.role}-${message.text.hashCode()}",
+                                contentType = "recipe-user-message"
+                            ) {
+                                RecipeUserMessageCard(message.text)
+                            }
+                        }
+
+                        RecipeChatRole.ASSISTANT -> {
+                            if (message.recipes.isEmpty()) {
+                                item(
+                                    key = "recipe-message-$messageIndex-${message.role}-${message.text.hashCode()}",
+                                    contentType = "recipe-assistant-text"
+                                ) {
+                                    RecipeAssistantMessageCard(message)
+                                }
+                            } else {
+                                item(
+                                    key = "recipe-message-$messageIndex-${message.role}-${message.text.hashCode()}",
+                                    contentType = "recipe-assistant-text"
+                                ) {
+                                    RecipeAssistantTextCard(message)
+                                }
+
+                                itemsIndexed(
+                                    items = message.recipes,
+                                    key = { recipeIndex, recipe ->
+                                        "recipe-card-$messageIndex-$recipeIndex-${recipe.title.hashCode()}"
+                                    },
+                                    contentType = { _, _ -> "recipe-card" }
+                                ) { _, recipe ->
+                                    RecipeAssistantRecipeCard(recipe)
+                                }
+
+                                item(
+                                    key = "recipe-follow-up-$messageIndex-${message.text.hashCode()}",
+                                    contentType = "recipe-follow-up"
+                                ) {
+                                    RecipeAssistantFollowUpHintCard()
+                                }
+                            }
+                        }
                     }
                 }
 
                 if (isLoading) {
-                    item {
+                    item(
+                        key = "recipe-loading",
+                        contentType = "recipe-loading"
+                    ) {
                         RecipeLoadingCard()
                     }
+                }
+            }
+
+            AnimatedVisibility(
+                visible = messages.isNotEmpty() || isLoading,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 10.dp, end = 2.dp),
+                enter = fadeIn(animationSpec = tween(140)) +
+                        scaleIn(
+                            initialScale = 0.92f,
+                            animationSpec = tween(160, easing = LinearOutSlowInEasing)
+                        ),
+                exit = fadeOut(animationSpec = tween(120)) +
+                        scaleOut(
+                            targetScale = 0.92f,
+                            animationSpec = tween(140, easing = FastOutLinearInEasing)
+                        )
+            ) {
+                RecipeNewChatButton(onClick = { showNewChatDialog = true })
+            }
+
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = recipePromptBarBottomPadding + 88.dp)
+            ) {
+                AnimatedVisibility(
+                    visible = showJumpToBottom,
+                    enter = fadeIn(animationSpec = tween(140)) +
+                            slideInVertically(
+                                animationSpec = tween(180, easing = LinearOutSlowInEasing)
+                            ) { it / 2 } +
+                            scaleIn(
+                                initialScale = 0.92f,
+                                animationSpec = tween(180, easing = LinearOutSlowInEasing)
+                            ),
+                    exit = fadeOut(animationSpec = tween(120)) +
+                            slideOutVertically(
+                                animationSpec = tween(180, easing = FastOutLinearInEasing)
+                            ) { it } +
+                            scaleOut(
+                                targetScale = 0.92f,
+                                animationSpec = tween(180, easing = FastOutLinearInEasing)
+                            )
+                ) {
+                    RecipeJumpToBottomButton(
+                        onClick = {
+                            showJumpToBottom = false
+                            scope.launch {
+                                val measuredLastItemIndex = listState.layoutInfo.totalItemsCount - 1
+                                val lastItemIndex = if (measuredLastItemIndex >= 0) {
+                                    measuredLastItemIndex
+                                } else {
+                                    (totalVisibleItems - 1).coerceAtLeast(0)
+                                }
+                                listState.scrollToItem(lastItemIndex, Int.MAX_VALUE)
+                            }
+                        }
+                    )
                 }
             }
 
@@ -6752,6 +7044,33 @@ private fun RecipeScreen(
                 }
             }
         }
+    }
+
+    if (showNewChatDialog) {
+        GlassAlertDialog(
+            onDismissRequest = { showNewChatDialog = false },
+            title = { DialogTitleText("New chat?") },
+            text = {
+                DialogBodyText(
+                    "If you create a new chat, all the current recipes in this chat will be gone. Are you sure you want to start a new chat?"
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showNewChatDialog = false
+                        resetRecipeAi()
+                    }
+                ) {
+                    Text("New chat")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showNewChatDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }
 
