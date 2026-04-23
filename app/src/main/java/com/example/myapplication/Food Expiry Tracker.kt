@@ -3319,6 +3319,32 @@ fun CompactSearchBar(
 }
 
 @Composable
+private fun CategoryPillsLabel() {
+    val labelColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.78f)
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp)
+    ) {
+        Icon(
+            imageVector = Icons.Default.Category,
+            contentDescription = null,
+            tint = labelColor,
+            modifier = Modifier.size(14.dp)
+        )
+        Text(
+            text = "Categories",
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = labelColor
+        )
+    }
+}
+
+@Composable
 private fun CategoryChip(
     text: String,
     selected: Boolean,
@@ -4160,9 +4186,9 @@ fun MyPantryTopBar(
                     exit = smoothVerticalRevealExit()
                 ) {
                     Column {
-                        if (!showSearchBar) {
-                            Spacer(Modifier.height(10.dp))
-                        }
+                        Spacer(Modifier.height(if (showSearchBar) 4.dp else 10.dp))
+                        CategoryPillsLabel()
+                        Spacer(Modifier.height(7.dp))
 
                         LazyRow(
                             state = categoryRowState,
@@ -5790,7 +5816,7 @@ private fun isSingleFoodLikeRequest(
 }
 
 private fun recipePromptPlaceholder(): String {
-    return "Give any food like eggs, rice, milk..."
+    return "Give me any foods like eggs, rice, milk..."
 }
 
 private fun buildExpiringFoodsRequest(expiringFoods: List<ExpiringFoodHint>): String {
@@ -6525,7 +6551,14 @@ private fun RecipeScreen(
         val trimmed = rawRequest.trim()
         if (trimmed.isBlank() || isLoading) return
 
-        if (!useExpiringFoods && !looksFoodRelatedRecipeRequest(trimmed, pantryIngredientNames)) {
+        val wantsMoreFromPrevious =
+            !useExpiringFoods && previousIngredients.isNotEmpty() && wantsMoreRecipeIdeas(trimmed)
+
+        if (
+            !useExpiringFoods &&
+            !wantsMoreFromPrevious &&
+            !looksFoodRelatedRecipeRequest(trimmed, pantryIngredientNames)
+        ) {
             val invalidPromptMessage =
                 if (isSingleFoodLikeRequest(trimmed, pantryIngredientNames)) {
                     "Can you give me some more foods?"
@@ -6575,6 +6608,8 @@ private fun RecipeScreen(
             buildExpiringFoodsRequest(frozenExpiringFoods)
         } else if (useFullPantryList) {
             "Please suggest 3 easy and quick recipes using foods from my pantry list."
+        } else if (wantsMoreFromPrevious) {
+            "Please suggest 3 more easy and quick recipes using the same food products as before."
         } else {
             trimmed
         }
@@ -6582,7 +6617,7 @@ private fun RecipeScreen(
         val userMessage = RecipeChatMessage(
             role = RecipeChatRole.USER,
             text = if (useExpiringFoods) {
-                "Use my foods expiring soon."
+                "Use foods in my list that are expiring soon."
             } else {
                 trimmed
             }

@@ -11,13 +11,48 @@ import java.nio.charset.StandardCharsets
 import java.util.Locale
 
 private const val GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
-private const val GEMINI_MODEL = "gemini-2.5-flash-lite"
-private const val GEMINI_TIMEOUT_MS = 9000
+private const val GEMINI_MODEL = "gemini-3.1-flash-lite-preview"
+private const val GEMINI_TIMEOUT_MS = 30000
 private const val DEFAULT_RECIPE_LIMIT = 3
 private const val MAX_RECIPE_LIMIT = 3
 private const val MAX_RECIPE_STEPS = 5
 private const val MAX_PANTRY_INGREDIENT_CONTEXT = 30
 private const val MAX_DIRECT_INGREDIENT_CONTEXT = 14
+
+internal fun wantsMoreRecipeIdeas(request: String): Boolean {
+    val normalized = request
+        .trim()
+        .lowercase(Locale.US)
+        .replace(Regex("\\s+"), " ")
+
+    if (normalized.isBlank()) return false
+
+    val tokens = normalized
+        .split(Regex("[^a-z0-9]+"))
+        .filter { it.isNotBlank() }
+
+    val compact = tokens.joinToString("")
+    val hasMoreIntent = tokens.any { token ->
+        token in setOf("more", "another", "again", "next", "extra", "same", "previous", "those")
+    } || compact.contains("somemore") ||
+            compact.contains("givemore") ||
+            compact.contains("needmore") ||
+            compact.contains("wantmore") ||
+            compact.contains("anotherone")
+
+    if (!hasMoreIntent) return false
+
+    val hasRecipeFollowUpTone = tokens.any { token ->
+        token in setOf(
+            "recipe", "recipes", "idea", "ideas", "meal", "meals",
+            "give", "make", "show", "suggest", "need", "want", "please"
+        )
+    } || compact.contains("canyou") ||
+            compact.contains("couldyou") ||
+            compact.contains("wouldyou")
+
+    return hasRecipeFollowUpTone || tokens.size <= 4
+}
 
 internal data class RecipeSuggestion(
     val title: String,
@@ -51,19 +86,36 @@ internal object RecipeAiService {
         val cleanedPantryIngredients = sanitizeIngredients(pantryIngredients)
             .take(MAX_PANTRY_INGREDIENT_CONTEXT)
         val cleanedPreviousIngredients = sanitizeIngredients(previousIngredients).take(8)
-        val explicitRequestIngredients = extractExplicitRequestIngredients(trimmedRequest).take(8)
+        val wantsMoreFromPrevious =
+            cleanedPreviousIngredients.isNotEmpty() && wantsMoreRecipeIdeas(trimmedRequest)
+        val explicitRequestIngredients =
+            if (wantsMoreFromPrevious) {
+                emptyList()
+            } else {
+                extractExplicitRequestIngredients(trimmedRequest).take(8)
+            }
         val effectivePantryIngredients =
-            explicitRequestIngredients.ifEmpty { cleanedPantryIngredients }
+            if (wantsMoreFromPrevious) {
+                cleanedPreviousIngredients
+            } else {
+                explicitRequestIngredients.ifEmpty { cleanedPantryIngredients }
+            }
         val effectivePreviousIngredients =
             if (explicitRequestIngredients.isNotEmpty()) {
                 emptyList()
             } else {
                 cleanedPreviousIngredients
             }
+        val effectiveRequest =
+            if (wantsMoreFromPrevious) {
+                "Please suggest 3 more easy and quick recipes using the same food products as before."
+            } else {
+                trimmedRequest
+            }
 
         val responseBody = generateContent(
             prompt = buildRecipeRequestPrompt(
-                request = trimmedRequest,
+                request = effectiveRequest,
                 pantryIngredients = effectivePantryIngredients,
                 previousIngredients = effectivePreviousIngredients,
                 explicitRequestIngredients = explicitRequestIngredients,
@@ -149,9 +201,9 @@ internal object RecipeAiService {
             return body
         } catch (error: RecipeAiException) {
             throw error
-        } catch (_: Exception) {
+        } catch (error: Exception) {
             throw RecipeAiException(
-                "I couldn't reach the food assistant right now. Check your internet connection and try again."
+                "I couldn't reach the food assistant right now: ${error.message ?: error.javaClass.simpleName}"
             )
         } finally {
             connection.disconnect()
@@ -184,6 +236,12 @@ internal object RecipeAiService {
                 addProperty("temperature", 0.4)
                 addProperty("topP", 0.9)
                 responseMimeType?.let { addProperty("responseMimeType", it) }
+                add(
+                    "thinkingConfig",
+                    JsonObject().apply {
+                        addProperty("thinkingLevel", "minimal")
+                    }
+                )
             }
         )
 
