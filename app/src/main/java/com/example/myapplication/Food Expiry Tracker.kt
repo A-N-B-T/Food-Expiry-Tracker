@@ -35,7 +35,6 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -127,7 +126,6 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Person
@@ -942,11 +940,13 @@ private fun SelectionControlsWarmup() {
 }
 
 @Composable
-private fun HomeAddFloatingActionButton(
+private fun HomeFloatingButtons(
     visible: Boolean,
     modifier: Modifier = Modifier,
-    onPositioned: ((Rect) -> Unit)? = null,
-    onClick: () -> Unit
+    onAddPositioned: ((Rect) -> Unit)? = null,
+    onAiPositioned: ((Rect) -> Unit)? = null,
+    onAddClick: () -> Unit,
+    onAiClick: () -> Unit
 ) {
     val density = LocalDensity.current
     val imeInsets = WindowInsets.ime
@@ -974,18 +974,34 @@ private fun HomeAddFloatingActionButton(
     ) {
         val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
 
-        EditCategoriesStyledFab(
-            onClick = onClick,
-            icon = Icons.Default.Add,
-            contentDescription = "Add",
-            backgroundTint = MaterialTheme.colorScheme.primary,
-            iconTint = MaterialTheme.colorScheme.onPrimary,
-            tintAlpha = if (isDarkTheme) 0.76f else 0.62f,
-            onPositioned = onPositioned,
+        Column(
             modifier = Modifier
-                .padding(bottom = 90.dp)
-                .then(modifier)
-        )
+                .padding(bottom = 75.dp)
+                .then(modifier),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            EditCategoriesStyledFab(
+                onClick = onAddClick,
+                icon = Icons.Default.Add,
+                contentDescription = "Add",
+                backgroundTint = MaterialTheme.colorScheme.primary,
+                iconTint = MaterialTheme.colorScheme.onPrimary,
+                tintAlpha = if (isDarkTheme) 0.76f else 0.62f,
+                onPositioned = onAddPositioned
+            )
+
+            EditCategoriesStyledFab(
+                onClick = onAiClick,
+                icon = Icons.Default.AutoAwesome,
+                contentDescription = "Food AI",
+                backgroundTint = MaterialTheme.colorScheme.primary,
+                iconTint = MaterialTheme.colorScheme.onPrimary,
+                tintAlpha = if (isDarkTheme) 0.72f else 0.54f,
+                onPositioned = onAiPositioned,
+                fabSize = 42.dp
+            )
+        }
     }
 }
 
@@ -998,7 +1014,8 @@ private fun EditCategoriesStyledFab(
     iconTint: Color,
     modifier: Modifier = Modifier,
     tintAlpha: Float = 0.62f,
-    onPositioned: ((Rect) -> Unit)? = null
+    onPositioned: ((Rect) -> Unit)? = null,
+    fabSize: Dp = 50.dp
 ) {
     val shape = RoundedCornerShape(50.dp)
     val positionedModifier =
@@ -1012,7 +1029,7 @@ private fun EditCategoriesStyledFab(
 
     EditCategoriesBackgroundSurface(
         modifier = modifier
-            .size(50.dp)
+            .size(fabSize)
             .then(positionedModifier)
             .clip(shape)
             .clickable(onClick = onClick),
@@ -1313,7 +1330,7 @@ private val firstLaunchOnboardingSteps = listOf(
     OnboardingStep(
         target = OnboardingSpotlightTarget.AI_TAB,
         title = "Food AI",
-        body = "Use AI to get recipe ideas and quick help from foods you already have."
+        body = "Tap this sparkle shortcut to open Food AI and get recipe ideas from your foods."
     ),
     OnboardingStep(
         target = OnboardingSpotlightTarget.PROFILE_TAB,
@@ -4579,12 +4596,6 @@ private val bottomBarItems = listOf(
         unselectedIcon = Icons.Outlined.History
     ),
     BottomBarItem(
-        route = Route.Recipe.r,
-        label = "AI",
-        selectedIcon = Icons.Filled.AutoAwesome,
-        unselectedIcon = Icons.Outlined.AutoAwesome
-    ),
-    BottomBarItem(
         route = Route.Profile.r,
         label = "Profile",
         selectedIcon = Icons.Filled.Person,
@@ -4625,6 +4636,7 @@ fun AppNav(
     var showForm by rememberSaveable { mutableStateOf(false) }
     var blurBackgroundForOverlay by rememberSaveable { mutableStateOf(false) }
     var hideBottomBar by rememberSaveable { mutableStateOf(false) }
+    var aiImmersiveMode by rememberSaveable { mutableStateOf(false) }
     var showFirstLaunchOnboarding by rememberSaveable {
         mutableStateOf(shouldShowFirstLaunchOnboarding(appContext))
     }
@@ -4650,6 +4662,33 @@ fun AppNav(
     LaunchedEffect(appContext) {
         applyAutoDeleteRulesOnAppLoad(appContext)
     }
+    LaunchedEffect(current) {
+        if (current != Route.Recipe.r && aiImmersiveMode) {
+            aiImmersiveMode = false
+        }
+        if (current != Route.Recipe.r) {
+        }
+    }
+
+    val shouldHideBottomBar =
+        (current == Route.Home.r && hideBottomBar) ||
+            (current == Route.Recipe.r && aiImmersiveMode)
+    val bottomBarOffset by animateDpAsState(
+        targetValue = if (shouldHideBottomBar) 136.dp else 0.dp,
+        animationSpec = tween(
+            durationMillis = if (shouldHideBottomBar) 380 else 260,
+            easing = FastOutSlowInEasing
+        ),
+        label = "appBottomBarOffset"
+    )
+    val bottomBarAlpha by animateFloatAsState(
+        targetValue = if (shouldHideBottomBar) 0f else 1f,
+        animationSpec = tween(
+            durationMillis = if (shouldHideBottomBar) 320 else 220,
+            easing = FastOutSlowInEasing
+        ),
+        label = "appBottomBarAlpha"
+    )
 
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
@@ -4659,35 +4698,25 @@ fun AppNav(
             containerColor = Color.Transparent,
             contentColor = MaterialTheme.colorScheme.onBackground,
             bottomBar = {
-                AnimatedVisibility(
-                    visible = !(current == Route.Home.r && hideBottomBar),
-                    enter = slideInVertically(
-                        initialOffsetY = { it },
-                        animationSpec = tween(350)
-                    ) + fadeIn(
-                        animationSpec = tween(350)
-                    ),
-                    exit = slideOutVertically(
-                        targetOffsetY = { it },
-                        animationSpec = tween(350)
-                    ) + fadeOut(
-                        animationSpec = tween(350)
-                    )
-                ) {
-                    BottomBar(
-                        navController = navController,
-                        currentRoute = current,
-                        tutorialActive = firstLaunchOnboardingVisible,
-                        onTutorialTargetPositioned = { target, bounds ->
-                            if (onboardingTargetBounds[target] != bounds) {
-                                onboardingTargetBounds =
-                                    onboardingTargetBounds.toMutableMap().apply {
-                                        put(target, bounds)
-                                    }
-                            }
+                BottomBar(
+                    modifier = Modifier
+                        .offset(y = bottomBarOffset)
+                        .graphicsLayer { alpha = bottomBarAlpha },
+                    navController = navController,
+                    currentRoute = current,
+                    onTabPressed = { route ->
+                        aiImmersiveMode = route == Route.Recipe.r
+                    },
+                    tutorialActive = firstLaunchOnboardingVisible,
+                    onTutorialTargetPositioned = { target, bounds ->
+                        if (onboardingTargetBounds[target] != bounds) {
+                            onboardingTargetBounds =
+                                onboardingTargetBounds.toMutableMap().apply {
+                                    put(target, bounds)
+                                }
                         }
-                    )
-                }
+                    }
+                )
             }
         ) { padding ->
             NavHost(
@@ -4717,6 +4746,10 @@ fun AppNav(
                         onShowFormChange = { showForm = it },
                         onSelectionModeChange = { hideBottomBar = it },
                         onOverlayVisibilityChange = { blurBackgroundForOverlay = it },
+                        onOpenAi = {
+                            aiImmersiveMode = true
+                            navController.safeNavigate(Route.Recipe.r)
+                        },
                         tutorialActive = firstLaunchOnboardingVisible,
                         onTutorialTargetPositioned = { target, bounds ->
                             if (onboardingTargetBounds[target] != bounds) {
@@ -4742,7 +4775,11 @@ fun AppNav(
                 }
                 composable(Route.Recipe.r) {
                     RecipeScreen(
-                        sessionState = recipeScreenSessionState
+                        sessionState = recipeScreenSessionState,
+                        immersiveMode = aiImmersiveMode,
+                        onExitImmersiveMode = {
+                            navController.safeNavigate(Route.Home.r)
+                        }
                     )
                 }
 
@@ -6552,7 +6589,9 @@ private fun RecipePromptBar(
 
 @Composable
 private fun RecipeScreen(
-    sessionState: RecipeScreenSessionState
+    sessionState: RecipeScreenSessionState,
+    immersiveMode: Boolean = false,
+    onExitImmersiveMode: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val appCtx = context.applicationContext
@@ -6563,14 +6602,22 @@ private fun RecipeScreen(
     }
     val scope = rememberCoroutineScope()
     val keyboard = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
     val listState = rememberLazyListState()
     val imeBottomPadding = with(density) { WindowInsets.ime.getBottom(this).toDp() }
-    val recipePromptBarRestingBottomPadding = 82.dp
+    val isRecipeKeyboardVisible = WindowInsets.ime.getBottom(density) > 0
+    var keyboardDismissBackGuard by remember { mutableStateOf(false) }
+    val recipePromptBarRestingBottomPadding =
+        if (immersiveMode) {
+            22.dp
+        } else {
+            82.dp
+        }
     val recipePromptBarBottomPadding by animateDpAsState(
         targetValue = maxOf(recipePromptBarRestingBottomPadding, imeBottomPadding + 12.dp),
         animationSpec = tween(
-            durationMillis = 220,
-            easing = LinearOutSlowInEasing
+            durationMillis = if (immersiveMode) 180 else 170,
+            easing = FastOutSlowInEasing
         ),
         label = "recipePromptBarBottomPadding"
     )
@@ -6632,7 +6679,35 @@ private fun RecipeScreen(
         (if (messages.isEmpty()) 1 else 0) +
         visibleMessageItemCount +
         (if (isLoading) 1 else 0)
-    val recipeListBottomPadding = 176.dp
+    val recipeListBottomPadding by animateDpAsState(
+        targetValue = if (immersiveMode) 132.dp else 176.dp,
+        animationSpec = tween(
+            durationMillis = if (immersiveMode) 180 else 170,
+            easing = FastOutSlowInEasing
+        ),
+        label = "recipeListBottomPadding"
+    )
+    fun dismissRecipeKeyboard() {
+        keyboardDismissBackGuard = true
+        focusManager.clearFocus(force = true)
+        keyboard?.hide()
+        scope.launch {
+            delay(300)
+            keyboardDismissBackGuard = false
+        }
+    }
+    OverlayBackHandler(enabled = isRecipeKeyboardVisible) {
+        dismissRecipeKeyboard()
+    }
+    BackHandler(enabled = isRecipeKeyboardVisible) {
+        dismissRecipeKeyboard()
+    }
+    OverlayBackHandler(enabled = immersiveMode && !isRecipeKeyboardVisible && !keyboardDismissBackGuard) {
+        onExitImmersiveMode()
+    }
+    BackHandler(enabled = immersiveMode && !isRecipeKeyboardVisible && !keyboardDismissBackGuard) {
+        onExitImmersiveMode()
+    }
 
     DisposableEffect(sharedPrefs, gson) {
         val listener =
@@ -6726,10 +6801,17 @@ private fun RecipeScreen(
 
         val wantsMoreFromPrevious =
             !useExpiringFoods && previousIngredients.isNotEmpty() && wantsMoreRecipeIdeas(trimmed)
+        val ingredientEditFollowUp =
+            !useExpiringFoods && looksLikeIngredientEditFollowUp(
+                request = trimmed,
+                pantryIngredients = pantryIngredientNames,
+                previousIngredients = previousIngredients
+            )
 
         if (
             !useExpiringFoods &&
             !wantsMoreFromPrevious &&
+            !ingredientEditFollowUp &&
             !looksFoodRelatedRecipeRequest(trimmed, pantryIngredientNames)
         ) {
             val invalidPromptMessage =
@@ -7080,6 +7162,7 @@ fun HomeScreen(
     onShowFormChange: (Boolean) -> Unit,
     onSelectionModeChange: (Boolean) -> Unit,
     onOverlayVisibilityChange: (Boolean) -> Unit,
+    onOpenAi: () -> Unit,
     tutorialActive: Boolean = false,
     onTutorialTargetPositioned: (OnboardingSpotlightTarget, Rect) -> Unit = { _, _ -> }
 ) {
@@ -7093,6 +7176,7 @@ fun HomeScreen(
         onShowFormChange = onShowFormChange,
         onSelectionModeChange = onSelectionModeChange,
         onOverlayVisibilityChange = onOverlayVisibilityChange,
+        onOpenAi = onOpenAi,
         tutorialActive = tutorialActive,
         onTutorialTargetPositioned = onTutorialTargetPositioned
     )
@@ -8476,8 +8560,10 @@ fun NotificationsScreen(navController: NavHostController) {
 
 @Composable
 fun BottomBar(
+    modifier: Modifier = Modifier,
     navController: NavHostController,
     currentRoute: String?,
+    onTabPressed: (String) -> Unit = {},
     tutorialActive: Boolean = false,
     onTutorialTargetPositioned: (OnboardingSpotlightTarget, Rect) -> Unit = { _, _ -> }
 ) {
@@ -8486,7 +8572,7 @@ fun BottomBar(
     val selectedRoute = bottomBarSelectedRoute(currentRoute)
 
     Box(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 18.dp)
             .navigationBarsPadding()
@@ -8535,7 +8621,11 @@ fun BottomBar(
                         selectedIcon = item.selectedIcon,
                         unselectedIcon = item.unselectedIcon,
                         onClick = {
-                            if (isTabTransitionLocked || selectedRoute == item.route) return@PillNavItem
+                            if (isTabTransitionLocked) return@PillNavItem
+
+                            onTabPressed(item.route)
+
+                            if (selectedRoute == item.route) return@PillNavItem
 
                             isTabTransitionLocked = true
                             navController.safeNavigate(item.route)
@@ -8643,6 +8733,7 @@ fun FoodEntryScreen(
     onShowFormChange: (Boolean) -> Unit,
     onSelectionModeChange: (Boolean) -> Unit,
     onOverlayVisibilityChange: (Boolean) -> Unit,
+    onOpenAi: () -> Unit,
     tutorialActive: Boolean = false,
     onTutorialTargetPositioned: (OnboardingSpotlightTarget, Rect) -> Unit = { _, _ -> }
 ) {
@@ -8928,8 +9019,19 @@ fun FoodEntryScreen(
         var prevOffset = listState.firstVisibleItemScrollOffset
         var currentFabVisible = fabVisible
 
-        snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
-            .collect { (index, offset) ->
+        snapshotFlow {
+            Triple(
+                listState.firstVisibleItemIndex,
+                listState.firstVisibleItemScrollOffset,
+                listState.isScrollInProgress
+            )
+        }.collect { (index, offset, isScrolling) ->
+                if (!isScrolling) {
+                    prevIndex = index
+                    prevOffset = offset
+                    return@collect
+                }
+
                 val scrollingUp = if (index != prevIndex) index < prevIndex else offset < prevOffset
                 val newFabVisible = scrollingUp || (index == 0 && offset == 0)
 
@@ -9250,9 +9352,9 @@ fun FoodEntryScreen(
             floatingActionButtonPosition = FabPosition.End,
             floatingActionButton = {
                     if (!isSelecting) {
-                        HomeAddFloatingActionButton(
+                        HomeFloatingButtons(
                             visible = fabVisible && !showForm,
-                            onPositioned = if (tutorialActive) {
+                            onAddPositioned = if (tutorialActive) {
                                 { bounds ->
                                     onTutorialTargetPositioned(
                                         OnboardingSpotlightTarget.HOME_ADD_FAB,
@@ -9262,7 +9364,17 @@ fun FoodEntryScreen(
                             } else {
                                 null
                             },
-                            onClick = {
+                            onAiPositioned = if (tutorialActive) {
+                                { bounds: Rect ->
+                                    onTutorialTargetPositioned(
+                                        OnboardingSpotlightTarget.AI_TAB,
+                                        bounds
+                                    )
+                                }
+                            } else {
+                                null
+                            },
+                            onAddClick = {
                                 if (!showForm) {
                                     editingItem = null
                                     foodName = ""
@@ -9277,6 +9389,9 @@ fun FoodEntryScreen(
                                     clearBarcodeLookupUi()
                                     onShowFormChange(true)
                                 }
+                            },
+                            onAiClick = {
+                                onOpenAi()
                             }
                         )
 

@@ -1,24 +1,56 @@
 package com.example.myapplication
 
+import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import java.io.IOException
 import java.net.HttpURLConnection
+import java.net.SocketTimeoutException
 import java.net.URL
+import java.net.UnknownHostException
 import java.nio.charset.StandardCharsets
 import java.util.Locale
 
+private const val TAG = "RecipeAiService"
 private const val GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
-private const val GEMINI_MODEL = "gemini-3.1-flash-lite-preview"
+private val GEMINI_MODEL_FALLBACKS = listOf(
+    "gemini-2.5-flash-lite",
+    "gemini-3.1-flash-lite-preview"
+)
 private const val GEMINI_TIMEOUT_MS = 30000
+private const val GEMINI_RETRIES_BEFORE_FALLBACK = 2
+private const val GEMINI_INITIAL_BACKOFF_MS = 700L
+private const val GEMINI_MAX_BACKOFF_MS = 2800L
 private const val DEFAULT_RECIPE_LIMIT = 3
 private const val MIN_RECIPE_LIMIT = 1
 private const val MAX_RECIPE_LIMIT = 3
 private const val MAX_RECIPE_STEPS = 5
 private const val MAX_PANTRY_INGREDIENT_CONTEXT = 30
 private const val MAX_DIRECT_INGREDIENT_CONTEXT = 14
+private val KNOWN_FOOD_HINT_TOKENS = setOf(
+    "apple", "avocado", "banana", "bean", "beans", "beef", "bread", "broccoli",
+    "butter", "cabbage", "carrot", "cheese", "chicken", "chili", "corn",
+    "cucumber", "egg", "eggs", "fish", "flour", "garlic", "grape", "ham",
+    "honey", "lettuce", "lemon", "lime", "mango", "meat", "milk", "mushroom",
+    "noodle", "noodles", "oat", "oats", "oil", "onion", "orange", "pasta",
+    "peanut", "pepper", "potato", "potatoes", "rice", "salmon", "salt",
+    "sausage", "shrimp", "spinach", "sugar", "tomato", "tomatoes", "tuna",
+    "turkey", "vegetable", "vegetables", "veggie", "veggies", "yogurt"
+)
+private val KNOWN_FOOD_HINT_PHRASES = listOf(
+    "bell pepper",
+    "olive oil",
+    "peanut butter",
+    "soy sauce",
+    "green onion",
+    "spring onion",
+    "coconut milk",
+    "tomato sauce"
+)
 
 internal fun wantsMoreRecipeIdeas(request: String): Boolean {
     val normalized = request
@@ -53,6 +85,62 @@ internal fun wantsMoreRecipeIdeas(request: String): Boolean {
             compact.contains("wouldyou")
 
     return hasRecipeFollowUpTone || tokens.size <= 4
+}
+
+internal fun looksLikeIngredientEditFollowUp(
+    request: String,
+    pantryIngredients: List<String>,
+    previousIngredients: List<String>
+): Boolean {
+    val normalized = request
+        .trim()
+        .lowercase(Locale.US)
+        .replace(Regex("\\s+"), " ")
+
+    if (normalized.isBlank() || previousIngredients.isEmpty()) return false
+
+    val tokens = normalized
+        .split(Regex("[^a-z0-9]+"))
+        .filter { it.isNotBlank() }
+    val referenceTokens =
+        (pantryIngredients + previousIngredients)
+            .flatMap { ingredient ->
+                ingredient
+                    .lowercase(Locale.US)
+                    .split(Regex("[^a-z0-9]+"))
+                    .map(::normalizeFollowUpMatchToken)
+            }
+            .filter { it.length >= 3 }
+            .toSet()
+    val ingredientMentions = tokens.filter { token ->
+        val normalizedToken = normalizeFollowUpMatchToken(token)
+        normalizedToken in KNOWN_FOOD_HINT_TOKENS || normalizedToken in referenceTokens
+    }
+
+    if (ingredientMentions.isEmpty()) return false
+
+    val followUpCueTokens = setOf(
+        "add", "include", "plus", "also", "with", "without", "remove",
+        "drop", "replace", "swap", "instead", "too", "and", "same",
+        "previous", "it", "them", "that", "those"
+    )
+    val hasFollowUpCue =
+        tokens.any { it in followUpCueTokens } ||
+            normalized.startsWith("with ") ||
+            normalized.startsWith("and ")
+    val isShortIngredientReply = tokens.size <= 4
+
+    return hasFollowUpCue || isShortIngredientReply
+}
+
+private fun normalizeFollowUpMatchToken(token: String): String {
+    return when {
+        token.endsWith("ies") && token.length > 4 -> token.dropLast(3) + "y"
+        token.endsWith("oes") && token.length > 4 -> token.dropLast(2)
+        token.endsWith("es") && token.length > 5 -> token.dropLast(2)
+        token.endsWith("s") && token.length > 4 -> token.dropLast(1)
+        else -> token
+    }
 }
 
 internal fun requestedRecipeLimit(request: String): Int? {
@@ -199,17 +287,27 @@ internal object RecipeAiService {
         val cleanedPreviousIngredients = sanitizeIngredients(previousIngredients).take(8)
         val wantsMoreFromPrevious =
             cleanedPreviousIngredients.isNotEmpty() && wantsMoreRecipeIdeas(trimmedRequest)
-        val explicitRequestIngredients =
+        val conversationalIngredientUpdate =
             if (wantsMoreFromPrevious) {
-                emptyList()
+                null
             } else {
-                extractExplicitRequestIngredients(trimmedRequest).take(8)
+                resolveConversationalIngredientUpdate(
+                    request = trimmedRequest,
+                    pantryIngredients = cleanedPantryIngredients,
+                    previousIngredients = cleanedPreviousIngredients
+                )?.take(8)
+            }
+        val explicitRequestIngredients =
+            when {
+                wantsMoreFromPrevious -> emptyList()
+                conversationalIngredientUpdate != null -> conversationalIngredientUpdate
+                else -> extractExplicitRequestIngredients(trimmedRequest).take(8)
             }
         val effectivePantryIngredients =
-            if (wantsMoreFromPrevious) {
-                cleanedPreviousIngredients
-            } else {
-                explicitRequestIngredients.ifEmpty { cleanedPantryIngredients }
+            when {
+                wantsMoreFromPrevious -> cleanedPreviousIngredients
+                conversationalIngredientUpdate != null -> conversationalIngredientUpdate
+                else -> explicitRequestIngredients.ifEmpty { cleanedPantryIngredients }
             }
         val effectivePreviousIngredients =
             if (explicitRequestIngredients.isNotEmpty()) {
@@ -218,12 +316,15 @@ internal object RecipeAiService {
                 cleanedPreviousIngredients
             }
         val effectiveRequest =
-            if (wantsMoreFromPrevious) {
-                "Please suggest $effectiveLimit more easy and quick ${
+            when {
+                wantsMoreFromPrevious -> "Please suggest $effectiveLimit more easy and quick ${
                     if (effectiveLimit == 1) "recipe" else "recipes"
                 } using the same food products as before."
-            } else {
-                trimmedRequest
+                conversationalIngredientUpdate != null ->
+                    "Please suggest $effectiveLimit easy and quick ${
+                        if (effectiveLimit == 1) "recipe" else "recipes"
+                    } using these foods: ${conversationalIngredientUpdate.joinToString(", ")}."
+                else -> trimmedRequest
             }
 
         val responseBody = generateContent(
@@ -272,14 +373,157 @@ internal object RecipeAiService {
         parseRecipeSuggestions(responseBody).take(effectiveLimit)
     }
 
-    private fun generateContent(
+    private suspend fun generateContent(
         prompt: String,
         responseMimeType: String? = null
     ): String {
         ensureApiKeyConfigured()
+        var bestFailure: GeminiServiceFailure? = null
 
-        val connection = (
-            URL("$GEMINI_BASE_URL/$GEMINI_MODEL:generateContent").openConnection()
+        GEMINI_MODEL_FALLBACKS.forEachIndexed { modelIndex, modelName ->
+            when (val result = executeModelWithRetries(modelName, prompt, responseMimeType)) {
+                is GeminiTextResult.Success -> {
+                    Log.d(TAG, "Gemini success with $modelName")
+                    return result.body
+                }
+
+                is GeminiTextResult.Failure -> {
+                    bestFailure = preferFailure(bestFailure, result.failure)
+                    val shouldTryNextModel =
+                        result.failure.allowFallback &&
+                            modelIndex < GEMINI_MODEL_FALLBACKS.lastIndex
+
+                    if (shouldTryNextModel) {
+                        Log.w(
+                            TAG,
+                            "Falling back from $modelName to next model: ${result.failure.message}"
+                        )
+                    } else {
+                        throw result.failure.toException()
+                    }
+                }
+            }
+        }
+
+        throw (bestFailure ?: temporaryBusyFailure()).toException()
+    }
+
+    private suspend fun executeModelWithRetries(
+        modelName: String,
+        prompt: String,
+        responseMimeType: String?
+    ): GeminiTextResult {
+        repeat(GEMINI_RETRIES_BEFORE_FALLBACK + 1) { attempt ->
+            Log.d(
+                TAG,
+                "Trying Gemini model $modelName (attempt ${attempt + 1}/${GEMINI_RETRIES_BEFORE_FALLBACK + 1})"
+            )
+
+            when (val result = executeHttpRequest(modelName, prompt, responseMimeType)) {
+                is GeminiTextResult.Success -> return result
+
+                is GeminiTextResult.Failure -> {
+                    val shouldRetry =
+                        result.failure.retryable && attempt < GEMINI_RETRIES_BEFORE_FALLBACK
+
+                    if (!shouldRetry) {
+                        return result
+                    }
+
+                    val delayMs = retryBackoffMs(attempt)
+                    Log.w(
+                        TAG,
+                        "Retrying $modelName after temporary Gemini issue in ${delayMs}ms: ${result.failure.message}"
+                    )
+                    delay(delayMs)
+                }
+            }
+        }
+
+        return GeminiTextResult.Failure(temporaryBusyFailure())
+    }
+
+    private fun executeHttpRequest(
+        modelName: String,
+        prompt: String,
+        responseMimeType: String?
+    ): GeminiTextResult {
+        val connection = openGeminiConnection(modelName)
+        val requestBody = buildRequestBody(
+            prompt = prompt,
+            responseMimeType = responseMimeType,
+            modelName = modelName
+        )
+
+        return try {
+            connection.outputStream.use { stream ->
+                stream.write(requestBody.toByteArray(StandardCharsets.UTF_8))
+            }
+
+            val statusCode = connection.responseCode
+            val body = readResponseBody(connection, statusCode)
+
+            if (statusCode !in 200..299) {
+                GeminiTextResult.Failure(explainError(statusCode, body))
+            } else if (body.isBlank()) {
+                GeminiTextResult.Failure(
+                    GeminiServiceFailure(
+                        kind = GeminiFailureKind.TEMPORARY,
+                        message = "The food assistant returned an empty reply. Please try again in a moment.",
+                        retryable = true,
+                        allowFallback = true
+                    )
+                )
+            } else {
+                GeminiTextResult.Success(body)
+            }
+        } catch (error: SocketTimeoutException) {
+            GeminiTextResult.Failure(
+                GeminiServiceFailure(
+                    kind = GeminiFailureKind.TEMPORARY,
+                    message = "The food assistant took too long to answer. Please try again in a moment.",
+                    retryable = true,
+                    allowFallback = true
+                )
+            )
+        } catch (error: UnknownHostException) {
+            GeminiTextResult.Failure(
+                GeminiServiceFailure(
+                    kind = GeminiFailureKind.NETWORK,
+                    message = "I couldn't reach the food assistant. Check your internet connection and try again."
+                )
+            )
+        } catch (error: IOException) {
+            GeminiTextResult.Failure(
+                GeminiServiceFailure(
+                    kind = GeminiFailureKind.TEMPORARY,
+                    message = "The food assistant is temporarily unavailable. Please try again in a moment.",
+                    retryable = true,
+                    allowFallback = true
+                )
+            )
+        } catch (error: RecipeAiException) {
+            GeminiTextResult.Failure(
+                GeminiServiceFailure(
+                    kind = GeminiFailureKind.OTHER,
+                    message = error.message
+                )
+            )
+        } catch (error: Exception) {
+            GeminiTextResult.Failure(
+                GeminiServiceFailure(
+                    kind = GeminiFailureKind.OTHER,
+                    message = "I couldn't reach the food assistant right now: ${error.message ?: error.javaClass.simpleName}"
+                )
+            )
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun openGeminiConnection(modelName: String): HttpURLConnection {
+        return (
+            URL("$GEMINI_BASE_URL/$modelName:generateContent").openConnection()
                 as HttpURLConnection
             ).apply {
                 requestMethod = "POST"
@@ -290,45 +534,25 @@ internal object RecipeAiService {
                 setRequestProperty("Content-Type", "application/json; charset=UTF-8")
                 setRequestProperty("x-goog-api-key", BuildConfig.GEMINI_API_KEY)
             }
+    }
 
-        val requestBody = buildRequestBody(
-            prompt = prompt,
-            responseMimeType = responseMimeType
-        )
+    private fun retryBackoffMs(attempt: Int): Long {
+        return (GEMINI_INITIAL_BACKOFF_MS * (1L shl attempt))
+            .coerceAtMost(GEMINI_MAX_BACKOFF_MS)
+    }
 
-        try {
-            connection.outputStream.use { stream ->
-                stream.write(requestBody.toByteArray(StandardCharsets.UTF_8))
-            }
-
-            val statusCode = connection.responseCode
-            val body = readResponseBody(connection, statusCode)
-
-            if (statusCode !in 200..299) {
-                throw explainError(statusCode, body)
-            }
-
-            if (body.isBlank()) {
-                throw RecipeAiException(
-                    "The Gemini food assistant returned an empty response. Please try again."
-                )
-            }
-
-            return body
-        } catch (error: RecipeAiException) {
-            throw error
-        } catch (error: Exception) {
-            throw RecipeAiException(
-                "I couldn't reach the food assistant right now: ${error.message ?: error.javaClass.simpleName}"
-            )
-        } finally {
-            connection.disconnect()
-        }
+    private fun preferFailure(
+        current: GeminiServiceFailure?,
+        candidate: GeminiServiceFailure
+    ): GeminiServiceFailure {
+        if (current == null) return candidate
+        return if (candidate.kind.priority < current.kind.priority) candidate else current
     }
 
     private fun buildRequestBody(
         prompt: String,
-        responseMimeType: String?
+        responseMimeType: String?,
+        modelName: String
     ): String {
         val root = JsonObject()
         val contents = JsonArray()
@@ -352,16 +576,22 @@ internal object RecipeAiService {
                 addProperty("temperature", 0.4)
                 addProperty("topP", 0.9)
                 responseMimeType?.let { addProperty("responseMimeType", it) }
-                add(
-                    "thinkingConfig",
-                    JsonObject().apply {
-                        addProperty("thinkingLevel", "minimal")
-                    }
-                )
+                if (supportsThinkingConfig(modelName)) {
+                    add(
+                        "thinkingConfig",
+                        JsonObject().apply {
+                            addProperty("thinkingLevel", "minimal")
+                        }
+                    )
+                }
             }
         )
 
         return gson.toJson(root)
+    }
+
+    private fun supportsThinkingConfig(modelName: String): Boolean {
+        return modelName == "gemini-3.1-flash-lite-preview"
     }
 
     private fun buildRecipeRequestPrompt(
@@ -379,26 +609,39 @@ internal object RecipeAiService {
         return """
             You are FoodExpiryTracker's recipe-only assistant.
             Conversation id: $contextId
-            
+
+            Return only valid JSON with this exact shape:
+            {
+              "resolvedIngredients": ["ingredient 1", "ingredient 2"],
+              "recipes": [
+                {
+                  "title": "Recipe name",
+                  "usedIngredients": ["ingredient 1", "ingredient 2"],
+                  "missedIngredients": ["optional extra 1", "optional extra 2"],
+                  "quickGuide": ["Short step 1", "Short step 2", "Short step 3"]
+                }
+              ]
+            }
+
+            Ingredient priority:
+            - If current request ingredients are not "none", use only those as the main set.
+            - If the user asks for pantry, list, saved foods, or available foods, use pantry ingredients.
+            - If the user asks for more, another, same ingredients, those ingredients, or previous ingredients and current request ingredients are "none", reuse previous recipe ingredients.
+            - If the user says add/include/also use an ingredient with previous foods, combine it with previous recipe ingredients.
+            - If the user says remove/without an ingredient, remove it from previous recipe ingredients.
+            - If the user says replace one ingredient with another, swap them.
+            - If no ingredients are named, use previous recipe ingredients when available, otherwise pantry ingredients.
+
             Rules:
-            - Every reply must be recipe suggestions only.
+            - Reply with recipe suggestions only.
             - Never ask follow-up questions.
-            - Never offer storage tips, nutrition advice, pantry tips, or anything outside recipe suggestions.
-            - If the current request ingredients are not "none", use only those current request ingredients as the main ingredient set.
-            - If the current request ingredients are not "none", ignore previous recipe ingredients and ignore unrelated pantry ingredients.
-            - If the user asks for recipes from their pantry, list, food list, saved foods, available foods, or foods they have, use the pantry ingredients as the main ingredient set.
-            - If the user says "more", "another", "same ingredients", "those ingredients", or "previous ingredients" and the current request ingredients are "none", reuse the previous recipe ingredients.
-            - If the user gives only a meal style like dinner, breakfast, snack, quick, or easy and the current request ingredients are "none", combine that preference with the previous recipe ingredients when available.
-            - If no ingredients are named in the request and there are no previous recipe ingredients, use the pantry ingredients.
+            - Prefer exactly $limit easy, quick, practical recipes when possible, usually about 30 minutes or less.
+            - Use simple home cooking, low effort, minimal extras, and short pantry staples only.
             - Keep resolvedIngredients to 8 or fewer unique items.
-            - Prefer exactly $limit recipe ideas when possible.
-            - Recipes should be easy, quick, simple, and practical, usually about 30 minutes or less.
-            - Prefer low-effort meals with common pantry-style prep, fewer steps, and minimal extra ingredients.
-            - Avoid complicated cooking methods, fancy techniques, or long cooking unless absolutely necessary.
-            - Each recipe should use the resolved ingredients as much as possible.
-            - missedIngredients must be short pantry staples only, with at most 3 items.
-            - If perfect matches are limited, still return up to $limit of the easiest closest recipe ideas.
-            - Return only valid JSON and nothing else.
+            - Keep missedIngredients to 3 or fewer items.
+            - If exact matches are limited, still return up to $limit easiest close matches.
+            - quickGuide should have 3 to 5 short steps when possible, never more than 5.
+            - Keep each step simple and direct.
 
             Current request ingredients:
             $explicitText
@@ -408,26 +651,6 @@ internal object RecipeAiService {
 
             Previous recipe ingredients:
             $previousText
-
-	            Return JSON with this exact shape:
-	            {
-	              "resolvedIngredients": ["ingredient 1", "ingredient 2"],
-	              "recipes": [
-	                {
-	                  "title": "Recipe name",
-	                  "usedIngredients": ["ingredient 1", "ingredient 2"],
-	                  "missedIngredients": ["optional extra 1", "optional extra 2"],
-	                  "quickGuide": ["Short step 1", "Short step 2", "Short step 3"]
-	                }
-	              ]
-	            }
-
-            quickGuide rules:
-            - Include 3 to 5 short steps when possible.
-            - Never exceed 5 short steps.
-            - Keep every step simple, direct, and easy to understand.
-            - Focus only on practical home cooking steps.
-            - Keep each step to one short sentence.
 
             User request:
             $request
@@ -494,6 +717,187 @@ internal object RecipeAiService {
         return normalizedRequest.substring(markerIndex + marker.length).trim()
     }
 
+    private fun resolveConversationalIngredientUpdate(
+        request: String,
+        pantryIngredients: List<String>,
+        previousIngredients: List<String>
+    ): List<String>? {
+        if (previousIngredients.isEmpty()) return null
+
+        val normalized = request
+            .trim()
+            .lowercase(Locale.US)
+            .replace(Regex("\\s+"), " ")
+
+        if (normalized.isBlank()) return null
+
+        val replaceMatch = Regex("\\breplace\\s+(.+?)\\s+with\\s+(.+)").find(normalized)
+        if (replaceMatch != null) {
+            val removedIngredients = extractMentionedIngredientCandidates(
+                text = replaceMatch.groupValues[1],
+                pantryIngredients = pantryIngredients,
+                previousIngredients = previousIngredients
+            )
+            val addedIngredients = extractMentionedIngredientCandidates(
+                text = replaceMatch.groupValues[2],
+                pantryIngredients = pantryIngredients,
+                previousIngredients = previousIngredients
+            )
+
+            val replaced = addUniqueIngredients(
+                base = removeMatchingIngredients(previousIngredients, removedIngredients),
+                additions = addedIngredients
+            )
+            if (replaced.isNotEmpty() && replaced != previousIngredients) {
+                return replaced
+            }
+        }
+
+        val mentionedIngredients = extractMentionedIngredientCandidates(
+            text = normalized,
+            pantryIngredients = pantryIngredients,
+            previousIngredients = previousIngredients
+        )
+        if (mentionedIngredients.isEmpty()) return null
+
+        val removeIntent =
+            Regex("\\b(remove|without|drop|skip|no)\\b").containsMatchIn(normalized)
+        if (removeIntent) {
+            val updated = removeMatchingIngredients(previousIngredients, mentionedIngredients)
+            if (updated.isNotEmpty() && updated != previousIngredients) {
+                return updated
+            }
+            return null
+        }
+
+        val addIntent =
+            Regex("\\b(add|include|plus|also|with|too|and)\\b").containsMatchIn(normalized) ||
+                normalized.startsWith("with ") ||
+                normalized.startsWith("and ")
+        val shortIngredientReply = normalized.split(Regex("[^a-z0-9]+")).count { it.isNotBlank() } <= 4
+
+        if (addIntent || shortIngredientReply) {
+            val updated = addUniqueIngredients(previousIngredients, mentionedIngredients)
+            if (updated.isNotEmpty() && updated != previousIngredients) {
+                return updated
+            }
+        }
+
+        return null
+    }
+
+    private fun extractMentionedIngredientCandidates(
+        text: String,
+        pantryIngredients: List<String>,
+        previousIngredients: List<String>
+    ): List<String> {
+        val normalized = text
+            .lowercase(Locale.US)
+            .replace('\n', ' ')
+            .replace(Regex("\\s+"), " ")
+            .trim()
+
+        if (normalized.isBlank()) return emptyList()
+
+        val candidatePhrases =
+            (KNOWN_FOOD_HINT_PHRASES + pantryIngredients + previousIngredients)
+                .map { it.trim() }
+                .filter { it.isNotBlank() }
+                .distinctBy { it.lowercase(Locale.US) }
+                .sortedByDescending { it.length }
+
+        val matchedPhrases = mutableListOf<String>()
+        var remainingText = " $normalized "
+
+        candidatePhrases.forEach { phrase ->
+            val phrasePattern = Regex("\\b${Regex.escape(phrase.lowercase(Locale.US))}\\b")
+            if (phrasePattern.containsMatchIn(remainingText)) {
+                matchedPhrases += phrase
+                remainingText = phrasePattern.replace(remainingText, " ")
+            }
+        }
+
+        val referenceTokens =
+            ingredientMatchTokensFromList(pantryIngredients + previousIngredients)
+        val matchedTokens = remainingText
+            .split(Regex("[^a-z0-9]+"))
+            .map { it.trim() }
+            .filter { it.length >= 3 }
+            .map { rawToken -> rawToken to normalizeIngredientMatchToken(rawToken) }
+            .filter { (_, normalizedToken) ->
+                normalizedToken in KNOWN_FOOD_HINT_TOKENS ||
+                    normalizedToken in referenceTokens
+            }
+            .map { (rawToken, _) -> rawToken }
+
+        return sanitizeIngredients(matchedPhrases + matchedTokens)
+    }
+
+    private fun addUniqueIngredients(
+        base: List<String>,
+        additions: List<String>
+    ): List<String> {
+        if (additions.isEmpty()) return base
+
+        val updated = base.toMutableList()
+        additions.forEach { addition ->
+            if (updated.none { ingredientMatchesReference(it, addition) }) {
+                updated += addition
+            }
+        }
+        return sanitizeIngredients(updated)
+    }
+
+    private fun removeMatchingIngredients(
+        base: List<String>,
+        removals: List<String>
+    ): List<String> {
+        if (removals.isEmpty()) return base
+
+        return base.filterNot { ingredient ->
+            removals.any { removal -> ingredientMatchesReference(ingredient, removal) }
+        }
+    }
+
+    private fun ingredientMatchesReference(
+        ingredient: String,
+        reference: String
+    ): Boolean {
+        if (ingredient.equals(reference, ignoreCase = true)) return true
+
+        val ingredientTokens = ingredientMatchTokens(ingredient)
+        val referenceTokens = ingredientMatchTokens(reference)
+
+        return ingredientTokens.isNotEmpty() &&
+            referenceTokens.isNotEmpty() &&
+            ingredientTokens.intersect(referenceTokens).isNotEmpty()
+    }
+
+    private fun ingredientMatchTokensFromList(items: List<String>): Set<String> {
+        return items.flatMapTo(mutableSetOf()) { ingredient ->
+            ingredientMatchTokens(ingredient)
+        }
+    }
+
+    private fun ingredientMatchTokens(text: String): Set<String> {
+        return text
+            .lowercase(Locale.US)
+            .split(Regex("[^a-z0-9]+"))
+            .map(::normalizeIngredientMatchToken)
+            .filter { it.length >= 3 }
+            .toSet()
+    }
+
+    private fun normalizeIngredientMatchToken(token: String): String {
+        return when {
+            token.endsWith("ies") && token.length > 4 -> token.dropLast(3) + "y"
+            token.endsWith("oes") && token.length > 4 -> token.dropLast(2)
+            token.endsWith("es") && token.length > 5 -> token.dropLast(2)
+            token.endsWith("s") && token.length > 4 -> token.dropLast(1)
+            else -> token
+        }
+    }
+
     private fun buildRecipeIdeasPrompt(
         ingredients: List<String>,
         limit: Int
@@ -501,10 +905,9 @@ internal object RecipeAiService {
         val ingredientList = ingredients.joinToString(", ")
         return """
             You are FoodExpiryTracker's recipe generator.
-            
             Use these pantry ingredients:
             $ingredientList
-            
+
             Return only valid JSON with this exact shape:
             {
               "recipes": [
@@ -516,18 +919,16 @@ internal object RecipeAiService {
                 }
               ]
             }
-            
+
             Rules:
-            - Prefer exactly $limit recipe ideas when possible.
-            - Recipes should be quick, easy, simple, and low effort, usually about 30 minutes or less.
-            - Prefer the easiest closest matches instead of fancy or time-consuming ideas.
+            - Prefer exactly $limit quick, easy, low-effort recipes when possible, usually about 30 minutes or less.
             - Use the listed ingredients as much as possible.
-            - Keep recipe titles short and natural.
-            - `missedIngredients` can only include a few simple extras or pantry staples, with a maximum of 3 items.
-            - Keep prep practical and minimal, with no complicated cooking unless necessary.
-            - Include a `quickGuide` with 3 to 5 short, simple steps when possible, and never more than 5.
-            - Do not include instructions, notes, markdown, or any text outside the JSON.
-            - If there are not enough strong matches, return up to $limit of the easiest closest ideas.
+            - Prefer the easiest closest matches instead of fancy or time-consuming ideas.
+            - Keep titles short and natural.
+            - missedIngredients can only include a few simple extras or pantry staples, with a maximum of 3 items.
+            - quickGuide should have 3 to 5 short steps when possible, and never more than 5.
+            - Return JSON only, with no markdown or extra text.
+            - If strong matches are limited, return up to $limit easiest close ideas.
             - If there are no good recipe ideas, return {"recipes":[]}.
         """.trimIndent()
     }
@@ -665,31 +1066,100 @@ internal object RecipeAiService {
     private fun explainError(
         statusCode: Int,
         body: String
-    ): RecipeAiException {
+    ): GeminiServiceFailure {
         val apiError = runCatching {
             gson.fromJson(body, GeminiErrorEnvelope::class.java)?.error
         }.getOrNull()
 
         val apiMessage = apiError?.message?.trim().orEmpty()
-        val isQuotaError = statusCode == 429 || apiError?.status == "RESOURCE_EXHAUSTED"
+        val normalizedMessage = apiMessage.lowercase(Locale.US)
+        val statusText = apiError?.status?.trim().orEmpty()
+        val isClearQuotaExhaustion =
+            normalizedMessage.contains("quota") ||
+                normalizedMessage.contains("billing") ||
+                normalizedMessage.contains("insufficient_quota") ||
+                normalizedMessage.contains("exceeded your current quota")
+        val isTemporaryBusy =
+            statusCode >= 500 ||
+                statusCode == 429 ||
+                statusText == "RESOURCE_EXHAUSTED" ||
+                statusText == "UNAVAILABLE" ||
+                normalizedMessage.contains("high demand") ||
+                normalizedMessage.contains("try again later") ||
+                normalizedMessage.contains("too many requests") ||
+                normalizedMessage.contains("resource exhausted") ||
+                normalizedMessage.contains("temporarily unavailable")
+        val isConfigurationIssue =
+            statusCode == 401 ||
+                statusCode == 403 ||
+                normalizedMessage.contains("api key not valid") ||
+                normalizedMessage.contains("permission denied") ||
+                normalizedMessage.contains("service disabled") ||
+                normalizedMessage.contains("not enabled")
+        val isModelUnavailable =
+            statusCode == 404 ||
+                (
+                    normalizedMessage.contains("model") && (
+                        normalizedMessage.contains("not found") ||
+                            normalizedMessage.contains("not supported") ||
+                            normalizedMessage.contains("not available") ||
+                            normalizedMessage.contains("unsupported")
+                        )
+                    )
 
-        if (isQuotaError) {
-            return RecipeAiException(
-                "You have reached the AI recipe limit for now. Please try again later.",
+        if (isClearQuotaExhaustion) {
+            return GeminiServiceFailure(
+                kind = GeminiFailureKind.QUOTA,
+                message = "The AI recipe quota looks used up right now. Please try again later.",
                 limitReached = true
             )
         }
 
-        val message = when (statusCode) {
-            400 -> apiMessage.ifBlank {
-                "The Gemini request was rejected. Please try again with a simpler food question."
-            }
-
-            401, 403 -> "The Gemini API key is missing, invalid, or not enabled for this project. Add a valid GEMINI_API_KEY in local.properties and rebuild."
-            else -> apiMessage.ifBlank { "The Gemini food assistant returned an error ($statusCode)." }
+        if (isTemporaryBusy) {
+            return temporaryBusyFailure()
         }
 
-        return RecipeAiException(message)
+        if (isModelUnavailable) {
+            return GeminiServiceFailure(
+                kind = GeminiFailureKind.MODEL_UNAVAILABLE,
+                message = apiMessage.ifBlank {
+                    "This Gemini recipe model is not available for this project."
+                },
+                allowFallback = true
+            )
+        }
+
+        if (isConfigurationIssue) {
+            return GeminiServiceFailure(
+                kind = GeminiFailureKind.CONFIGURATION,
+                message = "The Gemini recipe service is not configured correctly. Check GEMINI_API_KEY and project permissions, then rebuild the app."
+            )
+        }
+
+        if (statusCode == 400) {
+            return GeminiServiceFailure(
+                kind = GeminiFailureKind.REQUEST,
+                message = apiMessage.ifBlank {
+                    "The recipe request couldn't be processed. Try a simpler food request."
+                }
+            )
+        }
+
+        return GeminiServiceFailure(
+            kind = GeminiFailureKind.OTHER,
+            message = apiMessage.ifBlank {
+                "The Gemini food assistant returned an error ($statusCode)."
+            }
+        )
+    }
+
+    private fun temporaryBusyFailure(): GeminiServiceFailure {
+        return GeminiServiceFailure(
+            kind = GeminiFailureKind.TEMPORARY,
+            message = "The food assistant is busy right now. Please try again in a moment.",
+            retryable = true,
+            allowFallback = true
+        )
     }
 }
 
@@ -697,6 +1167,36 @@ internal class RecipeAiException(
     override val message: String,
     val limitReached: Boolean = false
 ) : IllegalStateException(message)
+
+private enum class GeminiFailureKind(
+    val priority: Int
+) {
+    CONFIGURATION(0),
+    REQUEST(1),
+    QUOTA(2),
+    NETWORK(3),
+    TEMPORARY(4),
+    MODEL_UNAVAILABLE(5),
+    OTHER(6)
+}
+
+private data class GeminiServiceFailure(
+    val kind: GeminiFailureKind,
+    val message: String,
+    val retryable: Boolean = false,
+    val allowFallback: Boolean = false,
+    val limitReached: Boolean = false
+) {
+    fun toException(): RecipeAiException = RecipeAiException(
+        message = message,
+        limitReached = limitReached
+    )
+}
+
+private sealed interface GeminiTextResult {
+    data class Success(val body: String) : GeminiTextResult
+    data class Failure(val failure: GeminiServiceFailure) : GeminiTextResult
+}
 
 private data class GeminiGenerateContentResponse(
     val candidates: List<GeminiCandidate>? = null
