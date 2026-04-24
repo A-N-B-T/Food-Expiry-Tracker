@@ -370,6 +370,26 @@ internal object RecipeAiService {
                 conversationalIngredientUpdate != null -> conversationalIngredientUpdate
                 else -> rawExplicitRequestIngredients
             }
+        val addedConversationalIngredients =
+            if (conversationalIngredientUpdate != null) {
+                conversationalIngredientUpdate.filter { updatedIngredient ->
+                    cleanedPreviousIngredients.none { previousIngredient ->
+                        ingredientMatchesEitherWay(updatedIngredient, previousIngredient)
+                    }
+                }
+            } else {
+                emptyList()
+            }
+        val removedConversationalIngredients =
+            if (conversationalIngredientUpdate != null) {
+                cleanedPreviousIngredients.filter { previousIngredient ->
+                    conversationalIngredientUpdate.none { updatedIngredient ->
+                        ingredientMatchesEitherWay(previousIngredient, updatedIngredient)
+                    }
+                }
+            } else {
+                emptyList()
+            }
         val effectivePantryIngredients =
             when {
                 wantsMoreFromPrevious -> emptyList()
@@ -384,6 +404,18 @@ internal object RecipeAiService {
                 cleanedPreviousIngredients
             } else {
                 emptyList()
+            }
+        val strictRequestedIngredients =
+            when {
+                explicitRequestIngredients.isNotEmpty() -> explicitRequestIngredients
+                wantsMoreFromPrevious -> cleanedPreviousIngredients
+                else -> emptyList()
+            }
+        val requiredRecipeIngredients =
+            when {
+                strictRequestedIngredients.size in 1..MAX_RECIPE_LIMIT -> strictRequestedIngredients
+                addedConversationalIngredients.isNotEmpty() -> addedConversationalIngredients
+                else -> emptyList()
             }
         val effectiveRequest =
             when {
@@ -404,12 +436,15 @@ internal object RecipeAiService {
                 previousIngredients = effectivePreviousIngredients,
                 explicitRequestIngredients = explicitRequestIngredients,
                 contextId = contextId,
-                limit = effectiveLimit
+                limit = effectiveLimit,
+                strictRequestedIngredients = strictRequestedIngredients,
+                requiredRecipeIngredients = requiredRecipeIngredients,
+                excludedRecipeIngredients = removedConversationalIngredients
             ),
             responseMimeType = "application/json"
         )
 
-        val parsedBatch = parseRecipeSuggestionBatch(
+        var parsedBatch = parseRecipeSuggestionBatch(
             responseBody = responseBody,
             fallbackIngredients = explicitRequestIngredients.ifEmpty {
                 effectivePreviousIngredients.ifEmpty {
@@ -418,7 +453,45 @@ internal object RecipeAiService {
             }
         )
 
-        parsedBatch.copy(recipes = parsedBatch.recipes.take(effectiveLimit))
+        if (
+            shouldRetryForStrictIngredients(
+                batch = parsedBatch,
+                strictRequestedIngredients = strictRequestedIngredients,
+                requiredRecipeIngredients = requiredRecipeIngredients,
+                excludedRecipeIngredients = removedConversationalIngredients
+            )
+        ) {
+            val strictRetryBody = generateContent(
+                prompt = buildRecipeRequestPrompt(
+                    request = effectiveRequest,
+                    pantryIngredients = effectivePantryIngredients,
+                    previousIngredients = effectivePreviousIngredients,
+                    explicitRequestIngredients = explicitRequestIngredients,
+                    contextId = contextId,
+                    limit = effectiveLimit,
+                    strictRequestedIngredients = strictRequestedIngredients,
+                    requiredRecipeIngredients = requiredRecipeIngredients,
+                    excludedRecipeIngredients = removedConversationalIngredients,
+                    strictRetry = true
+                ),
+                responseMimeType = "application/json"
+            )
+            parsedBatch = parseRecipeSuggestionBatch(
+                responseBody = strictRetryBody,
+                fallbackIngredients = explicitRequestIngredients.ifEmpty {
+                    effectivePreviousIngredients.ifEmpty {
+                        effectivePantryIngredients.ifEmpty { cleanedPantryIngredients }
+                    }
+                }
+            )
+        }
+
+        sanitizeBatchForRequestedIngredients(
+            batch = parsedBatch.copy(recipes = parsedBatch.recipes.take(effectiveLimit)),
+            strictRequestedIngredients = strictRequestedIngredients,
+            requiredRecipeIngredients = requiredRecipeIngredients,
+            excludedRecipeIngredients = removedConversationalIngredients
+        )
     }
 
     suspend fun findRecipesByIngredients(
@@ -672,11 +745,42 @@ internal object RecipeAiService {
         previousIngredients: List<String>,
         explicitRequestIngredients: List<String>,
         contextId: String,
-        limit: Int
+        limit: Int,
+        strictRequestedIngredients: List<String> = emptyList(),
+        requiredRecipeIngredients: List<String> = emptyList(),
+        excludedRecipeIngredients: List<String> = emptyList(),
+        strictRetry: Boolean = false
     ): String {
         val pantryText = pantryIngredients.joinToString(", ").ifBlank { "none" }
         val previousText = previousIngredients.joinToString(", ").ifBlank { "none" }
         val explicitText = explicitRequestIngredients.joinToString(", ").ifBlank { "none" }
+        val strictText = strictRequestedIngredients.joinToString(", ").ifBlank { "none" }
+        val requiredText = requiredRecipeIngredients.joinToString(", ").ifBlank { "none" }
+        val excludedText = excludedRecipeIngredients.joinToString(", ").ifBlank { "none" }
+        val strictRuleBlock =
+            if (strictRequestedIngredients.isNotEmpty()) {
+                """
+                Strict ingredient mode:
+                - Treat these as the only user food ingredients for this request: $strictText
+                - Do not switch to unrelated pantry or previous foods.
+                - usedIngredients must only contain foods from that strict list.
+                - If there are 3 or fewer strict ingredients, every recipe must use all of them.
+                - If required ingredients are not "none", every recipe must use them: $requiredText
+                - If excluded ingredients are not "none", never use them in usedIngredients: $excludedText
+                """.trimIndent()
+            } else {
+                ""
+            }
+        val strictRetryBlock =
+            if (strictRetry) {
+                """
+                Important correction:
+                - The previous reply ignored the requested foods.
+                - Retry now and follow the strict ingredient mode exactly.
+                """.trimIndent()
+            } else {
+                ""
+            }
 
         return """
             You are FoodExpiryTracker's recipe-only assistant.
@@ -703,6 +807,9 @@ internal object RecipeAiService {
             - If the user says remove/without an ingredient, remove it from previous recipe ingredients.
             - If the user says replace one ingredient with another, swap them.
             - If no ingredients are named, use previous recipe ingredients when available, otherwise pantry ingredients.
+
+            $strictRuleBlock
+            $strictRetryBlock
 
             Rules:
             - Reply with recipe suggestions only.
@@ -945,6 +1052,13 @@ internal object RecipeAiService {
             ingredientTokens.intersect(referenceTokens).isNotEmpty()
     }
 
+    private fun ingredientMatchesEitherWay(
+        first: String,
+        second: String
+    ): Boolean {
+        return ingredientMatchesReference(first, second) || ingredientMatchesReference(second, first)
+    }
+
     private fun ingredientMatchTokensFromList(items: List<String>): Set<String> {
         return items.flatMapTo(mutableSetOf()) { ingredient ->
             ingredientMatchTokens(ingredient)
@@ -1048,6 +1162,79 @@ internal object RecipeAiService {
             resolvedIngredients = resolvedIngredients,
             recipes = recipes
         )
+    }
+
+    private fun shouldRetryForStrictIngredients(
+        batch: RecipeSuggestionBatch,
+        strictRequestedIngredients: List<String>,
+        requiredRecipeIngredients: List<String>,
+        excludedRecipeIngredients: List<String>
+    ): Boolean {
+        if (strictRequestedIngredients.isEmpty()) return false
+        if (batch.recipes.isEmpty()) return false
+
+        return batch.recipes.any { recipe ->
+            !recipeMatchesRequestedIngredients(
+                recipe = recipe,
+                strictRequestedIngredients = strictRequestedIngredients,
+                requiredRecipeIngredients = requiredRecipeIngredients,
+                excludedRecipeIngredients = excludedRecipeIngredients
+            )
+        }
+    }
+
+    private fun sanitizeBatchForRequestedIngredients(
+        batch: RecipeSuggestionBatch,
+        strictRequestedIngredients: List<String>,
+        requiredRecipeIngredients: List<String>,
+        excludedRecipeIngredients: List<String>
+    ): RecipeSuggestionBatch {
+        if (strictRequestedIngredients.isEmpty()) return batch
+
+        val filteredRecipes = batch.recipes.filter { recipe ->
+            recipeMatchesRequestedIngredients(
+                recipe = recipe,
+                strictRequestedIngredients = strictRequestedIngredients,
+                requiredRecipeIngredients = requiredRecipeIngredients,
+                excludedRecipeIngredients = excludedRecipeIngredients
+            )
+        }
+
+        return batch.copy(
+            resolvedIngredients = strictRequestedIngredients,
+            recipes = filteredRecipes
+        )
+    }
+
+    private fun recipeMatchesRequestedIngredients(
+        recipe: RecipeSuggestion,
+        strictRequestedIngredients: List<String>,
+        requiredRecipeIngredients: List<String>,
+        excludedRecipeIngredients: List<String>
+    ): Boolean {
+        if (recipe.usedIngredients.isEmpty()) return false
+
+        val usesOnlyRequestedIngredients = recipe.usedIngredients.all { usedIngredient ->
+            strictRequestedIngredients.any { requestedIngredient ->
+                ingredientMatchesEitherWay(usedIngredient, requestedIngredient)
+            }
+        }
+        if (!usesOnlyRequestedIngredients) return false
+
+        val includesRequiredIngredients = requiredRecipeIngredients.all { requiredIngredient ->
+            recipe.usedIngredients.any { usedIngredient ->
+                ingredientMatchesEitherWay(usedIngredient, requiredIngredient)
+            }
+        }
+        if (!includesRequiredIngredients) return false
+
+        val avoidsExcludedIngredients = excludedRecipeIngredients.none { excludedIngredient ->
+            recipe.usedIngredients.any { usedIngredient ->
+                ingredientMatchesEitherWay(usedIngredient, excludedIngredient)
+            }
+        }
+
+        return avoidsExcludedIngredients
     }
 
     private fun parseRecipesOnly(cleanedJson: String): List<RecipeSuggestion> {

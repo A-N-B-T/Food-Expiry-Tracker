@@ -228,6 +228,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.lifecycleScope
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
@@ -4514,11 +4515,13 @@ class MainActivity : ComponentActivity() {
         createExpiryNotificationChannel(appCtx)
 
         val notifPrefs = appCtx.getSharedPreferences(NOTIF_PREFS, MODE_PRIVATE)
-        if (notifPrefs.getBoolean(DAILY_ENABLED_KEY, false)) {
-            scheduleDailyExpiryWork(appCtx)
-        }
-        if (shouldShowFirstLaunchOnboarding(appCtx)) {
-            seedFirstLaunchDemoFoodIfNeeded(appCtx)
+        lifecycleScope.launch(Dispatchers.Default) {
+            if (notifPrefs.getBoolean(DAILY_ENABLED_KEY, false)) {
+                scheduleDailyExpiryWork(appCtx)
+            }
+            if (shouldShowFirstLaunchOnboarding(appCtx)) {
+                seedFirstLaunchDemoFoodIfNeeded(appCtx)
+            }
         }
 
         setContent {
@@ -4665,8 +4668,6 @@ fun AppNav(
     LaunchedEffect(current) {
         if (current != Route.Recipe.r && aiImmersiveMode) {
             aiImmersiveMode = false
-        }
-        if (current != Route.Recipe.r) {
         }
     }
 
@@ -6079,7 +6080,7 @@ private fun RecipeChatBubble(
 @Composable
 private fun RecipeSuggestionCard(
     recipe: RecipeSuggestion,
-    modifier: Modifier = Modifier.fillMaxWidth()
+    modifier: Modifier = Modifier
 ) {
     val scheme = MaterialTheme.colorScheme
     val isDarkTheme = scheme.background.luminance() < 0.5f
@@ -6124,6 +6125,7 @@ private fun RecipeSuggestionCard(
 
     Box(
         modifier = modifier
+            .fillMaxWidth()
             .clip(cardShape)
             .drawWithCache {
                 val baseBrush = Brush.verticalGradient(recipeCardBase)
@@ -6275,14 +6277,14 @@ private fun RecipeStepLine(
 
 @Composable
 private fun RecipeFollowUpHint(
-    modifier: Modifier = Modifier.fillMaxWidth()
+    modifier: Modifier = Modifier
 ) {
     val scheme = MaterialTheme.colorScheme
     val isDarkTheme = scheme.background.luminance() < 0.5f
     val hintColor = scheme.primary.copy(alpha = if (isDarkTheme) 0.92f else 0.78f)
 
     Box(
-        modifier = modifier,
+        modifier = modifier.fillMaxWidth(),
         contentAlignment = Alignment.CenterStart
     ) {
         Row(
