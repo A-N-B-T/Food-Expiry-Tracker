@@ -29,11 +29,11 @@ import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutLinearInEasing
@@ -52,7 +52,6 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -1375,7 +1374,9 @@ private fun FirstLaunchOnboardingOverlay(
         MaterialTheme.colorScheme.primary.copy(alpha = if (isDarkTheme) 0.62f else 0.46f)
     val spotlightHaloColor = Color.White.copy(alpha = if (isDarkTheme) 0.12f else 0.22f)
 
-    BackHandler(onBack = onSkip)
+    BackHandler {
+        // Keep onboarding active until the user explicitly taps Skip or Done.
+    }
 
     BoxWithConstraints(
         modifier = Modifier
@@ -1475,80 +1476,66 @@ private fun FirstLaunchOnboardingOverlay(
             label = "firstLaunchOnboardingCardTop"
         )
 
-        AnimatedContent(
-            targetState = step,
-            transitionSpec = {
-                (fadeIn(
-                    animationSpec = tween(
-                        durationMillis = 180,
-                        delayMillis = 20,
-                        easing = LinearOutSlowInEasing
-                    )
-                ) togetherWith
-                        fadeOut(
-                            animationSpec = tween(
-                                durationMillis = 110,
-                                easing = FastOutLinearInEasing
-                            )
-                        ))
-            },
-            label = "firstLaunchOnboardingCard",
+        ExactFrostedPillCard(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .offset(y = animatedCardTop)
                 .padding(horizontal = 22.dp)
-        ) { currentStep ->
-            ExactFrostedPillCard(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(28.dp),
-                shadowElevation = 18.dp
+                .fillMaxWidth()
+                .animateContentSize(
+                    animationSpec = tween(
+                        durationMillis = 220,
+                        easing = FastOutSlowInEasing
+                    )
+                ),
+            shape = RoundedCornerShape(28.dp),
+            shadowElevation = 18.dp
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp)
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(20.dp)
+                Text(
+                    text = step.title,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+
+                Spacer(Modifier.height(8.dp))
+
+                Text(
+                    text = step.body,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Spacer(Modifier.height(16.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = currentStep.title,
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface
+                        text = "${safeStepIndex + 1} of ${firstLaunchOnboardingSteps.size}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f)
                     )
 
-                    Spacer(Modifier.height(8.dp))
+                    TextButton(onClick = onSkip) {
+                        Text("Skip")
+                    }
 
-                    Text(
-                        text = currentStep.body,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Spacer(Modifier.width(6.dp))
 
-                    Spacer(Modifier.height(16.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
+                    Button(
+                        onClick = onNext,
+                        shape = RoundedCornerShape(50.dp),
+                        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp)
                     ) {
-                        Text(
-                            text = "${safeStepIndex + 1} of ${firstLaunchOnboardingSteps.size}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.weight(1f)
-                        )
-
-                        TextButton(onClick = onSkip) {
-                            Text("Skip")
-                        }
-
-                        Spacer(Modifier.width(6.dp))
-
-                        Button(
-                            onClick = onNext,
-                            shape = RoundedCornerShape(50.dp),
-                            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp)
-                        ) {
-                            Text(if (safeStepIndex == firstLaunchOnboardingSteps.lastIndex) "Done" else "Next")
-                        }
+                        Text(if (safeStepIndex == firstLaunchOnboardingSteps.lastIndex) "Done" else "Next")
                     }
                 }
             }
