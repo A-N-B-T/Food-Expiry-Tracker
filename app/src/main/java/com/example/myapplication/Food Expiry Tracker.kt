@@ -1469,17 +1469,33 @@ private fun FirstLaunchOnboardingOverlay(
                 .coerceIn(minCardTopPx, maxCardTopPx)
                 .toDp()
         }
+        val animatedCardTop by animateDpAsState(
+            targetValue = cardTop,
+            animationSpec = tween(220, easing = FastOutSlowInEasing),
+            label = "firstLaunchOnboardingCardTop"
+        )
 
         AnimatedContent(
             targetState = step,
             transitionSpec = {
-                (fadeIn(tween(220)) + scaleIn(tween(220), initialScale = 0.96f)) togetherWith
-                        (fadeOut(tween(120)) + scaleOut(tween(120), targetScale = 0.98f))
+                (fadeIn(
+                    animationSpec = tween(
+                        durationMillis = 180,
+                        delayMillis = 20,
+                        easing = LinearOutSlowInEasing
+                    )
+                ) togetherWith
+                        fadeOut(
+                            animationSpec = tween(
+                                durationMillis = 110,
+                                easing = FastOutLinearInEasing
+                            )
+                        ))
             },
             label = "firstLaunchOnboardingCard",
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .offset(y = cardTop)
+                .offset(y = animatedCardTop)
                 .padding(horizontal = 22.dp)
         ) { currentStep ->
             ExactFrostedPillCard(
