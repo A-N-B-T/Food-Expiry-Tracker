@@ -253,11 +253,14 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.net.HttpURLConnection
 import java.net.URL
+import java.time.Instant
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
+import java.time.temporal.WeekFields
 import java.util.Calendar
 import java.util.Locale
+import java.time.ZoneId
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
@@ -1834,6 +1837,11 @@ private data class HistoryEntry(
     val lastUsedAt: Long = System.currentTimeMillis()
 )
 
+private data class HistoryDateSection(
+    val title: String,
+    val entries: List<HistoryEntry>
+)
+
 private data class ExpiringFoodHint(
     val name: String,
     val daysLeft: Int
@@ -2532,6 +2540,59 @@ private fun loadAndSyncHistoryEntries(
         saveHistoryEntries(prefs, gson, entries)
     }
     return entries
+}
+
+private fun historyEntryLocalDate(
+    lastUsedAt: Long,
+    zoneId: ZoneId = ZoneId.systemDefault()
+): LocalDate {
+    return Instant.ofEpochMilli(lastUsedAt)
+        .atZone(zoneId)
+        .toLocalDate()
+}
+
+private fun historySectionTitle(
+    entryDate: LocalDate,
+    today: LocalDate,
+    weekFields: WeekFields
+): String {
+    return when {
+        entryDate == today -> "Today"
+        entryDate == today.minusDays(1) -> "Yesterday"
+        entryDate.get(weekFields.weekBasedYear()) == today.get(weekFields.weekBasedYear()) &&
+                entryDate.get(weekFields.weekOfWeekBasedYear()) == today.get(weekFields.weekOfWeekBasedYear()) ->
+            "This week"
+        entryDate.month == today.month && entryDate.year == today.year -> "This month"
+        else -> "Earlier"
+    }
+}
+
+private fun buildHistoryDateSections(
+    entries: List<HistoryEntry>,
+    today: LocalDate = LocalDate.now(),
+    zoneId: ZoneId = ZoneId.systemDefault(),
+    locale: Locale = Locale.getDefault()
+): List<HistoryDateSection> {
+    if (entries.isEmpty()) return emptyList()
+
+    val weekFields = WeekFields.of(locale)
+    val groupedEntries = linkedMapOf<String, MutableList<HistoryEntry>>()
+
+    entries.forEach { entry ->
+        val title = historySectionTitle(
+            entryDate = historyEntryLocalDate(entry.lastUsedAt, zoneId),
+            today = today,
+            weekFields = weekFields
+        )
+        groupedEntries.getOrPut(title) { mutableListOf() }.add(entry)
+    }
+
+    return groupedEntries.map { (title, sectionEntries) ->
+        HistoryDateSection(
+            title = title,
+            entries = sectionEntries
+        )
+    }
 }
 
 private fun recordFoodNameInHistory(
@@ -4928,6 +4989,9 @@ fun HistoryScreen(
             if (q.isBlank()) src else src.filter { it.name.contains(q, ignoreCase = true) }
         }
     }
+    val historySections by remember {
+        derivedStateOf { buildHistoryDateSections(filtered) }
+    }
     val listState = rememberLazyListState()
     val historyBottomSafePadding = listBottomSafePadding(
         itemCount = filtered.size,
@@ -5032,31 +5096,40 @@ fun HistoryScreen(
                             bottom = 80.dp
                         )
                     ) {
-                        items(
-                            items = filtered,
-                            key = { normalizeFoodName(it.name) },
-                            contentType = { "history_food_item" }
-                        ) { entry ->
-                            HistoryFoodCard(
-                                modifier = Modifier.animateItem(
-                                    fadeInSpec = null,
-                                    fadeOutSpec = null,
-                                    placementSpec = tween(
-                                        durationMillis = SWIPE_ITEM_PLACEMENT_DURATION_MS,
-                                        easing = FastOutSlowInEasing
-                                    )
-                                ),
-                                name = entry.name,
-                                onQuickAdd = {
-                                    quickAddName = entry.name
-                                    quickAddExpiry = ""
-                                    quickAddCategory = null
-                                    quickAddError = null
-                                },
-                                onDelete = {
-                                    pendingDeleteHistoryEntry = entry
-                                }
-                            )
+                        historySections.forEach { section ->
+                            item(
+                                key = "history-section-${section.title}",
+                                contentType = "history_section_header"
+                            ) {
+                                HistorySectionHeader(title = section.title)
+                            }
+
+                            items(
+                                items = section.entries,
+                                key = { normalizeFoodName(it.name) },
+                                contentType = { "history_food_item" }
+                            ) { entry ->
+                                HistoryFoodCard(
+                                    modifier = Modifier.animateItem(
+                                        fadeInSpec = null,
+                                        fadeOutSpec = null,
+                                        placementSpec = tween(
+                                            durationMillis = SWIPE_ITEM_PLACEMENT_DURATION_MS,
+                                            easing = FastOutSlowInEasing
+                                        )
+                                    ),
+                                    name = entry.name,
+                                    onQuickAdd = {
+                                        quickAddName = entry.name
+                                        quickAddExpiry = ""
+                                        quickAddCategory = null
+                                        quickAddError = null
+                                    },
+                                    onDelete = {
+                                        pendingDeleteHistoryEntry = entry
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -5250,6 +5323,36 @@ fun HistoryScreen(
                     Text("Cancel")
                 }
             }
+        )
+    }
+}
+
+@Composable
+private fun HistorySectionHeader(
+    title: String,
+    modifier: Modifier = Modifier
+) {
+    val scheme = MaterialTheme.colorScheme
+
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(top = 6.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = scheme.onSurfaceVariant.copy(alpha = 0.86f)
+        )
+
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .height(1.dp)
+                .background(scheme.outlineVariant.copy(alpha = 0.5f))
         )
     }
 }
