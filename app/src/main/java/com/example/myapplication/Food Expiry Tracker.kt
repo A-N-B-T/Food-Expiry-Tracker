@@ -1769,6 +1769,29 @@ private fun OverrideStatusBarColor(
 }
 
 @Composable
+private fun OverrideNavigationBarColor(
+    color: Color,
+    isDarkIcons: Boolean
+) {
+    val view = LocalView.current
+    val defaultLightNavigationBars = MaterialTheme.colorScheme.background.luminance() > 0.5f
+    if (view.isInEditMode) return
+
+    DisposableEffect(view, color, isDarkIcons) {
+        val window = (view.context as Activity).window
+        val insetsController = WindowInsetsControllerCompat(window, view)
+
+        window.navigationBarColor = color.toArgb()
+        insetsController.isAppearanceLightNavigationBars = isDarkIcons
+
+        onDispose {
+            window.navigationBarColor = Color.Transparent.toArgb()
+            insetsController.isAppearanceLightNavigationBars = defaultLightNavigationBars
+        }
+    }
+}
+
+@Composable
 private fun OverlayBackHandler(
     enabled: Boolean,
     onBack: () -> Unit
@@ -6611,6 +6634,47 @@ private fun RecipeLoadingCard() {
 }
 
 @Composable
+private fun RecipeJumpToTopButton(
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    val scheme = MaterialTheme.colorScheme
+    val isDarkTheme = scheme.background.luminance() < 0.5f
+    val containerColor =
+        if (isDarkTheme) {
+            scheme.surfaceContainerHighest.copy(alpha = 0.88f)
+        } else {
+            Color.White.copy(alpha = 0.94f)
+        }
+    val borderColor = scheme.outlineVariant.copy(alpha = if (isDarkTheme) 0.78f else 0.58f)
+
+    GlassSurface(
+        modifier = modifier
+            .size(42.dp)
+            .clip(RoundedCornerShape(50))
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(50),
+        tone = GlassTone.CHROME,
+        containerColor = containerColor,
+        borderColor = borderColor,
+        showDecorativeOverlays = false,
+        shadowElevation = 2.dp
+    ) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.KeyboardArrowUp,
+                contentDescription = "Go to top of recipe chat",
+                tint = scheme.onSurface.copy(alpha = 0.86f),
+                modifier = Modifier.size(22.dp)
+            )
+        }
+    }
+}
+
+@Composable
 private fun RecipeJumpToBottomButton(
     modifier: Modifier = Modifier,
     onClick: () -> Unit
@@ -6871,6 +6935,9 @@ private fun RecipeScreen(
     var pendingLatestMessageScroll by remember { mutableIntStateOf(0) }
     var aiRequestVersion by remember { mutableIntStateOf(0) }
     var showJumpToBottom by remember { mutableStateOf(false) }
+    val showJumpToTop by remember {
+        derivedStateOf { listState.canScrollBackward }
+    }
     var showNewChatDialog by rememberSaveable { mutableStateOf(false) }
     var showLaunchIntro by rememberSaveable {
         mutableStateOf(!hasShownRecipeLaunchIntroThisProcess)
@@ -7333,26 +7400,58 @@ private fun RecipeScreen(
                         .padding(bottom = recipePromptBottomPadding),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    AnimatedVisibility(
-                        visible = showJumpToBottom,
-                        enter = fadeIn(animationSpec = tween(140)) +
-                                slideInVertically(
-                                    animationSpec = tween(180, easing = LinearOutSlowInEasing)
-                                ) { it / 2 } +
-                                scaleIn(
-                                    initialScale = 0.92f,
-                                    animationSpec = tween(180, easing = LinearOutSlowInEasing)
-                                ),
-                        exit = fadeOut(animationSpec = tween(120)) +
-                                slideOutVertically(
-                                    animationSpec = tween(180, easing = FastOutLinearInEasing)
-                                ) { it } +
-                                scaleOut(
-                                    targetScale = 0.92f,
-                                    animationSpec = tween(180, easing = FastOutLinearInEasing)
-                                )
+                    Column(
+                        modifier = Modifier.padding(bottom = 10.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Box(modifier = Modifier.padding(bottom = 10.dp)) {
+                        AnimatedVisibility(
+                            visible = showJumpToTop,
+                            enter = fadeIn(animationSpec = tween(140)) +
+                                    slideInVertically(
+                                        animationSpec = tween(180, easing = LinearOutSlowInEasing)
+                                    ) { it / 2 } +
+                                    scaleIn(
+                                        initialScale = 0.92f,
+                                        animationSpec = tween(180, easing = LinearOutSlowInEasing)
+                                    ),
+                            exit = fadeOut(animationSpec = tween(120)) +
+                                    slideOutVertically(
+                                        animationSpec = tween(180, easing = FastOutLinearInEasing)
+                                    ) { it } +
+                                    scaleOut(
+                                        targetScale = 0.92f,
+                                        animationSpec = tween(180, easing = FastOutLinearInEasing)
+                                    )
+                        ) {
+                            RecipeJumpToTopButton(
+                                onClick = {
+                                    scope.launch {
+                                        listState.scrollToItem(0)
+                                    }
+                                }
+                            )
+                        }
+
+                        AnimatedVisibility(
+                            visible = showJumpToBottom,
+                            enter = fadeIn(animationSpec = tween(140)) +
+                                    slideInVertically(
+                                        animationSpec = tween(180, easing = LinearOutSlowInEasing)
+                                    ) { it / 2 } +
+                                    scaleIn(
+                                        initialScale = 0.92f,
+                                        animationSpec = tween(180, easing = LinearOutSlowInEasing)
+                                    ),
+                            exit = fadeOut(animationSpec = tween(120)) +
+                                    slideOutVertically(
+                                        animationSpec = tween(180, easing = FastOutLinearInEasing)
+                                    ) { it } +
+                                    scaleOut(
+                                        targetScale = 0.92f,
+                                        animationSpec = tween(180, easing = FastOutLinearInEasing)
+                                    )
+                        ) {
                             RecipeJumpToBottomButton(
                                 onClick = {
                                     showJumpToBottom = false
@@ -7471,6 +7570,7 @@ fun CategoryScreen() {
 fun ProfileScreen(navController: NavHostController) {
     val context = LocalContext.current
     val density = LocalDensity.current
+    val colorScheme = MaterialTheme.colorScheme
     val accountSession = rememberAccountSessionPreference()
     var localProfileName by rememberSaveable { mutableStateOf(loadLocalProfileName(context)) }
     var localProfilePhotoUri by rememberSaveable { mutableStateOf(loadLocalProfilePhotoUri(context)) }
@@ -7514,73 +7614,88 @@ fun ProfileScreen(navController: NavHostController) {
         WindowInsets.navigationBars.getBottom(this).toDp() + 84.dp
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .statusBarsPadding()
-            .padding(top = 8.dp)
-            .padding(horizontal = 16.dp)
-            .padding(bottom = profileBottomSafePadding)
-            .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        @Suppress("UNNECESSARY_SAFE_CALL")
-        ProfileHeaderCard(
-            name = profileName,
-            subtitle = profileSubtitle,
-            photoUrl = if (isGoogleProfile) accountSession?.photoUrl else null,
-            localPhotoUri = if (canUseLocalProfilePhoto) localProfilePhotoUri else null,
-            showEditName = accountSession == null,
-            canEditPhoto = canUseLocalProfilePhoto,
-            onEditPhoto = {
-                localPhotoPickerLauncher.launch(arrayOf("image/*"))
-            },
-            onEditName = {
-                draftLocalProfileName = localProfileName
-                showEditLocalNameDialog = true
+    OverrideStatusBarColor(
+        color = Color.Transparent,
+        isDarkIcons = colorScheme.background.luminance() > 0.5f
+    )
+    OverrideNavigationBarColor(
+        color = Color.Transparent,
+        isDarkIcons = colorScheme.background.luminance() > 0.5f
+    )
+
+    Scaffold(
+        containerColor = Color.Transparent,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0)
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .statusBarsPadding()
+                .padding(top = 8.dp)
+                .padding(horizontal = 16.dp)
+                .padding(bottom = profileBottomSafePadding)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            @Suppress("UNNECESSARY_SAFE_CALL")
+            ProfileHeaderCard(
+                name = profileName,
+                subtitle = profileSubtitle,
+                photoUrl = if (isGoogleProfile) accountSession?.photoUrl else null,
+                localPhotoUri = if (canUseLocalProfilePhoto) localProfilePhotoUri else null,
+                showEditName = accountSession == null,
+                canEditPhoto = canUseLocalProfilePhoto,
+                onEditPhoto = {
+                    localPhotoPickerLauncher.launch(arrayOf("image/*"))
+                },
+                onEditName = {
+                    draftLocalProfileName = localProfileName
+                    showEditLocalNameDialog = true
+                }
+            )
+
+            ProfileSectionTitle("Manage")
+            ProfileActionRow(
+                title = "Account",
+                subtitle = "Sign in, sync, and move your pantry between devices",
+                icon = Icons.Filled.Person
+            ) {
+                navController.navigate(Route.Account.r)
             }
-        )
+            ProfileActionRow(
+                title = "Settings",
+                subtitle = "Theme, countdown format, and notifications",
+                icon = Icons.Filled.Settings
+            ) {
+                navController.navigate(Route.Settings.r)
+            }
 
-        ProfileSectionTitle("Manage")
-        ProfileActionRow(
-            title = "Account",
-            subtitle = "Sign in, sync, and move your pantry between devices",
-            icon = Icons.Filled.Person
-        ) {
-            navController.navigate(Route.Account.r)
-        }
-        ProfileActionRow(
-            title = "Settings",
-            subtitle = "Theme, countdown format, and notifications",
-            icon = Icons.Filled.Settings
-        ) {
-            navController.navigate(Route.Settings.r)
-        }
+            ProfileSectionTitle("Transfer")
+            PantryTransferCard()
 
-        ProfileSectionTitle("Transfer")
-        PantryTransferCard()
-
-        ProfileSectionTitle("More")
-        ProfileActionRow(
-            title = "Help & support",
-            subtitle = "Tips for pantry, history, and AI recipes",
-            icon = Icons.Filled.Help
-        ) {
-            navController.navigate(Route.Help.r)
-        }
-        ProfileActionRow(
-            title = "Privacy",
-            subtitle = "How your pantry and AI data are handled",
-            icon = Icons.Filled.Lock
-        ) {
-            navController.navigate(Route.Privacy.r)
-        }
-        ProfileActionRow(
-            title = "About",
-            subtitle = "App details and version ${BuildConfig.VERSION_NAME}",
-            icon = Icons.Filled.Info
-        ) {
-            navController.navigate(Route.About.r)
+            ProfileSectionTitle("More")
+            ProfileActionRow(
+                title = "Help & support",
+                subtitle = "Tips for pantry, history, and AI recipes",
+                icon = Icons.Filled.Help
+            ) {
+                navController.navigate(Route.Help.r)
+            }
+            ProfileActionRow(
+                title = "Privacy",
+                subtitle = "How your pantry and AI data are handled",
+                icon = Icons.Filled.Lock
+            ) {
+                navController.navigate(Route.Privacy.r)
+            }
+            ProfileActionRow(
+                title = "About",
+                subtitle = "App details and version ${BuildConfig.VERSION_NAME}",
+                icon = Icons.Filled.Info
+            ) {
+                navController.navigate(Route.About.r)
+            }
         }
     }
 
