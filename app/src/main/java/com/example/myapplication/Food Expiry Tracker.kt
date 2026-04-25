@@ -125,6 +125,7 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Person
@@ -132,6 +133,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -1829,8 +1831,16 @@ private data class SortedFoodSnapshot(
     val item: FoodItem,
     val expiryBucket: Int,
     val expiryDistance: Int,
-    val nameKey: String
+    val nameKey: String,
+    val categoryBucket: Int,
+    val categoryKey: String
 )
+
+private enum class PantrySortMode(val label: String) {
+    NEAREST_EXPIRY("Nearest expiry"),
+    NAME_A_TO_Z("A-Z"),
+    CATEGORY("Category")
+}
 
 private data class HistoryEntry(
     val name: String,
@@ -3134,6 +3144,64 @@ private fun daysUntil(expiry: String): Int? = try {
     null
 }
 
+private fun pantrySortSnapshot(item: FoodItem): SortedFoodSnapshot {
+    val daysLeft = daysUntil(item.expiry)
+    val cleanedCategory = item.category.orEmpty().trim()
+
+    return SortedFoodSnapshot(
+        item = item,
+        expiryBucket = when {
+            daysLeft == null -> 2
+            daysLeft < 0 -> 0
+            else -> 1
+        },
+        expiryDistance = when {
+            daysLeft == null -> Int.MAX_VALUE
+            daysLeft < 0 -> abs(daysLeft)
+            else -> daysLeft
+        },
+        nameKey = item.name.trim().lowercase(Locale.US),
+        categoryBucket = if (cleanedCategory.isBlank()) 1 else 0,
+        categoryKey = cleanedCategory.lowercase(Locale.US)
+    )
+}
+
+private fun sortPantryFoods(
+    foods: List<FoodItem>,
+    sortMode: PantrySortMode
+): List<FoodItem> {
+    val snapshots = foods.map(::pantrySortSnapshot)
+
+    val comparator =
+        when (sortMode) {
+            PantrySortMode.NEAREST_EXPIRY -> compareBy<SortedFoodSnapshot>(
+                SortedFoodSnapshot::expiryBucket,
+                SortedFoodSnapshot::expiryDistance,
+                SortedFoodSnapshot::nameKey,
+                SortedFoodSnapshot::categoryKey
+            )
+
+            PantrySortMode.NAME_A_TO_Z -> compareBy<SortedFoodSnapshot>(
+                SortedFoodSnapshot::nameKey,
+                SortedFoodSnapshot::expiryBucket,
+                SortedFoodSnapshot::expiryDistance,
+                SortedFoodSnapshot::categoryKey
+            )
+
+            PantrySortMode.CATEGORY -> compareBy<SortedFoodSnapshot>(
+                SortedFoodSnapshot::categoryBucket,
+                SortedFoodSnapshot::categoryKey,
+                SortedFoodSnapshot::expiryBucket,
+                SortedFoodSnapshot::expiryDistance,
+                SortedFoodSnapshot::nameKey
+            )
+        }
+
+    return snapshots
+        .sortedWith(comparator)
+        .map(SortedFoodSnapshot::item)
+}
+
 private data class CountdownStyle(val bg: Color, val fg: Color)
 
 private fun countdownTextColor(background: Color): Color {
@@ -4108,7 +4176,7 @@ private fun BulkCategorySelectionSheet(
 }
 
 @Composable
-fun MyPantryTopBar(
+private fun MyPantryTopBar(
     modifier: Modifier = Modifier,
     isSelecting: Boolean,
     selectedItemsCount: Int,
@@ -4125,6 +4193,8 @@ fun MyPantryTopBar(
     categories: List<String>,
     selectedFilterCategory: String,
     onFilterChange: (String) -> Unit,
+    selectedSortMode: PantrySortMode,
+    onSortChange: (PantrySortMode) -> Unit,
 
     onEnterSelectionMode: () -> Unit,
     onToggleSelectAll: () -> Unit,
@@ -4141,6 +4211,7 @@ fun MyPantryTopBar(
         if (selectedItemsCount == 1) "1 item selected"
         else "$selectedItemsCount items selected"
     val categoryRowState = rememberLazyListState()
+    var showSortMenu by remember { mutableStateOf(false) }
 
     Box(
         modifier = modifier
@@ -4232,7 +4303,48 @@ fun MyPantryTopBar(
                             )
                         }
 
-                        IconButton(onClick = onEnterSelectionMode) {
+                        Box {
+                            IconButton(onClick = { showSortMenu = true }) {
+                                Icon(
+                                    imageVector = Icons.Default.Sort,
+                                    contentDescription = "Show sort options",
+                                    tint = if (selectedSortMode == PantrySortMode.NEAREST_EXPIRY) {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    } else {
+                                        MaterialTheme.colorScheme.primary
+                                    }
+                                )
+                            }
+
+                            DropdownMenu(
+                                expanded = showSortMenu,
+                                onDismissRequest = { showSortMenu = false }
+                            ) {
+                                PantrySortMode.entries.forEach { mode ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                text = mode.label,
+                                                fontWeight = if (selectedSortMode == mode) {
+                                                    FontWeight.SemiBold
+                                                } else {
+                                                    FontWeight.Normal
+                                                }
+                                            )
+                                        },
+                                        onClick = {
+                                            showSortMenu = false
+                                            onSortChange(mode)
+                                        }
+                                    )
+                                }
+                            }
+                        }
+
+                        IconButton(onClick = {
+                            showSortMenu = false
+                            onEnterSelectionMode()
+                        }) {
                             Icon(
                                 Icons.Default.Checklist,
                                 contentDescription = "Enter selection mode"
@@ -9048,9 +9160,16 @@ fun FoodEntryScreen(
     val isHomeSearchKeyboardVisible = WindowInsets.ime.getBottom(density) > 0
     var homeSearchKeyboardWasVisible by remember { mutableStateOf(false) }
     var selectedFilterCategory by rememberSaveable { mutableStateOf("All") }
+    var selectedSortModeName by rememberSaveable {
+        mutableStateOf(PantrySortMode.NEAREST_EXPIRY.name)
+    }
     var savedListIndex by rememberSaveable { mutableIntStateOf(0) }
     var savedListOffset by rememberSaveable { mutableIntStateOf(0) }
     var filterChangeJob by remember { mutableStateOf<Job?>(null) }
+    var sortChangeJob by remember { mutableStateOf<Job?>(null) }
+    val selectedSortMode =
+        PantrySortMode.entries.firstOrNull { it.name == selectedSortModeName }
+            ?: PantrySortMode.NEAREST_EXPIRY
 
     fun closePantrySearch() {
         focusManager.clearFocus(force = true)
@@ -9108,6 +9227,19 @@ fun FoodEntryScreen(
             }
         }
     }
+
+    fun updatePantrySort(newSortMode: PantrySortMode) {
+        if (selectedSortMode == newSortMode) return
+
+        sortChangeJob?.cancel()
+        sortChangeJob = formScope.launch {
+            selectedSortModeName = newSortMode.name
+            if (listState.firstVisibleItemIndex != 0 || listState.firstVisibleItemScrollOffset != 0) {
+                listState.animateScrollToItem(0)
+            }
+        }
+    }
+
     LaunchedEffect(searchQuery) {
         if (
             searchQuery.isNotBlank() &&
@@ -9409,34 +9541,9 @@ fun FoodEntryScreen(
             }
         }
 
-    val sortedFoodList by remember {
+    val sortedFoodList by remember(selectedSortMode) {
         derivedStateOf {
-            foodList
-                .map { item ->
-                    val daysLeft = daysUntil(item.expiry)
-                    SortedFoodSnapshot(
-                        item = item,
-                        expiryBucket = when {
-                            daysLeft == null -> 2
-                            daysLeft < 0 -> 0
-                            else -> 1
-                        },
-                        expiryDistance = when {
-                            daysLeft == null -> Int.MAX_VALUE
-                            daysLeft < 0 -> abs(daysLeft)
-                            else -> daysLeft
-                        },
-                        nameKey = item.name.lowercase()
-                    )
-                }
-                .sortedWith(
-                    compareBy(
-                        SortedFoodSnapshot::expiryBucket,
-                        SortedFoodSnapshot::expiryDistance,
-                        SortedFoodSnapshot::nameKey
-                    )
-                )
-                .map(SortedFoodSnapshot::item)
+            sortPantryFoods(foodList, selectedSortMode)
         }
     }
 
@@ -9692,6 +9799,8 @@ fun FoodEntryScreen(
                     categories = categories,
                     selectedFilterCategory = selectedFilterCategory,
                     onFilterChange = { updatePantryFilter(it) },
+                    selectedSortMode = selectedSortMode,
+                    onSortChange = { updatePantrySort(it) },
 
                     onEnterSelectionMode = {
                         closePantrySearch()
