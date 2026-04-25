@@ -13,7 +13,6 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Build
 import android.os.Bundle
-import android.view.WindowManager
 import android.widget.Toast
 import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
@@ -83,6 +82,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
@@ -272,6 +272,7 @@ private const val COUNTDOWN_FORMAT_KEY = "countdown_format"
 private const val LOCAL_PROFILE_NAME_KEY = "local_profile_name"
 private const val LOCAL_PROFILE_PHOTO_URI_KEY = "local_profile_photo_uri"
 private const val LOCAL_PROFILE_NAME_MAX_LENGTH = 15
+private var hasShownRecipeLaunchIntroThisProcess = false
 
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
 enum class CountdownFormat { DAYS_ONLY, MONTHS_AND_DAYS, YEARS_MONTHS_DAYS }
@@ -969,8 +970,18 @@ private fun HomeFloatingButtons(
 
     AnimatedVisibility(
         visible = visible && showForKeyboard,
-        enter = fadeIn(tween(430)) + slideInVertically(tween(430)) { it / 2 },
-        exit = fadeOut(tween(430)) + slideOutVertically(tween(430)) { it / 2 }
+        enter = fadeIn(
+            animationSpec = tween(
+                durationMillis = 160,
+                easing = LinearOutSlowInEasing
+            )
+        ),
+        exit = fadeOut(
+            animationSpec = tween(
+                durationMillis = 120,
+                easing = FastOutLinearInEasing
+            )
+        )
     ) {
         val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
 
@@ -1753,25 +1764,6 @@ private fun OverrideStatusBarColor(
 }
 
 @Composable
-private fun OverrideSoftInputMode(
-    softInputMode: Int
-) {
-    val view = LocalView.current
-    if (view.isInEditMode) return
-
-    DisposableEffect(view, softInputMode) {
-        val window = (view.context as Activity).window
-        val previousSoftInputMode = window.attributes.softInputMode
-
-        window.setSoftInputMode(softInputMode)
-
-        onDispose {
-            window.setSoftInputMode(previousSoftInputMode)
-        }
-    }
-}
-
-@Composable
 private fun OverlayBackHandler(
     enabled: Boolean,
     onBack: () -> Unit
@@ -2236,6 +2228,11 @@ private fun normalizeFoodName(raw: String): String {
         .lowercase(Locale.US)
         .replace(Regex("\\s+"), " ")
         .replace(Regex("[^\\p{L}\\p{N} ]"), "")
+}
+
+private fun isOnboardingDemoFood(food: FoodItem): Boolean {
+    return normalizeFoodName(food.name) == normalizeFoodName(ONBOARDING_DEMO_FOOD_NAME) &&
+            normalizeFoodName(food.category.orEmpty()) == normalizeFoodName(ONBOARDING_DEMO_CATEGORY_NAME)
 }
 
 private fun cleanHistoryName(raw: String): String {
@@ -2918,7 +2915,7 @@ private fun ExpiryWheelPickerDialog(
                         scaleX = dialogScale
                         scaleY = dialogScale
                         alpha = dialogAlpha
-                },
+                    },
                 shape = RoundedCornerShape(28.dp),
                 shadowElevation = 12.dp
             ) {
@@ -3277,7 +3274,7 @@ fun CompactSearchBar(
                 } else {
                     Modifier
                 }
-        ),
+            ),
         shape = RoundedCornerShape(50.dp),
         tone = GlassTone.SEARCH,
         shadowElevation = 0.dp
@@ -3807,11 +3804,11 @@ private fun EditCategoriesBottomSheet(
                             }
 
                         }
+                    }
                 }
             }
         }
     }
-}
 }
 
 @Composable
@@ -4183,11 +4180,7 @@ fun MyPantryTopBar(
                     }
                 }
 
-                AnimatedVisibility(
-                    visible = !isSelecting && showSearchBar,
-                    enter = smoothVerticalRevealEnter(),
-                    exit = smoothVerticalRevealExit()
-                ) {
+                if (!isSelecting && showSearchBar) {
                     Column {
                         Spacer(Modifier.height(10.dp))
 
@@ -4202,11 +4195,7 @@ fun MyPantryTopBar(
                     }
                 }
 
-                AnimatedVisibility(
-                    visible = !isSelecting,
-                    enter = smoothVerticalRevealEnter(),
-                    exit = smoothVerticalRevealExit()
-                ) {
+                if (!isSelecting) {
                     Column {
                         Spacer(Modifier.height(if (showSearchBar) 4.dp else 10.dp))
                         CategoryPillsLabel()
@@ -4419,9 +4408,9 @@ private fun LazyListFastScroller(
 
     val lastStartIndex = (itemCount - visibleCount).coerceAtLeast(1)
     val currentIndexEstimate = (
-        listState.firstVisibleItemIndex.toFloat() +
-            (listState.firstVisibleItemScrollOffset / averageItemSizePx)
-        ).coerceIn(0f, lastStartIndex.toFloat())
+            listState.firstVisibleItemIndex.toFloat() +
+                    (listState.firstVisibleItemScrollOffset / averageItemSizePx)
+            ).coerceIn(0f, lastStartIndex.toFloat())
 
     val progress = (currentIndexEstimate / lastStartIndex.toFloat()).coerceIn(0f, 1f)
     val thumbHeightPx = if (trackHeightPx == 0) {
@@ -4676,21 +4665,36 @@ fun AppNav(
 
     val shouldHideBottomBar =
         (current == Route.Home.r && hideBottomBar) ||
-            (current == Route.Recipe.r && aiImmersiveMode)
+                (current == Route.Recipe.r && aiImmersiveMode)
+    val isHomeBottomBarTransition = current == Route.Home.r
     val bottomBarOffset by animateDpAsState(
         targetValue = if (shouldHideBottomBar) 136.dp else 0.dp,
-        animationSpec = tween(
-            durationMillis = if (shouldHideBottomBar) 380 else 260,
-            easing = FastOutSlowInEasing
-        ),
+        animationSpec = if (isHomeBottomBarTransition) {
+            tween(
+                durationMillis = if (shouldHideBottomBar) 160 else 140,
+                easing = FastOutSlowInEasing
+            )
+        } else {
+            tween(
+                durationMillis = if (shouldHideBottomBar) 380 else 260,
+                easing = FastOutSlowInEasing
+            )
+        },
         label = "appBottomBarOffset"
     )
     val bottomBarAlpha by animateFloatAsState(
         targetValue = if (shouldHideBottomBar) 0f else 1f,
-        animationSpec = tween(
-            durationMillis = if (shouldHideBottomBar) 320 else 220,
-            easing = FastOutSlowInEasing
-        ),
+        animationSpec = if (isHomeBottomBarTransition) {
+            tween(
+                durationMillis = if (shouldHideBottomBar) 130 else 120,
+                easing = FastOutSlowInEasing
+            )
+        } else {
+            tween(
+                durationMillis = if (shouldHideBottomBar) 320 else 220,
+                easing = FastOutSlowInEasing
+            )
+        },
         label = "appBottomBarAlpha"
     )
 
@@ -4777,7 +4781,41 @@ fun AppNav(
                         onOverlayVisibilityChange = { blurBackgroundForOverlay = it }
                     )
                 }
-                composable(Route.Recipe.r) {
+                composable(
+                    route = Route.Recipe.r,
+                    enterTransition = {
+                        fadeIn(
+                            animationSpec = tween(
+                                durationMillis = 260,
+                                easing = LinearOutSlowInEasing
+                            )
+                        )
+                    },
+                    exitTransition = {
+                        fadeOut(
+                            animationSpec = tween(
+                                durationMillis = 180,
+                                easing = FastOutLinearInEasing
+                            )
+                        )
+                    },
+                    popEnterTransition = {
+                        fadeIn(
+                            animationSpec = tween(
+                                durationMillis = 220,
+                                easing = LinearOutSlowInEasing
+                            )
+                        )
+                    },
+                    popExitTransition = {
+                        fadeOut(
+                            animationSpec = tween(
+                                durationMillis = 160,
+                                easing = FastOutLinearInEasing
+                            )
+                        )
+                    }
+                ) {
                     RecipeScreen(
                         sessionState = recipeScreenSessionState,
                         immersiveMode = aiImmersiveMode,
@@ -5276,38 +5314,8 @@ private fun PantryFoodCard(
         else -> Alignment.CenterStart
     }
 
-    val checkboxGapWidth by animateDpAsState(
-        targetValue = if (isSelecting) 10.dp else 0.dp,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioNoBouncy,
-            stiffness = Spring.StiffnessMediumLow
-        ),
-        label = "checkboxGapWidth"
-    )
-    val checkboxSlotWidth by animateDpAsState(
-        targetValue = if (isSelecting) 36.dp else 0.dp,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioNoBouncy,
-            stiffness = Spring.StiffnessMediumLow
-        ),
-        label = "checkboxSlotWidth"
-    )
-    val checkboxScale by animateFloatAsState(
-        targetValue = if (isSelecting) 1f else 0.9f,
-        animationSpec = tween(
-            durationMillis = if (isSelecting) 190 else 150,
-            easing = if (isSelecting) LinearOutSlowInEasing else FastOutLinearInEasing
-        ),
-        label = "checkboxScale"
-    )
-    val checkboxAlpha by animateFloatAsState(
-        targetValue = if (isSelecting) 1f else 0f,
-        animationSpec = tween(
-            durationMillis = if (isSelecting) 190 else 130,
-            easing = if (isSelecting) LinearOutSlowInEasing else FastOutLinearInEasing
-        ),
-        label = "checkboxAlpha"
-    )
+    val checkboxGapWidth = if (isSelecting) 10.dp else 0.dp
+    val checkboxSlotWidth = if (isSelecting) 36.dp else 0.dp
 
     AnimatedVisibility(
         modifier = modifier.fillMaxWidth(),
@@ -5319,19 +5327,19 @@ private fun PantryFoodCard(
                     easing = FastOutSlowInEasing
                 )
             ) +
-                fadeOut(
-                    animationSpec = tween(
-                        durationMillis = SWIPE_DELETE_EXIT_DURATION_MS,
-                        easing = LinearOutSlowInEasing
+                    fadeOut(
+                        animationSpec = tween(
+                            durationMillis = SWIPE_DELETE_EXIT_DURATION_MS,
+                            easing = LinearOutSlowInEasing
+                        )
+                    ) +
+                    scaleOut(
+                        targetScale = 0.98f,
+                        animationSpec = tween(
+                            durationMillis = SWIPE_DELETE_EXIT_DURATION_MS,
+                            easing = FastOutSlowInEasing
+                        )
                     )
-                ) +
-                scaleOut(
-                    targetScale = 0.98f,
-                    animationSpec = tween(
-                        durationMillis = SWIPE_DELETE_EXIT_DURATION_MS,
-                        easing = FastOutSlowInEasing
-                    )
-                )
     ) {
         Box(
             modifier = Modifier
@@ -5447,23 +5455,15 @@ private fun PantryFoodCard(
 
                             Box(
                                 modifier = Modifier
-                                    .width(checkboxSlotWidth)
-                                    .graphicsLayer { clip = true },
+                                    .width(checkboxSlotWidth),
                                 contentAlignment = Alignment.CenterEnd
                             ) {
-                                Checkbox(
-                                    modifier = Modifier.graphicsLayer {
-                                        alpha = checkboxAlpha
-                                        scaleX = checkboxScale
-                                        scaleY = checkboxScale
-                                    },
-                                    checked = isSelected,
-                                    onCheckedChange = if (isSelecting) {
-                                        onSelectionChange
-                                    } else {
-                                        null
-                                    }
-                                )
+                                if (isSelecting) {
+                                    Checkbox(
+                                        checked = isSelected,
+                                        onCheckedChange = onSelectionChange
+                                    )
+                                }
                             }
                         }
                     }
@@ -6331,7 +6331,7 @@ private fun RecipeAssistantTextCard(
             scheme.primary.copy(alpha = 0.94f)
         } else {
             LocalContentColor.current
-    }
+        }
 
     RecipeChatMessageRow(isUser = false) { bubbleModifier ->
         RecipeChatBubble(
@@ -6593,6 +6593,38 @@ private fun RecipePromptBar(
 }
 
 @Composable
+private fun AiRecipeLaunchIntro(
+    modifier: Modifier = Modifier
+) {
+    val scheme = MaterialTheme.colorScheme
+
+    Box(
+        modifier = modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = "AI Recipe",
+                style = MaterialTheme.typography.displaySmall.copy(
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.4.sp
+                ),
+                color = scheme.primary
+            )
+            Text(
+                text = "Making your recipe space ready",
+                style = MaterialTheme.typography.titleMedium,
+                color = scheme.onSurfaceVariant.copy(alpha = 0.82f),
+                textAlign = TextAlign.Center
+            )
+        }
+    }
+}
+
+@Composable
 private fun RecipeScreen(
     sessionState: RecipeScreenSessionState,
     immersiveMode: Boolean = false,
@@ -6609,23 +6641,9 @@ private fun RecipeScreen(
     val keyboard = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
     val listState = rememberLazyListState()
-    val imeBottomPadding = with(density) { WindowInsets.ime.getBottom(this).toDp() }
     val isRecipeKeyboardVisible = WindowInsets.ime.getBottom(density) > 0
     var keyboardDismissBackGuard by remember { mutableStateOf(false) }
-    val recipePromptBarRestingBottomPadding =
-        if (immersiveMode) {
-            22.dp
-        } else {
-            82.dp
-        }
-    val recipePromptBarBottomPadding by animateDpAsState(
-        targetValue = maxOf(recipePromptBarRestingBottomPadding, imeBottomPadding + 12.dp),
-        animationSpec = tween(
-            durationMillis = if (immersiveMode) 180 else 170,
-            easing = FastOutSlowInEasing
-        ),
-        label = "recipePromptBarBottomPadding"
-    )
+    val recipePromptBottomPadding = if (immersiveMode) 8.dp else 82.dp
 
     val pantryFoods = remember {
         mutableStateListOf<FoodItem>().apply {
@@ -6639,25 +6657,28 @@ private fun RecipeScreen(
     var aiRequestVersion by remember { mutableIntStateOf(0) }
     var showJumpToBottom by remember { mutableStateOf(false) }
     var showNewChatDialog by rememberSaveable { mutableStateOf(false) }
+    var showLaunchIntro by rememberSaveable {
+        mutableStateOf(!hasShownRecipeLaunchIntroThisProcess)
+    }
     val expiringPromptDismissed = sessionState.expiringPromptDismissed
     val messagesJson = sessionState.messagesJson
     val previousIngredientsJson = sessionState.previousIngredientsJson
     val conversationId = sessionState.conversationId
-
-    OverrideSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING)
-
     val messages = remember(messagesJson) {
         loadRecipeChatMessages(gson, messagesJson)
     }
     val previousIngredients = remember(previousIngredientsJson) {
         loadRecipeIngredientContext(gson, previousIngredientsJson)
     }
-    val pantryIngredientNames by remember {
-        derivedStateOf { pantryFoods.map { it.name } }
+    val aiEligiblePantryFoods by remember {
+        derivedStateOf { pantryFoods.filterNot(::isOnboardingDemoFood) }
     }
-    val soonExpiringFoods by remember(pantryFoods) {
+    val pantryIngredientNames by remember {
+        derivedStateOf { aiEligiblePantryFoods.map { it.name } }
+    }
+    val soonExpiringFoods by remember(aiEligiblePantryFoods) {
         derivedStateOf {
-            pantryFoods
+            aiEligiblePantryFoods
                 .mapNotNull { food ->
                     val daysLeft = daysUntil(food.expiry)
                     if (daysLeft != null && daysLeft in 0..AI_EXPIRING_FOOD_WINDOW_DAYS) {
@@ -6681,9 +6702,9 @@ private fun RecipeScreen(
     }
     val totalVisibleItems =
         (if (showExpiringPrompt) 1 else 0) +
-        (if (messages.isEmpty()) 1 else 0) +
-        visibleMessageItemCount +
-        (if (isLoading) 1 else 0)
+                (if (messages.isEmpty()) 1 else 0) +
+                visibleMessageItemCount +
+                (if (isLoading) 1 else 0)
     val recipeListBottomPadding by animateDpAsState(
         targetValue = if (immersiveMode) 132.dp else 176.dp,
         animationSpec = tween(
@@ -6788,15 +6809,15 @@ private fun RecipeScreen(
 
         if (!useExpiringFoods && requestedRecipeLimitTooHigh(trimmed)) {
             val tooManyRecipeMessages = messages +
-                RecipeChatMessage(
-                    role = RecipeChatRole.USER,
-                    text = trimmed
-                ) +
-                RecipeChatMessage(
-                    role = RecipeChatRole.ASSISTANT,
-                    text = "Sorry, I can only give 1, 2, or 3 recipes at a time.",
-                    isError = true
-                )
+                    RecipeChatMessage(
+                        role = RecipeChatRole.USER,
+                        text = trimmed
+                    ) +
+                    RecipeChatMessage(
+                        role = RecipeChatRole.ASSISTANT,
+                        text = "Sorry, I can only give 1, 2, or 3 recipes at a time.",
+                        isError = true
+                    )
             persistMessages(tooManyRecipeMessages)
             promptText = ""
             keyboard?.hide()
@@ -6812,9 +6833,9 @@ private fun RecipeScreen(
             )
         val wantsMoreFromPrevious =
             !useExpiringFoods &&
-                previousIngredients.isNotEmpty() &&
-                !ingredientEditFollowUp &&
-                wantsMoreRecipeIdeas(trimmed)
+                    previousIngredients.isNotEmpty() &&
+                    !ingredientEditFollowUp &&
+                    wantsMoreRecipeIdeas(trimmed)
 
         if (
             !useExpiringFoods &&
@@ -6831,15 +6852,15 @@ private fun RecipeScreen(
                     "I can only help with food-related recipe requests."
                 }
             val invalidMessages = messages +
-                RecipeChatMessage(
-                    role = RecipeChatRole.USER,
-                    text = trimmed
-                ) +
-                RecipeChatMessage(
-                    role = RecipeChatRole.ASSISTANT,
-                    text = invalidPromptMessage,
-                    isError = true
-                )
+                    RecipeChatMessage(
+                        role = RecipeChatRole.USER,
+                        text = trimmed
+                    ) +
+                    RecipeChatMessage(
+                        role = RecipeChatRole.ASSISTANT,
+                        text = invalidPromptMessage,
+                        isError = true
+                    )
             persistMessages(invalidMessages)
             promptText = ""
             keyboard?.hide()
@@ -6855,15 +6876,15 @@ private fun RecipeScreen(
 
         if (useFullPantryList && frozenPantryIngredients.isEmpty()) {
             val emptyPantryMessages = messages +
-                RecipeChatMessage(
-                    role = RecipeChatRole.USER,
-                    text = trimmed
-                ) +
-                RecipeChatMessage(
-                    role = RecipeChatRole.ASSISTANT,
-                    text = "Add foods in Home first, then ask me to make recipes from your list.",
-                    isError = true
-                )
+                    RecipeChatMessage(
+                        role = RecipeChatRole.USER,
+                        text = trimmed
+                    ) +
+                    RecipeChatMessage(
+                        role = RecipeChatRole.ASSISTANT,
+                        text = "Add foods in Home first, then ask me to make recipes from your list.",
+                        isError = true
+                    )
             persistMessages(emptyPantryMessages)
             promptText = ""
             keyboard?.hide()
@@ -6950,189 +6971,223 @@ private fun RecipeScreen(
         }
     }
 
+    LaunchedEffect(showLaunchIntro) {
+        if (showLaunchIntro) {
+            hasShownRecipeLaunchIntroThisProcess = true
+            delay(760)
+            showLaunchIntro = false
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding()
-                .padding(top = 8.dp)
-                .padding(horizontal = 16.dp)
+        AnimatedVisibility(
+            visible = !showLaunchIntro,
+            enter = fadeIn(
+                animationSpec = tween(
+                    durationMillis = 220,
+                    easing = LinearOutSlowInEasing
+                )
+            ),
+            exit = ExitTransition.None
         ) {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize(),
-                overscrollEffect = null,
-                contentPadding = PaddingValues(
-                    top = 4.dp,
-                    bottom = recipeListBottomPadding
-                ),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .padding(top = 8.dp)
+                    .padding(horizontal = 16.dp)
             ) {
-                if (showExpiringPrompt) {
-                    item(
-                        key = "ai-expiring-prompt",
-                        contentType = "ai-expiring-prompt"
-                    ) {
-                        ExpiringFoodsPromptCard(
-                            foods = soonExpiringFoods,
-                            windowDays = AI_EXPIRING_FOOD_WINDOW_DAYS,
-                            isLoading = isLoading,
-                            onUseExpiringFoods = {
-                                sendRecipePrompt(
-                                    rawRequest = buildExpiringFoodsRequest(soonExpiringFoods),
-                                    useExpiringFoods = true
-                                )
-                            }
-                        )
-                    }
-                }
-
-                if (messages.isEmpty()) {
-                    item(
-                        key = "ai-intro-card",
-                        contentType = "ai-intro-card"
-                    ) {
-                        RecipeIntroCard(hasPantryFoods = pantryFoods.isNotEmpty())
-                    }
-                }
-
-                messages.forEachIndexed { messageIndex, message ->
-                    when (message.role) {
-                        RecipeChatRole.USER -> {
-                            item(
-                                key = "recipe-message-$messageIndex-${message.role}-${message.text.hashCode()}",
-                                contentType = "recipe-user-message"
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    overscrollEffect = null,
+                    contentPadding = PaddingValues(
+                        top = 4.dp,
+                        bottom = recipeListBottomPadding
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    if (messages.isNotEmpty() || isLoading) {
+                        item(
+                            key = "recipe-new-chat-header",
+                            contentType = "recipe-header"
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 2.dp),
+                                horizontalArrangement = Arrangement.End
                             ) {
-                                RecipeUserMessageCard(message.text)
-                            }
-                        }
-
-                        RecipeChatRole.ASSISTANT -> {
-                            if (message.recipes.isEmpty()) {
-                                item(
-                                    key = "recipe-message-$messageIndex-${message.role}-${message.text.hashCode()}",
-                                    contentType = "recipe-assistant-text"
-                                ) {
-                                    RecipeAssistantMessageCard(message)
-                                }
-                            } else {
-                                item(
-                                    key = "recipe-message-$messageIndex-${message.role}-${message.text.hashCode()}",
-                                    contentType = "recipe-assistant-text"
-                                ) {
-                                    RecipeAssistantTextCard(message)
-                                }
-
-                                itemsIndexed(
-                                    items = message.recipes,
-                                    key = { recipeIndex, recipe ->
-                                        "recipe-card-$messageIndex-$recipeIndex-${recipe.title.hashCode()}"
-                                    },
-                                    contentType = { _, _ -> "recipe-card" }
-                                ) { _, recipe ->
-                                    RecipeAssistantRecipeCard(recipe)
-                                }
-
-                                item(
-                                    key = "recipe-follow-up-$messageIndex-${message.text.hashCode()}",
-                                    contentType = "recipe-follow-up"
-                                ) {
-                                    RecipeAssistantFollowUpHintCard()
-                                }
+                                RecipeNewChatButton(onClick = { showNewChatDialog = true })
                             }
                         }
                     }
-                }
 
-                if (isLoading) {
-                    item(
-                        key = "recipe-loading",
-                        contentType = "recipe-loading"
-                    ) {
-                        RecipeLoadingCard()
-                    }
-                }
-            }
-
-            AnimatedVisibility(
-                visible = messages.isNotEmpty() || isLoading,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(top = 10.dp, end = 2.dp),
-                enter = fadeIn(animationSpec = tween(140)) +
-                        scaleIn(
-                            initialScale = 0.92f,
-                            animationSpec = tween(160, easing = LinearOutSlowInEasing)
-                        ),
-                exit = fadeOut(animationSpec = tween(120)) +
-                        scaleOut(
-                            targetScale = 0.92f,
-                            animationSpec = tween(140, easing = FastOutLinearInEasing)
-                        )
-            ) {
-                RecipeNewChatButton(onClick = { showNewChatDialog = true })
-            }
-
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = recipePromptBarBottomPadding + 88.dp)
-            ) {
-                AnimatedVisibility(
-                    visible = showJumpToBottom,
-                    enter = fadeIn(animationSpec = tween(140)) +
-                            slideInVertically(
-                                animationSpec = tween(180, easing = LinearOutSlowInEasing)
-                            ) { it / 2 } +
-                            scaleIn(
-                                initialScale = 0.92f,
-                                animationSpec = tween(180, easing = LinearOutSlowInEasing)
-                            ),
-                    exit = fadeOut(animationSpec = tween(120)) +
-                            slideOutVertically(
-                                animationSpec = tween(180, easing = FastOutLinearInEasing)
-                            ) { it } +
-                            scaleOut(
-                                targetScale = 0.92f,
-                                animationSpec = tween(180, easing = FastOutLinearInEasing)
+                    if (showExpiringPrompt) {
+                        item(
+                            key = "ai-expiring-prompt",
+                            contentType = "ai-expiring-prompt"
+                        ) {
+                            ExpiringFoodsPromptCard(
+                                foods = soonExpiringFoods,
+                                windowDays = AI_EXPIRING_FOOD_WINDOW_DAYS,
+                                isLoading = isLoading,
+                                onUseExpiringFoods = {
+                                    sendRecipePrompt(
+                                        rawRequest = buildExpiringFoodsRequest(soonExpiringFoods),
+                                        useExpiringFoods = true
+                                    )
+                                }
                             )
-                ) {
-                    RecipeJumpToBottomButton(
-                        onClick = {
-                            showJumpToBottom = false
-                            scope.launch {
-                                val measuredLastItemIndex = listState.layoutInfo.totalItemsCount - 1
-                                val lastItemIndex = if (measuredLastItemIndex >= 0) {
-                                    measuredLastItemIndex
-                                } else {
-                                    (totalVisibleItems - 1).coerceAtLeast(0)
+                        }
+                    }
+
+                    if (messages.isEmpty()) {
+                        item(
+                            key = "ai-intro-card",
+                            contentType = "ai-intro-card"
+                        ) {
+                            RecipeIntroCard(hasPantryFoods = pantryFoods.isNotEmpty())
+                        }
+                    }
+
+                    messages.forEachIndexed { messageIndex, message ->
+                        when (message.role) {
+                            RecipeChatRole.USER -> {
+                                item(
+                                    key = "recipe-message-$messageIndex-${message.role}-${message.text.hashCode()}",
+                                    contentType = "recipe-user-message"
+                                ) {
+                                    RecipeUserMessageCard(message.text)
                                 }
-                                listState.scrollToItem(lastItemIndex, Int.MAX_VALUE)
+                            }
+
+                            RecipeChatRole.ASSISTANT -> {
+                                if (message.recipes.isEmpty()) {
+                                    item(
+                                        key = "recipe-message-$messageIndex-${message.role}-${message.text.hashCode()}",
+                                        contentType = "recipe-assistant-text"
+                                    ) {
+                                        RecipeAssistantMessageCard(message)
+                                    }
+                                } else {
+                                    item(
+                                        key = "recipe-message-$messageIndex-${message.role}-${message.text.hashCode()}",
+                                        contentType = "recipe-assistant-text"
+                                    ) {
+                                        RecipeAssistantTextCard(message)
+                                    }
+
+                                    itemsIndexed(
+                                        items = message.recipes,
+                                        key = { recipeIndex, recipe ->
+                                            "recipe-card-$messageIndex-$recipeIndex-${recipe.title.hashCode()}"
+                                        },
+                                        contentType = { _, _ -> "recipe-card" }
+                                    ) { _, recipe ->
+                                        RecipeAssistantRecipeCard(recipe)
+                                    }
+
+                                    item(
+                                        key = "recipe-follow-up-$messageIndex-${message.text.hashCode()}",
+                                        contentType = "recipe-follow-up"
+                                    ) {
+                                        RecipeAssistantFollowUpHintCard()
+                                    }
+                                }
                             }
                         }
-                    )
-                }
-            }
+                    }
 
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = recipePromptBarBottomPadding)
-            ) {
-                Box(
+                    if (isLoading) {
+                        item(
+                            key = "recipe-loading",
+                            contentType = "recipe-loading"
+                        ) {
+                            RecipeLoadingCard()
+                        }
+                    }
+                }
+
+                Column(
                     modifier = Modifier
+                        .align(Alignment.BottomCenter)
                         .fillMaxWidth()
-                        .padding(vertical = 8.dp)
+                        .navigationBarsPadding()
+                        .imePadding()
+                        .padding(bottom = recipePromptBottomPadding),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    RecipePromptBar(
-                        value = promptText,
-                        placeholder = recipePromptPlaceholder(),
-                        isLoading = isLoading,
-                        onValueChange = { promptText = it },
-                        onSend = { sendRecipePrompt(promptText) }
-                    )
+                    AnimatedVisibility(
+                        visible = showJumpToBottom,
+                        enter = fadeIn(animationSpec = tween(140)) +
+                                slideInVertically(
+                                    animationSpec = tween(180, easing = LinearOutSlowInEasing)
+                                ) { it / 2 } +
+                                scaleIn(
+                                    initialScale = 0.92f,
+                                    animationSpec = tween(180, easing = LinearOutSlowInEasing)
+                                ),
+                        exit = fadeOut(animationSpec = tween(120)) +
+                                slideOutVertically(
+                                    animationSpec = tween(180, easing = FastOutLinearInEasing)
+                                ) { it } +
+                                scaleOut(
+                                    targetScale = 0.92f,
+                                    animationSpec = tween(180, easing = FastOutLinearInEasing)
+                                )
+                    ) {
+                        Box(modifier = Modifier.padding(bottom = 10.dp)) {
+                            RecipeJumpToBottomButton(
+                                onClick = {
+                                    showJumpToBottom = false
+                                    scope.launch {
+                                        val measuredLastItemIndex = listState.layoutInfo.totalItemsCount - 1
+                                        val lastItemIndex = if (measuredLastItemIndex >= 0) {
+                                            measuredLastItemIndex
+                                        } else {
+                                            (totalVisibleItems - 1).coerceAtLeast(0)
+                                        }
+                                        listState.scrollToItem(lastItemIndex, Int.MAX_VALUE)
+                                    }
+                                }
+                            )
+                        }
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp)
+                    ) {
+                        RecipePromptBar(
+                            value = promptText,
+                            placeholder = recipePromptPlaceholder(),
+                            isLoading = isLoading,
+                            onValueChange = { promptText = it },
+                            onSend = { sendRecipePrompt(promptText) }
+                        )
+                    }
                 }
             }
+        }
+
+        AnimatedVisibility(
+            visible = showLaunchIntro,
+            enter = fadeIn(
+                animationSpec = tween(
+                    durationMillis = 180,
+                    easing = LinearOutSlowInEasing
+                )
+            ),
+            exit = fadeOut(
+                animationSpec = tween(
+                    durationMillis = 180,
+                    easing = FastOutLinearInEasing
+                )
+            )
+        ) {
+            AiRecipeLaunchIntro()
         }
     }
 
@@ -7200,6 +7255,7 @@ fun CategoryScreen() {
 @Composable
 fun ProfileScreen(navController: NavHostController) {
     val context = LocalContext.current
+    val density = LocalDensity.current
     val accountSession = rememberAccountSessionPreference()
     var localProfileName by rememberSaveable { mutableStateOf(loadLocalProfileName(context)) }
     var localProfilePhotoUri by rememberSaveable { mutableStateOf(loadLocalProfilePhotoUri(context)) }
@@ -7239,6 +7295,9 @@ fun ProfileScreen(navController: NavHostController) {
             localProfileName.isNotBlank() -> "This name stays on this device."
             else -> "Add a name to personalize your profile on this device."
         }
+    val profileBottomSafePadding = with(density) {
+        WindowInsets.navigationBars.getBottom(this).toDp() + 84.dp
+    }
 
     Column(
         modifier = Modifier
@@ -7246,6 +7305,7 @@ fun ProfileScreen(navController: NavHostController) {
             .statusBarsPadding()
             .padding(top = 8.dp)
             .padding(horizontal = 16.dp)
+            .padding(bottom = profileBottomSafePadding)
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
@@ -7307,8 +7367,6 @@ fun ProfileScreen(navController: NavHostController) {
         ) {
             navController.navigate(Route.About.r)
         }
-
-        Spacer(Modifier.height(110.dp))
     }
 
     if (showEditLocalNameDialog) {
@@ -9034,23 +9092,23 @@ fun FoodEntryScreen(
                 listState.isScrollInProgress
             )
         }.collect { (index, offset, isScrolling) ->
-                if (!isScrolling) {
-                    prevIndex = index
-                    prevOffset = offset
-                    return@collect
-                }
-
-                val scrollingUp = if (index != prevIndex) index < prevIndex else offset < prevOffset
-                val newFabVisible = scrollingUp || (index == 0 && offset == 0)
-
-                if (currentFabVisible != newFabVisible) {
-                    currentFabVisible = newFabVisible
-                    fabVisible = newFabVisible
-                }
-
+            if (!isScrolling) {
                 prevIndex = index
                 prevOffset = offset
+                return@collect
             }
+
+            val scrollingUp = if (index != prevIndex) index < prevIndex else offset < prevOffset
+            val newFabVisible = scrollingUp || (index == 0 && offset == 0)
+
+            if (currentFabVisible != newFabVisible) {
+                currentFabVisible = newFabVisible
+                fabVisible = newFabVisible
+            }
+
+            prevIndex = index
+            prevOffset = offset
+        }
     }
 
     BackHandler(enabled = isSelecting) {
@@ -9359,851 +9417,851 @@ fun FoodEntryScreen(
             contentWindowInsets = WindowInsets.ime,
             floatingActionButtonPosition = FabPosition.End,
             floatingActionButton = {
-                    if (!isSelecting) {
-                        HomeFloatingButtons(
-                            visible = fabVisible && !showForm,
-                            onAddPositioned = if (tutorialActive) {
-                                { bounds ->
-                                    onTutorialTargetPositioned(
-                                        OnboardingSpotlightTarget.HOME_ADD_FAB,
-                                        bounds
-                                    )
-                                }
-                            } else {
-                                null
-                            },
-                            onAiPositioned = if (tutorialActive) {
-                                { bounds: Rect ->
-                                    onTutorialTargetPositioned(
-                                        OnboardingSpotlightTarget.AI_TAB,
-                                        bounds
-                                    )
-                                }
-                            } else {
-                                null
-                            },
-                            onAddClick = {
-                                if (!showForm) {
-                                    editingItem = null
-                                    foodName = ""
-                                    expiryDate = ""
-
-                                    selectedCategory = null
-                                    isCustomCategory = false
-                                    customCategory = ""
-
-                                    showError = false
-                                    nameExistsError = false
-                                    clearBarcodeLookupUi()
-                                    onShowFormChange(true)
-                                }
-                            },
-                            onAiClick = {
-                                onOpenAi()
-                            }
-                        )
-
-                    } else if (selectedItems.isNotEmpty()) {
-                        val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
-                        val deleteFabRed = if (isDarkTheme) Color(0xFFFF6257) else Color(0xFFD32F2F)
-                        val deleteFabOverlay = if (isDarkTheme) Color(0xFF9F1F1F) else Color(0xFFB71C1C)
-
-                        EditCategoriesStyledFab(
-                            onClick = { pendingDeleteSelected = true },
-                            icon = Icons.Default.Delete,
-                            contentDescription = "Delete Selected",
-                            backgroundTint = deleteFabOverlay,
-                            iconTint = deleteFabRed,
-                            tintAlpha = if (isDarkTheme) 0.78f else 0.64f,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(start = 30.dp, bottom = 10.dp)
-                        )
-                    }
-                }
-        ) { innerPadding ->
-
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(innerPadding)
-                ) {
-
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 16.dp)
-                    ) {
-
-                        if (filteredFoodList.isEmpty() && searchQuery.isNotBlank()) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(top = pantryContentTopPadding),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text("No food found")
+                if (!isSelecting) {
+                    HomeFloatingButtons(
+                        visible = fabVisible && !showForm,
+                        onAddPositioned = if (tutorialActive) {
+                            { bounds ->
+                                onTutorialTargetPositioned(
+                                    OnboardingSpotlightTarget.HOME_ADD_FAB,
+                                    bounds
+                                )
                             }
                         } else {
-                            Box(modifier = Modifier.fillMaxSize()) {
-                                LazyColumn(
-                                    state = listState,
-                                    modifier = Modifier.fillMaxSize(),
-                                    overscrollEffect = null,
-                                    contentPadding = PaddingValues(
-                                        top = pantryContentTopPadding,
-                                        bottom = 80.dp
-                                    )
-                                ) {
-                                    items(
-                                        items = filteredFoodList,
-                                        key = { "${it.name}|${it.expiry}|${it.category ?: ""}" },
-                                        contentType = { "pantry_food_item" }
-                                    ) { food ->
-                                        val tutorialItemModifier =
-                                            if (tutorialActive && food == tutorialPantryTarget) {
-                                                Modifier.onGloballyPositioned { coordinates ->
-                                                    onTutorialTargetPositioned(
-                                                        OnboardingSpotlightTarget.PANTRY_ITEM,
-                                                        coordinates.boundsInRoot()
-                                                    )
-                                                }
-                                            } else {
-                                                Modifier
-                                            }
-
-                                        PantryFoodCard(
-                                            modifier = Modifier
-                                                .then(tutorialItemModifier)
-                                                .animateItem(
-                                                    fadeInSpec = null,
-                                                    fadeOutSpec = null,
-                                                    placementSpec = tween(
-                                                        durationMillis = SWIPE_ITEM_PLACEMENT_DURATION_MS,
-                                                        easing = FastOutSlowInEasing
-                                                    )
-                                                ),
-                                            food = food,
-                                            countdownFormat = countdownFormat,
-                                            isSelecting = isSelecting,
-                                            isSelected = selectedItems.contains(food),
-                                            onSelectionChange = { checked ->
-                                                if (checked) {
-                                                    if (!selectedItems.contains(food)) {
-                                                        selectedItems.add(food)
-                                                    }
-                                                } else {
-                                                    selectedItems.remove(food)
-                                                }
-                                            },
-                                            onEdit = { openEditFoodForm(food) },
-                                            onDelete = { pendingDelete = food }
-                                        )
-                                    }
-                                }
+                            null
+                        },
+                        onAiPositioned = if (tutorialActive) {
+                            { bounds: Rect ->
+                                onTutorialTargetPositioned(
+                                    OnboardingSpotlightTarget.AI_TAB,
+                                    bounds
+                                )
                             }
+                        } else {
+                            null
+                        },
+                        onAddClick = {
+                            if (!showForm) {
+                                editingItem = null
+                                foodName = ""
+                                expiryDate = ""
+
+                                selectedCategory = null
+                                isCustomCategory = false
+                                customCategory = ""
+
+                                showError = false
+                                nameExistsError = false
+                                clearBarcodeLookupUi()
+                                onShowFormChange(true)
+                            }
+                        },
+                        onAiClick = {
+                            onOpenAi()
                         }
-                    }
+                    )
 
-                    MyPantryTopBar(
+                } else if (selectedItems.isNotEmpty()) {
+                    val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
+                    val deleteFabRed = if (isDarkTheme) Color(0xFFFF6257) else Color(0xFFD32F2F)
+                    val deleteFabOverlay = if (isDarkTheme) Color(0xFF9F1F1F) else Color(0xFFB71C1C)
+
+                    EditCategoriesStyledFab(
+                        onClick = { pendingDeleteSelected = true },
+                        icon = Icons.Default.Delete,
+                        contentDescription = "Delete Selected",
+                        backgroundTint = deleteFabOverlay,
+                        iconTint = deleteFabRed,
+                        tintAlpha = if (isDarkTheme) 0.78f else 0.64f,
                         modifier = Modifier
-                            .align(Alignment.TopCenter)
-                            .onSizeChanged { pantryTopBarHeightPx = it.height },
-                        isSelecting = isSelecting,
-                        selectedItemsCount = selectedItems.size,
-                        hasVisibleItems = filteredFoodList.isNotEmpty(),
-                        allVisibleItemsSelected = allVisibleItemsSelected,
-
-                        showSearchBar = showPantrySearchBar,
-                        searchQuery = searchQuery,
-                        onSearchQueryChange = { searchQuery = it },
-                        onShowSearchBar = {
-                            showPantrySearchBar = true
-                            homeSearchFocus.requestFocus()
-                            keyboard?.show()
-                        },
-                        searchTextFieldModifier = Modifier.focusRequester(homeSearchFocus),
-                        onSearchBarTap = {
-                            homeSearchFocus.requestFocus()
-                            keyboard?.show()
-                        },
-
-                        categories = categories,
-                        selectedFilterCategory = selectedFilterCategory,
-                        onFilterChange = { updatePantryFilter(it) },
-
-                        onEnterSelectionMode = {
-                            closePantrySearch()
-                            isSelecting = true
-                            selectedItems.clear()
-                        },
-                        onToggleSelectAll = {
-                            if (filteredFoodList.isNotEmpty()) {
-                                if (allVisibleItemsSelected) {
-                                    selectedItems.removeAll(filteredFoodList.toSet())
-                                } else {
-                                    filteredFoodList.forEach { item ->
-                                        if (!selectedItems.contains(item)) {
-                                            selectedItems.add(item)
-                                        }
-                                    }
-                                }
-                            }
-                        },
-
-                        onBulkAddToCategoryClick = {
-                            showBulkCategorySheet = true
-                        },
-
-                        onBulkCustomCategoryClick = {
-                            bulkCustomCategoryName = ""
-                            bulkCustomCategoryExistsError = false
-                            showBulkCustomCategoryDialog = true
-                        },
-
-                        onAddCategoryClick = {
-                            editCategoriesBackdropVisible = true
-                            showEditCategoriesSheet = true
-                        },
-                        tutorialActive = tutorialActive,
-                        onTutorialTargetPositioned = onTutorialTargetPositioned
+                            .fillMaxWidth()
+                            .padding(start = 30.dp, bottom = 10.dp)
                     )
                 }
             }
+        ) { innerPadding ->
 
-            EditCategoriesBottomSheet(
-                show = showEditCategoriesSheet,
-                categories = categories,
-                initialCategories = initialCategories,
-                onBeginDismiss = {
-                    editCategoriesBackdropVisible = false
-                },
-                onDismiss = {
-                    editCategoriesBackdropVisible = false
-                    showEditCategoriesSheet = false
-                },
-                onAddClick = {
-                    newCategoryName = ""
-                    addCategoryExistsError = false
-                    showAddCategorySheetDialog = true
-                },
-                onDeleteClick = { cat ->
-                    pendingDeleteCategory = cat
-                }
-            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+            ) {
 
-            BulkCategorySelectionSheet(
-                show = showBulkCategorySheet,
-                categories = categories,
-                onBeginDismiss = {},
-                onDismiss = {
-                    showBulkCategorySheet = false
-                },
-                onCategorySelected = { selectedCategoryName ->
-                    applyCategoryToSelected(selectedCategoryName)
-                }
-            )
-        }
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 16.dp)
+                ) {
 
-
-        pendingDelete?.let { item ->
-            GlassAlertDialog(
-                onDismissRequest = { pendingDelete = null },
-                title = { Text("Delete item?") },
-                text = { Text("Are you sure you want to delete \"${item.name}\"?") },
-                confirmButton = {
-                    TextButton(onClick = {
-                        foodList.remove(item)
-                        selectedItems.remove(item)
-
-                        if (editingItem == item) {
-                            editingItem = null
-                            onShowFormChange(true)
-                            foodName = ""
-                            expiryDate = ""
-                            showError = false
+                    if (filteredFoodList.isEmpty() && searchQuery.isNotBlank()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(top = pantryContentTopPadding),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("No food found")
                         }
+                    } else {
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            LazyColumn(
+                                state = listState,
+                                modifier = Modifier.fillMaxSize(),
+                                overscrollEffect = null,
+                                contentPadding = PaddingValues(
+                                    top = pantryContentTopPadding,
+                                    bottom = 80.dp
+                                )
+                            ) {
+                                items(
+                                    items = filteredFoodList,
+                                    key = { "${it.name}|${it.expiry}|${it.category ?: ""}" },
+                                    contentType = { "pantry_food_item" }
+                                ) { food ->
+                                    val tutorialItemModifier =
+                                        if (tutorialActive && food == tutorialPantryTarget) {
+                                            Modifier.onGloballyPositioned { coordinates ->
+                                                onTutorialTargetPositioned(
+                                                    OnboardingSpotlightTarget.PANTRY_ITEM,
+                                                    coordinates.boundsInRoot()
+                                                )
+                                            }
+                                        } else {
+                                            Modifier
+                                        }
 
-                        pendingDelete = null
-                    }) {
-                        DialogDestructiveText("Delete")
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { pendingDelete = null }) {
-                        Text("Cancel")
-                    }
-                }
-            )
-        }
-
-        pendingDeleteCategory?.let { cat ->
-            GlassAlertDialog(
-                onDismissRequest = { pendingDeleteCategory = null },
-                title = { Text("Delete category?") },
-                text = { Text("Are you sure you want to delete \"$cat\"? (Items in this category won't be deleted.)") },
-                confirmButton = {
-                    TextButton(onClick = {
-                        if (selectedFilterCategory.equals(cat, ignoreCase = true)) {
-                            updatePantryFilter("All")
-                        }
-
-                        for (i in foodList.indices) {
-                            val item = foodList[i]
-                            if ((item.category ?: "").equals(cat, ignoreCase = true)) {
-                                foodList[i] = item.copy(category = null)
+                                    PantryFoodCard(
+                                        modifier = Modifier
+                                            .then(tutorialItemModifier)
+                                            .animateItem(
+                                                fadeInSpec = null,
+                                                fadeOutSpec = null,
+                                                placementSpec = tween(
+                                                    durationMillis = SWIPE_ITEM_PLACEMENT_DURATION_MS,
+                                                    easing = FastOutSlowInEasing
+                                                )
+                                            ),
+                                        food = food,
+                                        countdownFormat = countdownFormat,
+                                        isSelecting = isSelecting,
+                                        isSelected = selectedItems.contains(food),
+                                        onSelectionChange = { checked ->
+                                            if (checked) {
+                                                if (!selectedItems.contains(food)) {
+                                                    selectedItems.add(food)
+                                                }
+                                            } else {
+                                                selectedItems.remove(food)
+                                            }
+                                        },
+                                        onEdit = { openEditFoodForm(food) },
+                                        onDelete = { pendingDelete = food }
+                                    )
+                                }
                             }
                         }
-                        for (i in selectedItems.indices) {
-                            val item = selectedItems[i]
-                            if ((item.category ?: "").equals(cat, ignoreCase = true)) {
-                                selectedItems[i] = item.copy(category = null)
+                    }
+                }
+
+                MyPantryTopBar(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .onSizeChanged { pantryTopBarHeightPx = it.height },
+                    isSelecting = isSelecting,
+                    selectedItemsCount = selectedItems.size,
+                    hasVisibleItems = filteredFoodList.isNotEmpty(),
+                    allVisibleItemsSelected = allVisibleItemsSelected,
+
+                    showSearchBar = showPantrySearchBar,
+                    searchQuery = searchQuery,
+                    onSearchQueryChange = { searchQuery = it },
+                    onShowSearchBar = {
+                        showPantrySearchBar = true
+                        homeSearchFocus.requestFocus()
+                        keyboard?.show()
+                    },
+                    searchTextFieldModifier = Modifier.focusRequester(homeSearchFocus),
+                    onSearchBarTap = {
+                        homeSearchFocus.requestFocus()
+                        keyboard?.show()
+                    },
+
+                    categories = categories,
+                    selectedFilterCategory = selectedFilterCategory,
+                    onFilterChange = { updatePantryFilter(it) },
+
+                    onEnterSelectionMode = {
+                        closePantrySearch()
+                        isSelecting = true
+                        selectedItems.clear()
+                    },
+                    onToggleSelectAll = {
+                        if (filteredFoodList.isNotEmpty()) {
+                            if (allVisibleItemsSelected) {
+                                selectedItems.removeAll(filteredFoodList.toSet())
+                            } else {
+                                filteredFoodList.forEach { item ->
+                                    if (!selectedItems.contains(item)) {
+                                        selectedItems.add(item)
+                                    }
+                                }
                             }
                         }
+                    },
 
-                        deleteCategory(cat)
-                        pendingDeleteCategory = null
-                    }) { DialogDestructiveText("Delete") }
-                },
-                dismissButton = {
-                    TextButton(onClick = { pendingDeleteCategory = null }) { Text("Cancel") }
-                }
-            )
-        }
+                    onBulkAddToCategoryClick = {
+                        showBulkCategorySheet = true
+                    },
 
-        if (showAddCategorySheetDialog) {
-            val addCategoryFocus = remember { FocusRequester() }
-            val keyboard = LocalSoftwareKeyboardController.current
+                    onBulkCustomCategoryClick = {
+                        bulkCustomCategoryName = ""
+                        bulkCustomCategoryExistsError = false
+                        showBulkCustomCategoryDialog = true
+                    },
 
-            LaunchedEffect(Unit) {
-                delay(150)
-                addCategoryFocus.requestFocus()
-                keyboard?.show()
+                    onAddCategoryClick = {
+                        editCategoriesBackdropVisible = true
+                        showEditCategoriesSheet = true
+                    },
+                    tutorialActive = tutorialActive,
+                    onTutorialTargetPositioned = onTutorialTargetPositioned
+                )
             }
+        }
 
-            GlassAlertDialog(
-                onDismissRequest = {
+        EditCategoriesBottomSheet(
+            show = showEditCategoriesSheet,
+            categories = categories,
+            initialCategories = initialCategories,
+            onBeginDismiss = {
+                editCategoriesBackdropVisible = false
+            },
+            onDismiss = {
+                editCategoriesBackdropVisible = false
+                showEditCategoriesSheet = false
+            },
+            onAddClick = {
+                newCategoryName = ""
+                addCategoryExistsError = false
+                showAddCategorySheetDialog = true
+            },
+            onDeleteClick = { cat ->
+                pendingDeleteCategory = cat
+            }
+        )
+
+        BulkCategorySelectionSheet(
+            show = showBulkCategorySheet,
+            categories = categories,
+            onBeginDismiss = {},
+            onDismiss = {
+                showBulkCategorySheet = false
+            },
+            onCategorySelected = { selectedCategoryName ->
+                applyCategoryToSelected(selectedCategoryName)
+            }
+        )
+    }
+
+
+    pendingDelete?.let { item ->
+        GlassAlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text("Delete item?") },
+            text = { Text("Are you sure you want to delete \"${item.name}\"?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    foodList.remove(item)
+                    selectedItems.remove(item)
+
+                    if (editingItem == item) {
+                        editingItem = null
+                        onShowFormChange(true)
+                        foodName = ""
+                        expiryDate = ""
+                        showError = false
+                    }
+
+                    pendingDelete = null
+                }) {
+                    DialogDestructiveText("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    pendingDeleteCategory?.let { cat ->
+        GlassAlertDialog(
+            onDismissRequest = { pendingDeleteCategory = null },
+            title = { Text("Delete category?") },
+            text = { Text("Are you sure you want to delete \"$cat\"? (Items in this category won't be deleted.)") },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (selectedFilterCategory.equals(cat, ignoreCase = true)) {
+                        updatePantryFilter("All")
+                    }
+
+                    for (i in foodList.indices) {
+                        val item = foodList[i]
+                        if ((item.category ?: "").equals(cat, ignoreCase = true)) {
+                            foodList[i] = item.copy(category = null)
+                        }
+                    }
+                    for (i in selectedItems.indices) {
+                        val item = selectedItems[i]
+                        if ((item.category ?: "").equals(cat, ignoreCase = true)) {
+                            selectedItems[i] = item.copy(category = null)
+                        }
+                    }
+
+                    deleteCategory(cat)
+                    pendingDeleteCategory = null
+                }) { DialogDestructiveText("Delete") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeleteCategory = null }) { Text("Cancel") }
+            }
+        )
+    }
+
+    if (showAddCategorySheetDialog) {
+        val addCategoryFocus = remember { FocusRequester() }
+        val keyboard = LocalSoftwareKeyboardController.current
+
+        LaunchedEffect(Unit) {
+            delay(150)
+            addCategoryFocus.requestFocus()
+            keyboard?.show()
+        }
+
+        GlassAlertDialog(
+            onDismissRequest = {
+                showAddCategorySheetDialog = false
+                addCategoryExistsError = false
+            },
+            title = { Text("Add Category", style = MaterialTheme.typography.titleLarge) },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = newCategoryName,
+                        onValueChange = {
+                            newCategoryName = it
+                            addCategoryExistsError = isDuplicateCategoryName(it)
+                        },
+                        singleLine = true,
+                        isError = addCategoryExistsError,
+                        label = { Text("Category name") },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .focusRequester(addCategoryFocus),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(
+                            onDone = {
+                                val cleaned = newCategoryName.trim()
+                                if (cleaned.isBlank()) return@KeyboardActions
+
+                                if (isDuplicateCategoryName(cleaned)) {
+                                    addCategoryExistsError = true
+                                    return@KeyboardActions
+                                }
+
+                                val added = addCategoryOnly(cleaned)
+                                if (added != null) {
+                                    addCategoryExistsError = false
+                                    showAddCategorySheetDialog = false
+                                    newCategoryName = ""
+                                }
+                            }
+                        )
+                    )
+
+                    if (addCategoryExistsError) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            text = "Category already exists!",
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val cleaned = newCategoryName.trim()
+                    if (cleaned.isBlank()) return@TextButton
+
+                    if (isDuplicateCategoryName(cleaned)) {
+                        addCategoryExistsError = true
+                        return@TextButton
+                    }
+
+                    val added = addCategoryOnly(cleaned)
+                    if (added != null) {
+                        addCategoryExistsError = false
+                        showAddCategorySheetDialog = false
+                        newCategoryName = ""
+                    }
+                }) { Text("Add") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
                     showAddCategorySheetDialog = false
                     addCategoryExistsError = false
-                },
-                title = { Text("Add Category", style = MaterialTheme.typography.titleLarge) },
-                text = {
-                    Column {
-                        OutlinedTextField(
-                            value = newCategoryName,
-                            onValueChange = {
-                                newCategoryName = it
-                                addCategoryExistsError = isDuplicateCategoryName(it)
-                            },
-                            singleLine = true,
-                            isError = addCategoryExistsError,
-                            label = { Text("Category name") },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .focusRequester(addCategoryFocus),
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                            keyboardActions = KeyboardActions(
-                                onDone = {
-                                    val cleaned = newCategoryName.trim()
-                                    if (cleaned.isBlank()) return@KeyboardActions
+                }) { Text("Cancel") }
+            }
+        )
+    }
 
-                                    if (isDuplicateCategoryName(cleaned)) {
-                                        addCategoryExistsError = true
-                                        return@KeyboardActions
-                                    }
+    if (showBulkCustomCategoryDialog) {
+        val bulkCustomFocus = remember { FocusRequester() }
+        val keyboard = LocalSoftwareKeyboardController.current
 
-                                    val added = addCategoryOnly(cleaned)
-                                    if (added != null) {
-                                        addCategoryExistsError = false
-                                        showAddCategorySheetDialog = false
-                                        newCategoryName = ""
-                                    }
-                                }
-                            )
-                        )
-
-                        if (addCategoryExistsError) {
-                            Spacer(Modifier.height(8.dp))
-                            Text(
-                                text = "Category already exists!",
-                                color = MaterialTheme.colorScheme.error
-                            )
-                        }
-                    }
-                },
-                confirmButton = {
-                    TextButton(onClick = {
-                        val cleaned = newCategoryName.trim()
-                        if (cleaned.isBlank()) return@TextButton
-
-                        if (isDuplicateCategoryName(cleaned)) {
-                            addCategoryExistsError = true
-                            return@TextButton
-                        }
-
-                        val added = addCategoryOnly(cleaned)
-                        if (added != null) {
-                            addCategoryExistsError = false
-                            showAddCategorySheetDialog = false
-                            newCategoryName = ""
-                        }
-                    }) { Text("Add") }
-                },
-                dismissButton = {
-                    TextButton(onClick = {
-                        showAddCategorySheetDialog = false
-                        addCategoryExistsError = false
-                    }) { Text("Cancel") }
-                }
-            )
+        LaunchedEffect(Unit) {
+            delay(150)
+            bulkCustomFocus.requestFocus()
+            keyboard?.show()
         }
 
-        if (showBulkCustomCategoryDialog) {
-            val bulkCustomFocus = remember { FocusRequester() }
-            val keyboard = LocalSoftwareKeyboardController.current
+        GlassAlertDialog(
+            onDismissRequest = {
+                showBulkCustomCategoryDialog = false
+                bulkCustomCategoryExistsError = false
+            },
+            title = { Text("Custom Category") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = bulkCustomCategoryName,
+                        onValueChange = {
+                            bulkCustomCategoryName = it
+                            bulkCustomCategoryExistsError = isDuplicateCategoryName(it)
+                        },
+                        singleLine = true,
+                        isError = bulkCustomCategoryExistsError,
+                        label = { Text("Category name") },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .focusRequester(bulkCustomFocus),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(
+                            onDone = {
+                                val cleaned = bulkCustomCategoryName.trim()
+                                if (cleaned.isBlank()) return@KeyboardActions
 
-            LaunchedEffect(Unit) {
-                delay(150)
-                bulkCustomFocus.requestFocus()
-                keyboard?.show()
-            }
+                                if (isDuplicateCategoryName(cleaned)) {
+                                    bulkCustomCategoryExistsError = true
+                                    return@KeyboardActions
+                                }
 
-            GlassAlertDialog(
-                onDismissRequest = {
+                                val added = addCategoryOnly(cleaned)
+                                if (added != null) {
+                                    bulkCustomCategoryExistsError = false
+                                    applyCategoryToSelected(added)
+                                    showBulkCustomCategoryDialog = false
+                                }
+                            }
+                        )
+                    )
+
+                    if (bulkCustomCategoryExistsError) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            text = "Category already exists!",
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val cleaned = bulkCustomCategoryName.trim()
+                    if (cleaned.isBlank()) return@TextButton
+
+                    if (isDuplicateCategoryName(cleaned)) {
+                        bulkCustomCategoryExistsError = true
+                        return@TextButton
+                    }
+
+                    val added = addCategoryOnly(cleaned)
+                    if (added != null) {
+                        bulkCustomCategoryExistsError = false
+                        applyCategoryToSelected(added)
+                        showBulkCustomCategoryDialog = false
+                    }
+                }) { Text("Done") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
                     showBulkCustomCategoryDialog = false
                     bulkCustomCategoryExistsError = false
-                },
-                title = { Text("Custom Category") },
-                text = {
-                    Column {
-                        OutlinedTextField(
-                            value = bulkCustomCategoryName,
-                            onValueChange = {
-                                bulkCustomCategoryName = it
-                                bulkCustomCategoryExistsError = isDuplicateCategoryName(it)
-                            },
-                            singleLine = true,
-                            isError = bulkCustomCategoryExistsError,
-                            label = { Text("Category name") },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .focusRequester(bulkCustomFocus),
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                            keyboardActions = KeyboardActions(
-                                onDone = {
-                                    val cleaned = bulkCustomCategoryName.trim()
-                                    if (cleaned.isBlank()) return@KeyboardActions
+                }) { Text("Cancel") }
+            }
+        )
+    }
 
-                                    if (isDuplicateCategoryName(cleaned)) {
-                                        bulkCustomCategoryExistsError = true
-                                        return@KeyboardActions
-                                    }
-
-                                    val added = addCategoryOnly(cleaned)
-                                    if (added != null) {
-                                        bulkCustomCategoryExistsError = false
-                                        applyCategoryToSelected(added)
-                                        showBulkCustomCategoryDialog = false
-                                    }
-                                }
-                            )
-                        )
-
-                        if (bulkCustomCategoryExistsError) {
-                            Spacer(Modifier.height(8.dp))
-                            Text(
-                                text = "Category already exists!",
-                                color = MaterialTheme.colorScheme.error
-                            )
-                        }
-                    }
-                },
-                confirmButton = {
-                    TextButton(onClick = {
-                        val cleaned = bulkCustomCategoryName.trim()
-                        if (cleaned.isBlank()) return@TextButton
-
-                        if (isDuplicateCategoryName(cleaned)) {
-                            bulkCustomCategoryExistsError = true
-                            return@TextButton
-                        }
-
-                        val added = addCategoryOnly(cleaned)
-                        if (added != null) {
-                            bulkCustomCategoryExistsError = false
-                            applyCategoryToSelected(added)
-                            showBulkCustomCategoryDialog = false
-                        }
-                    }) { Text("Done") }
-                },
-                dismissButton = {
-                    TextButton(onClick = {
-                        showBulkCustomCategoryDialog = false
-                        bulkCustomCategoryExistsError = false
-                    }) { Text("Cancel") }
-                }
-            )
-        }
-
-        if (pendingDeleteSelected) {
-            GlassAlertDialog(
-                onDismissRequest = { pendingDeleteSelected = false },
-                title = { Text("Delete selected items?") },
-                text = {
-                    Text("Are you sure you want to delete ${selectedItems.size} items.")
-                },
-                confirmButton = {
-                    DelayedDestructiveConfirmButton(
-                        itemCount = selectedItems.size,
-                        finalButtonText = "Delete",
-                        onConfirm = {
+    if (pendingDeleteSelected) {
+        GlassAlertDialog(
+            onDismissRequest = { pendingDeleteSelected = false },
+            title = { Text("Delete selected items?") },
+            text = {
+                Text("Are you sure you want to delete ${selectedItems.size} items.")
+            },
+            confirmButton = {
+                DelayedDestructiveConfirmButton(
+                    itemCount = selectedItems.size,
+                    finalButtonText = "Delete",
+                    onConfirm = {
                         val toDelete = selectedItems.toList()
                         foodList.removeAll(toDelete)
 
                         selectedItems.clear()
                         isSelecting = false
                         pendingDeleteSelected = false
-                        }
+                    }
+                )
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeleteSelected = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (showCustomCategoryDialog) {
+
+        if (showQuickAddCategoryDialog) {
+            GlassAlertDialog(
+                onDismissRequest = { showQuickAddCategoryDialog = false },
+                title = { Text("Add Category", style = MaterialTheme.typography.titleLarge) },
+                text = {
+                    OutlinedTextField(
+                        value = quickCategoryName,
+                        onValueChange = { quickCategoryName = it },
+                        singleLine = true,
+                        label = { Text("Category name") },
+                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(
+                            onDone = {
+                                val added = addCategoryOnly(quickCategoryName)
+                                if (added != null) {
+                                    updatePantryFilter(added)
+                                    showQuickAddCategoryDialog = false
+                                }
+                            }
+                        )
                     )
                 },
+                confirmButton = {
+                    TextButton(onClick = {
+                        val added = addCategoryOnly(quickCategoryName)
+                        if (added != null) {
+                            updatePantryFilter(added)
+                            showQuickAddCategoryDialog = false
+                        }
+                    }) {
+                        Text("Add")
+                    }
+                },
                 dismissButton = {
-                    TextButton(onClick = { pendingDeleteSelected = false }) {
+                    TextButton(onClick = { showQuickAddCategoryDialog = false }) {
                         Text("Cancel")
                     }
                 }
             )
         }
 
-        if (showCustomCategoryDialog) {
+        val customFocus = remember { FocusRequester() }
 
-            if (showQuickAddCategoryDialog) {
-                GlassAlertDialog(
-                    onDismissRequest = { showQuickAddCategoryDialog = false },
-                    title = { Text("Add Category", style = MaterialTheme.typography.titleLarge) },
-                    text = {
-                        OutlinedTextField(
-                            value = quickCategoryName,
-                            onValueChange = { quickCategoryName = it },
-                            singleLine = true,
-                            label = { Text("Category name") },
-                            modifier = Modifier.fillMaxWidth(),
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                            keyboardActions = KeyboardActions(
-                                onDone = {
-                                    val added = addCategoryOnly(quickCategoryName)
-                                    if (added != null) {
-                                        updatePantryFilter(added)
-                                        showQuickAddCategoryDialog = false
-                                    }
-                                }
-                            )
-                        )
-                    },
-                    confirmButton = {
-                        TextButton(onClick = {
-                            val added = addCategoryOnly(quickCategoryName)
-                            if (added != null) {
-                                updatePantryFilter(added)
-                                showQuickAddCategoryDialog = false
-                            }
-                        }) {
-                            Text("Add")
-                        }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { showQuickAddCategoryDialog = false }) {
-                            Text("Cancel")
-                        }
-                    }
-                )
+        val keyboard = LocalSoftwareKeyboardController.current
+
+        LaunchedEffect(showCustomCategoryDialog) {
+            if (showCustomCategoryDialog) {
+                delay(150)
+                customFocus.requestFocus()
+                keyboard?.show()
             }
-
-            val customFocus = remember { FocusRequester() }
-
-            val keyboard = LocalSoftwareKeyboardController.current
-
-            LaunchedEffect(showCustomCategoryDialog) {
-                if (showCustomCategoryDialog) {
-                    delay(150)
-                    customFocus.requestFocus()
-                    keyboard?.show()
-                }
-            }
-
-            GlassAlertDialog(
-                onDismissRequest = {
-                    showCustomCategoryDialog = false
-                    customCategoryExistsError = false
-                },
-                title = { Text("Custom Category") },
-                text = {
-                    Column {
-                        OutlinedTextField(
-                            value = tempCustomCategory,
-                            onValueChange = {
-                                tempCustomCategory = it
-                                customCategoryExistsError = isDuplicateCategoryName(it)
-                            },
-                            singleLine = true,
-                            isError = customCategoryExistsError,
-                            label = { Text("Category name") },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .focusRequester(customFocus),
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                            keyboardActions = KeyboardActions(
-                                onDone = {
-                                    val cleaned = tempCustomCategory.trim()
-                                    if (cleaned.isBlank()) return@KeyboardActions
-
-                                    if (isDuplicateCategoryName(cleaned)) {
-                                        customCategoryExistsError = true
-                                        return@KeyboardActions
-                                    }
-
-                                    customCategory = cleaned
-                                    isCustomCategory = true
-                                    commitCustomCategory()
-                                    customCategoryExistsError = false
-                                    showCustomCategoryDialog = false
-                                }
-                            )
-                        )
-
-                        if (customCategoryExistsError) {
-                            Spacer(Modifier.height(8.dp))
-                            Text(
-                                text = "Category already exists!",
-                                color = MaterialTheme.colorScheme.error
-                            )
-                        }
-                    }
-                },
-                confirmButton = {
-                    TextButton(onClick = {
-                        val cleaned = tempCustomCategory.trim()
-                        if (cleaned.isBlank()) return@TextButton
-
-                        if (isDuplicateCategoryName(cleaned)) {
-                            customCategoryExistsError = true
-                            return@TextButton
-                        }
-
-                        customCategory = cleaned
-                        isCustomCategory = true
-                        commitCustomCategory()
-                        customCategoryExistsError = false
-                        showCustomCategoryDialog = false
-                    }) { Text("Done") }
-                },
-                dismissButton = {
-                    TextButton(onClick = {
-                        showCustomCategoryDialog = false
-                        customCategoryExistsError = false
-                    }) { Text("Cancel") }
-                }
-            )
         }
 
-        if (showForm) {
-            val animatedImeShiftPx = rememberAnimatedImeShiftPx(label = "addFoodImeShift")
-
-            Dialog(
-                onDismissRequest = { closeFoodForm() },
-                properties = DialogProperties(
-                    dismissOnBackPress = true,
-                    dismissOnClickOutside = false,
-                    usePlatformDefaultWidth = false
-                )
-            ) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    ExactFrostedPillCard(
+        GlassAlertDialog(
+            onDismissRequest = {
+                showCustomCategoryDialog = false
+                customCategoryExistsError = false
+            },
+            title = { Text("Custom Category") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = tempCustomCategory,
+                        onValueChange = {
+                            tempCustomCategory = it
+                            customCategoryExistsError = isDuplicateCategoryName(it)
+                        },
+                        singleLine = true,
+                        isError = customCategoryExistsError,
+                        label = { Text("Category name") },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .graphicsLayer { translationY = -animatedImeShiftPx }
+                            .focusRequester(customFocus),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(
+                            onDone = {
+                                val cleaned = tempCustomCategory.trim()
+                                if (cleaned.isBlank()) return@KeyboardActions
+
+                                if (isDuplicateCategoryName(cleaned)) {
+                                    customCategoryExistsError = true
+                                    return@KeyboardActions
+                                }
+
+                                customCategory = cleaned
+                                isCustomCategory = true
+                                commitCustomCategory()
+                                customCategoryExistsError = false
+                                showCustomCategoryDialog = false
+                            }
+                        )
+                    )
+
+                    if (customCategoryExistsError) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            text = "Category already exists!",
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val cleaned = tempCustomCategory.trim()
+                    if (cleaned.isBlank()) return@TextButton
+
+                    if (isDuplicateCategoryName(cleaned)) {
+                        customCategoryExistsError = true
+                        return@TextButton
+                    }
+
+                    customCategory = cleaned
+                    isCustomCategory = true
+                    commitCustomCategory()
+                    customCategoryExistsError = false
+                    showCustomCategoryDialog = false
+                }) { Text("Done") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showCustomCategoryDialog = false
+                    customCategoryExistsError = false
+                }) { Text("Cancel") }
+            }
+        )
+    }
+
+    if (showForm) {
+        val animatedImeShiftPx = rememberAnimatedImeShiftPx(label = "addFoodImeShift")
+
+        Dialog(
+            onDismissRequest = { closeFoodForm() },
+            properties = DialogProperties(
+                dismissOnBackPress = true,
+                dismissOnClickOutside = false,
+                usePlatformDefaultWidth = false
+            )
+        ) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                ExactFrostedPillCard(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .graphicsLayer { translationY = -animatedImeShiftPx }
+                        .padding(16.dp),
+                    shape = RoundedCornerShape(28.dp),
+                    shadowElevation = 14.dp
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
                             .padding(16.dp),
-                        shape = RoundedCornerShape(28.dp),
-                        shadowElevation = 14.dp
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Column(
+                        Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(16.dp),
-                            verticalArrangement = Arrangement.Center,
-                            horizontalAlignment = Alignment.CenterHorizontally
+                                .padding(horizontal = 8.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 8.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    if (editingItem == null) "Add Food" else "Edit Food",
-                                    style = MaterialTheme.typography.titleLarge
-                                )
-                            }
+                            Text(
+                                if (editingItem == null) "Add Food" else "Edit Food",
+                                style = MaterialTheme.typography.titleLarge
+                            )
+                        }
 
-                            Spacer(modifier = Modifier.height(2.dp))
+                        Spacer(modifier = Modifier.height(2.dp))
 
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                OutlinedTextField(
-                                    value = foodName,
-                                    onValueChange = {
-                                        if (it.length <= 50) {
-                                            foodName = it
-                                            if (showError) showError = false
-                                            nameExistsError = isDuplicateFood(foodName, expiryDate)
-                                        }
-                                    },
-                                    label = { Text("Food Name") },
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .focusRequester(nameFocus),
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                                    keyboardActions = KeyboardActions(
-                                        onDone = { saveCurrentFoodFromForm() }
-                                    )
-                                )
-
-                                Spacer(modifier = Modifier.width(8.dp))
-
-                                IconButton(
-                                    onClick = {
-                                        barcodeLookupMessage = null
-                                        isLookingUpBarcode = false
-                                        barcodeScannerLauncher.launch(
-                                            Intent(context, BarcodeScannerActivity::class.java)
-                                        )
-                                    },
-                                    enabled = !isLookingUpBarcode,
-                                    modifier = Modifier.size(56.dp)
-                                ) {
-                                    Icon(
-                                        painter = painterResource(id = R.drawable.outline_barcode_scanner_24),
-                                        contentDescription = "Scan barcode",
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(24.dp)
-                                    )
-                                }
-                            }
-
-                            if (isLookingUpBarcode || !barcodeLookupMessage.isNullOrBlank()) {
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Text(
-                                    text = if (isLookingUpBarcode) {
-                                        "Looking up product..."
-                                    } else {
-                                        barcodeLookupMessage.orEmpty()
-                                    },
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.height(6.dp))
-
-                            ExpiryDateInputField(
-                                value = expiryDate,
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            OutlinedTextField(
+                                value = foodName,
                                 onValueChange = {
-                                    expiryDate = it
-                                    if (showError) showError = false
-                                    nameExistsError = isDuplicateFood(foodName, it)
-                                },
-                                onCalendarClick = {
-                                    openExpiryDatePicker(context) { pickedDate ->
-                                        expiryDate = pickedDate
+                                    if (it.length <= 50) {
+                                        foodName = it
                                         if (showError) showError = false
-                                        nameExistsError = isDuplicateFood(foodName, pickedDate)
+                                        nameExistsError = isDuplicateFood(foodName, expiryDate)
                                     }
-                                }
-                            )
-
-                            Spacer(modifier = Modifier.height(12.dp))
-
-                            CategoryDropdown(
-                                categories = categories,
-                                initialCategories = initialCategories,
-                                selectedCategory = selectedCategory,
-                                isCustom = isCustomCategory,
-                                onPickCategory = {
-                                    isCustomCategory = false
-                                    selectedCategory = it
-                                    customCategory = ""
-                                    if (showError) showError = false
                                 },
-                                onPickCustom = {
-                                    showCustomCategoryDialog = true
-                                    tempCustomCategory = ""
-                                    customCategoryExistsError = false
-                                },
-                                onDeleteCategory = { cat ->
-                                    pendingDeleteCategory = cat
-                                }
-                            )
-
-                            Spacer(modifier = Modifier.height(2.dp))
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.End
-                            ) {
-                                TextButton(onClick = { closeFoodForm() }) {
-                                    Text("Cancel")
-                                }
-
-                                Spacer(modifier = Modifier.width(8.dp))
-
-                                Button(
-                                    onClick = {
-
-                                        saveCurrentFoodFromForm()
-                                    }
-                                ) {
-                                    Text("Done")
-                                }
-                            }
-
-                            if(nameExistsError) {
-                                Text(
-                                    "Same food and date already exists.",
-                                    color = MaterialTheme.colorScheme.error
+                                label = { Text("Food Name") },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .focusRequester(nameFocus),
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                                keyboardActions = KeyboardActions(
+                                    onDone = { saveCurrentFoodFromForm() }
                                 )
-                            }else if (showError) {
-                                when {
-                                    foodName.isEmpty() && expiryDate.isEmpty() ->
-                                        Text(
-                                            "Please enter food name and expiry date!",
-                                            color = MaterialTheme.colorScheme.error
-                                        )
+                            )
 
-                                    foodName.isEmpty() ->
-                                        Text(
-                                            "Please enter food name!",
-                                            color = MaterialTheme.colorScheme.error
-                                        )
+                            Spacer(modifier = Modifier.width(8.dp))
 
-                                    expiryDate.isEmpty() ->
-                                        Text(
-                                            "Please enter expiry date!",
-                                            color = MaterialTheme.colorScheme.error
-                                        )
+                            IconButton(
+                                onClick = {
+                                    barcodeLookupMessage = null
+                                    isLookingUpBarcode = false
+                                    barcodeScannerLauncher.launch(
+                                        Intent(context, BarcodeScannerActivity::class.java)
+                                    )
+                                },
+                                enabled = !isLookingUpBarcode,
+                                modifier = Modifier.size(56.dp)
+                            ) {
+                                Icon(
+                                    painter = painterResource(id = R.drawable.outline_barcode_scanner_24),
+                                    contentDescription = "Scan barcode",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                        }
 
-                                    !isValidFutureExpiryDate(expiryDate) ->
-                                        Text(
-                                            "Please enter a valid future date!",
-                                            color = MaterialTheme.colorScheme.error
-                                        )
+                        if (isLookingUpBarcode || !barcodeLookupMessage.isNullOrBlank()) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = if (isLookingUpBarcode) {
+                                    "Looking up product..."
+                                } else {
+                                    barcodeLookupMessage.orEmpty()
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        ExpiryDateInputField(
+                            value = expiryDate,
+                            onValueChange = {
+                                expiryDate = it
+                                if (showError) showError = false
+                                nameExistsError = isDuplicateFood(foodName, it)
+                            },
+                            onCalendarClick = {
+                                openExpiryDatePicker(context) { pickedDate ->
+                                    expiryDate = pickedDate
+                                    if (showError) showError = false
+                                    nameExistsError = isDuplicateFood(foodName, pickedDate)
                                 }
                             }
+                        )
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        CategoryDropdown(
+                            categories = categories,
+                            initialCategories = initialCategories,
+                            selectedCategory = selectedCategory,
+                            isCustom = isCustomCategory,
+                            onPickCategory = {
+                                isCustomCategory = false
+                                selectedCategory = it
+                                customCategory = ""
+                                if (showError) showError = false
+                            },
+                            onPickCustom = {
+                                showCustomCategoryDialog = true
+                                tempCustomCategory = ""
+                                customCategoryExistsError = false
+                            },
+                            onDeleteCategory = { cat ->
+                                pendingDeleteCategory = cat
+                            }
+                        )
+
+                        Spacer(modifier = Modifier.height(2.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End
+                        ) {
+                            TextButton(onClick = { closeFoodForm() }) {
+                                Text("Cancel")
+                            }
+
+                            Spacer(modifier = Modifier.width(8.dp))
+
+                            Button(
+                                onClick = {
+
+                                    saveCurrentFoodFromForm()
+                                }
+                            ) {
+                                Text("Done")
+                            }
+                        }
+
+                        if(nameExistsError) {
+                            Text(
+                                "Same food and date already exists.",
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }else if (showError) {
+                            when {
+                                foodName.isEmpty() && expiryDate.isEmpty() ->
+                                    Text(
+                                        "Please enter food name and expiry date!",
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+
+                                foodName.isEmpty() ->
+                                    Text(
+                                        "Please enter food name!",
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+
+                                expiryDate.isEmpty() ->
+                                    Text(
+                                        "Please enter expiry date!",
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+
+                                !isValidFutureExpiryDate(expiryDate) ->
+                                    Text(
+                                        "Please enter a valid future date!",
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                            }
+                        }
                     }
                 }
             }
