@@ -2292,6 +2292,13 @@ private fun cleanFoodCategory(raw: String?): String? {
     return raw?.trim()?.replace(Regex("\\s+"), " ")?.takeIf { it.isNotBlank() }
 }
 
+private fun cleanFoodExpiry(raw: String): String {
+    val trimmed = raw.trim()
+    return runCatching {
+        formatExpiryDate(LocalDate.parse(trimmed, EXPIRY_FORMATTER))
+    }.getOrDefault(trimmed)
+}
+
 private fun sanitizeFoodQuantity(quantity: Int): Int {
     return quantity.coerceIn(MIN_FOOD_QUANTITY, MAX_FOOD_QUANTITY)
 }
@@ -2299,7 +2306,7 @@ private fun sanitizeFoodQuantity(quantity: Int): Int {
 private fun foodBatchKey(name: String, expiry: String): FoodBatchKey {
     return FoodBatchKey(
         nameKey = normalizeFoodName(name),
-        expiryKey = expiry.trim()
+        expiryKey = cleanFoodExpiry(expiry)
     )
 }
 
@@ -2310,7 +2317,7 @@ private fun FoodItem.batchKey(): FoodBatchKey {
 private fun FoodItem.sanitized(): FoodItem {
     return copy(
         name = cleanFoodLabel(name),
-        expiry = expiry.trim(),
+        expiry = cleanFoodExpiry(expiry),
         category = cleanFoodCategory(category),
         quantity = sanitizeFoodQuantity(quantity)
     )
@@ -3494,6 +3501,33 @@ private fun ExpiryCountdownBadge(
             style = MaterialTheme.typography.bodyMedium,
             color = textColor,
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+        )
+    }
+}
+
+@Composable
+private fun FoodQuantityBadge(quantity: Int) {
+    val scheme = MaterialTheme.colorScheme
+    val isDarkTheme = scheme.background.luminance() < 0.5f
+    val shape = RoundedCornerShape(50.dp)
+    val tintAlpha = if (isDarkTheme) 0.22f else 0.13f
+
+    Box(
+        modifier = Modifier
+            .clip(shape)
+            .background(scheme.primary.copy(alpha = tintAlpha))
+            .border(
+                width = 1.dp,
+                color = scheme.primary.copy(alpha = if (isDarkTheme) 0.34f else 0.22f),
+                shape = shape
+            )
+    ) {
+        Text(
+            text = "Qty x${sanitizeFoodQuantity(quantity)}",
+            style = MaterialTheme.typography.bodySmall,
+            color = scheme.primary,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
         )
     }
 }
@@ -5448,10 +5482,21 @@ fun HistoryScreen(
         GlassAlertDialog(
             onDismissRequest = {
                 quickAddName = null
+                quickAddQuantityText = MIN_FOOD_QUANTITY.toString()
                 quickAddError = null
             },
             title = { Text("Quick Add", style = MaterialTheme.typography.titleLarge) },
             text = {
+                val quickAddWillMerge =
+                    quickAddName != null &&
+                            quickAddExpiry.isNotBlank() &&
+                            pantryFoods.any { food ->
+                                food.batchKey() == foodBatchKey(
+                                    quickAddName.orEmpty(),
+                                    quickAddExpiry
+                                )
+                            }
+
                 Column {
                     Text("Food: ${quickAddName!!}", fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(10.dp))
@@ -5460,25 +5505,31 @@ fun HistoryScreen(
                         value = quickAddExpiry,
                         onValueChange = {
                             quickAddExpiry = it
-                            val duplicate =
-                                quickAddName != null &&
-                                        pantryFoods.any { food ->
-                                            normalizeFoodName(food.name) == normalizeFoodName(quickAddName.orEmpty()) &&
-                                                    food.expiry.trim() == it.trim()
-                                        }
-                            quickAddError = if (duplicate) "Same food and date already exists." else null
+                            quickAddError = null
                         },
                         onCalendarClick = {
                             openExpiryDatePicker(context) { pickedDate ->
                                 quickAddExpiry = pickedDate
-                                val duplicate =
-                                    pantryFoods.any { food ->
-                                        normalizeFoodName(food.name) == normalizeFoodName(quickAddName.orEmpty()) &&
-                                                food.expiry.trim() == pickedDate.trim()
-                                    }
-                                quickAddError = if (duplicate) "Same food and date already exists." else null
+                                quickAddError = null
                             }
                         }
+                    )
+
+                    Spacer(Modifier.height(10.dp))
+
+                    OutlinedTextField(
+                        value = quickAddQuantityText,
+                        onValueChange = { value ->
+                            quickAddQuantityText = value.filter { it.isDigit() }.take(3)
+                            quickAddError = null
+                        },
+                        label = { Text("Quantity") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Number,
+                            imeAction = ImeAction.Done
+                        )
                     )
 
                     Spacer(Modifier.height(10.dp))
@@ -5525,6 +5576,13 @@ fun HistoryScreen(
                         Spacer(Modifier.height(8.dp))
                         Spacer(Modifier.height(8.dp))
                         Text(quickAddError!!, color = MaterialTheme.colorScheme.error)
+                    } else if (quickAddWillMerge) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "Same batch found. Add will increase its quantity.",
+                            color = MaterialTheme.colorScheme.primary,
+                            style = MaterialTheme.typography.bodySmall
+                        )
                     }
                 }
             },
@@ -5543,13 +5601,9 @@ fun HistoryScreen(
                             return@TextButton
                         }
 
-                        val exists =
-                            pantryFoods.any {
-                                normalizeFoodName(it.name) == normalizeFoodName(name) &&
-                                        it.expiry.trim() == quickAddExpiry.trim()
-                            }
-                        if (exists) {
-                            quickAddError = "Same food and date already exists."
+                        val quantity = quickAddQuantityText.toIntOrNull()
+                        if (quantity == null || quantity !in MIN_FOOD_QUANTITY..MAX_FOOD_QUANTITY) {
+                            quickAddError = "Enter a quantity from $MIN_FOOD_QUANTITY to $MAX_FOOD_QUANTITY."
                             return@TextButton
                         }
 
@@ -5557,9 +5611,10 @@ fun HistoryScreen(
                             FoodItem(
                                 name = name,
                                 expiry = quickAddExpiry,
-                                category = quickAddCategory
+                                category = quickAddCategory,
+                                quantity = quantity
                             )
-                        pantryFoods.add(newFood)
+                        upsertFoodBatch(pantryFoods, newFood)
                         saveFoodList(prefs, gson, pantryFoods)
 
                         recordFoodNameInHistory(prefs, gson, history, name)
@@ -5567,6 +5622,7 @@ fun HistoryScreen(
                         quickAddName = null
                         quickAddExpiry = ""
                         quickAddCategory = null
+                        quickAddQuantityText = MIN_FOOD_QUANTITY.toString()
                         quickAddError = null
                     }
                 ) {
@@ -5576,6 +5632,7 @@ fun HistoryScreen(
             dismissButton = {
                 TextButton(onClick = {
                     quickAddName = null
+                    quickAddQuantityText = MIN_FOOD_QUANTITY.toString()
                     quickAddError = null
                 }) {
                     Text("Cancel")
@@ -5802,6 +5859,11 @@ private fun PantryFoodCard(
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
+
+                            if (food.quantity > MIN_FOOD_QUANTITY) {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                FoodQuantityBadge(quantity = food.quantity)
+                            }
                         }
 
                         Spacer(modifier = Modifier.width(10.dp))
@@ -7134,10 +7196,8 @@ private fun RecipeScreen(
     var isLoading by rememberSaveable { mutableStateOf(false) }
     var pendingLatestMessageScroll by remember { mutableIntStateOf(0) }
     var aiRequestVersion by remember { mutableIntStateOf(0) }
+    var showJumpToTop by remember { mutableStateOf(false) }
     var showJumpToBottom by remember { mutableStateOf(false) }
-    val showJumpToTop by remember {
-        derivedStateOf { listState.canScrollBackward }
-    }
     var showNewChatDialog by rememberSaveable { mutableStateOf(false) }
     var showLaunchIntro by rememberSaveable {
         mutableStateOf(!hasShownRecipeLaunchIntroThisProcess)
@@ -7246,15 +7306,22 @@ private fun RecipeScreen(
 
     LaunchedEffect(listState) {
         snapshotFlow {
-            listState.isScrollInProgress to listState.canScrollForward
-        }.collectLatest { (isScrolling, canJumpToBottom) ->
-            when {
-                !canJumpToBottom -> showJumpToBottom = false
-                isScrolling -> showJumpToBottom = true
-                else -> {
-                    delay(1600)
-                    showJumpToBottom = false
-                }
+            Triple(
+                listState.isScrollInProgress,
+                listState.canScrollBackward,
+                listState.canScrollForward
+            )
+        }.collectLatest { (isScrolling, canJumpToTop, canJumpToBottom) ->
+            if (!canJumpToTop) showJumpToTop = false
+            if (!canJumpToBottom) showJumpToBottom = false
+
+            if (isScrolling) {
+                if (canJumpToTop) showJumpToTop = true
+                if (canJumpToBottom) showJumpToBottom = true
+            } else {
+                delay(1600)
+                showJumpToTop = false
+                showJumpToBottom = false
             }
         }
     }
@@ -7271,6 +7338,7 @@ private fun RecipeScreen(
         aiRequestVersion += 1
         isLoading = false
         promptText = ""
+        showJumpToTop = false
         showJumpToBottom = false
         sessionState.messagesJson = "[]"
         sessionState.previousIngredientsJson = "[]"
@@ -7604,6 +7672,7 @@ private fun RecipeScreen(
                         showJumpToTop = showJumpToTop,
                         showJumpToBottom = showJumpToBottom,
                         onJumpToTop = {
+                            showJumpToTop = false
                             scope.launch {
                                 listState.scrollToItem(0)
                             }
@@ -9298,6 +9367,7 @@ fun FoodEntryScreen(
 ) {
     var foodName by remember { mutableStateOf("") }
     var expiryDate by remember { mutableStateOf("") }
+    var quantityText by remember { mutableStateOf(MIN_FOOD_QUANTITY.toString()) }
 
     var showCustomCategoryDialog by remember { mutableStateOf(false) }
     var tempCustomCategory by remember { mutableStateOf("") }
@@ -9390,7 +9460,7 @@ fun FoodEntryScreen(
     }
 
     var showError by remember { mutableStateOf(false) }
-    var nameExistsError by remember { mutableStateOf(false) }
+    var batchMergeNotice by remember { mutableStateOf(false) }
 
     var editingItem by remember { mutableStateOf<FoodItem?>(null) }
     var pendingDelete by remember { mutableStateOf<FoodItem?>(null) }
@@ -9675,15 +9745,15 @@ fun FoodEntryScreen(
         isSelecting = false
     }
 
-    fun isDuplicateFood(inputName: String, inputExpiry: String): Boolean {
+    fun hasMatchingFoodBatch(inputName: String, inputExpiry: String): Boolean {
         val cleanedName = inputName.trim()
         val cleanedExpiry = inputExpiry.trim()
         if (cleanedName.isBlank() || cleanedExpiry.isBlank()) return false
 
+        val key = foodBatchKey(cleanedName, cleanedExpiry)
         return foodList.any { item ->
             item != editingItem &&
-                    item.name.trim().equals(cleanedName, ignoreCase = true) &&
-                    item.expiry.trim() == cleanedExpiry
+                    item.batchKey() == key
         }
     }
 
@@ -9698,13 +9768,14 @@ fun FoodEntryScreen(
         editingItem = null
         foodName = ""
         expiryDate = ""
+        quantityText = MIN_FOOD_QUANTITY.toString()
 
         selectedCategory = null
         isCustomCategory = false
         customCategory = ""
 
         showError = false
-        nameExistsError = false
+        batchMergeNotice = false
         clearBarcodeLookupUi()
     }
 
@@ -9712,6 +9783,7 @@ fun FoodEntryScreen(
         editingItem = food
         foodName = food.name
         expiryDate = food.expiry
+        quantityText = sanitizeFoodQuantity(food.quantity).toString()
 
         val cat = food.category?.trim().orEmpty()
         when {
@@ -9735,6 +9807,7 @@ fun FoodEntryScreen(
         }
 
         showError = false
+        batchMergeNotice = false
         clearBarcodeLookupUi()
         onShowFormChange(true)
     }
@@ -9751,31 +9824,42 @@ fun FoodEntryScreen(
     fun saveCurrentFoodFromForm(): Boolean {
         val missing = foodName.isBlank() || expiryDate.isBlank()
         val invalidDate = expiryDate.isNotBlank() && !isValidFutureExpiryDate(expiryDate)
+        val quantity = quantityText.toIntOrNull()
+        val invalidQuantity = quantity == null || quantity !in MIN_FOOD_QUANTITY..MAX_FOOD_QUANTITY
 
-        showError = missing || invalidDate
-        nameExistsError = !missing && !invalidDate && isDuplicateFood(foodName, expiryDate)
+        showError = missing || invalidDate || invalidQuantity
+        batchMergeNotice = !missing && !invalidDate && hasMatchingFoodBatch(foodName, expiryDate)
 
-        if (missing || invalidDate || nameExistsError) return false
+        if (missing || invalidDate || invalidQuantity) return false
+        val savedQuantity = quantity
 
         if (isCustomCategory) commitCustomCategory()
-        val updated = FoodItem(foodName.trim(), expiryDate, finalCategoryOrNull())
+        val updated = FoodItem(
+            name = foodName.trim(),
+            expiry = expiryDate,
+            category = finalCategoryOrNull(),
+            quantity = savedQuantity
+        )
 
         val old = editingItem
-        if (old == null) {
-            foodList.add(updated)
-        } else {
-            val idx = foodList.indexOf(old)
-            if (idx != -1) foodList[idx] = updated else foodList.add(updated)
-            if (selectedItems.remove(old)) selectedItems.add(updated)
+        val wasSelected = old != null && selectedItems.remove(old)
+        val savedFood =
+            if (old == null) {
+                upsertFoodBatch(foodList, updated)
+            } else {
+                upsertFoodBatch(foodList, updated, oldFood = old)
+            }
+        if (wasSelected) {
+            selectedItems.add(savedFood)
         }
 
-        addFoodNameToHistory(sharedPrefs, gson, updated.name)
+        addFoodNameToHistory(sharedPrefs, gson, savedFood.name)
 
         lastScannedBarcode?.let { scannedBarcode ->
             saveBarcodeNameToCache(
                 context = context,
                 barcode = scannedBarcode,
-                productName = updated.name,
+                productName = savedFood.name,
                 source = "User confirmed"
             )
         }
@@ -9811,7 +9895,7 @@ fun FoodEntryScreen(
                     }
 
                     showError = false
-                    nameExistsError = isDuplicateFood(foodName, expiryDate)
+                    batchMergeNotice = hasMatchingFoodBatch(foodName, expiryDate)
                 }
             } else if (scanMessage.isNotBlank()) {
                 isLookingUpBarcode = false
@@ -9933,13 +10017,14 @@ fun FoodEntryScreen(
                                 editingItem = null
                                 foodName = ""
                                 expiryDate = ""
+                                quantityText = MIN_FOOD_QUANTITY.toString()
 
                                 selectedCategory = null
                                 isCustomCategory = false
                                 customCategory = ""
 
                                 showError = false
-                                nameExistsError = false
+                                batchMergeNotice = false
                                 clearBarcodeLookupUi()
                                 onShowFormChange(true)
                             }
@@ -10607,7 +10692,7 @@ fun FoodEntryScreen(
                                     if (it.length <= 50) {
                                         foodName = it
                                         if (showError) showError = false
-                                        nameExistsError = isDuplicateFood(foodName, expiryDate)
+                                        batchMergeNotice = hasMatchingFoodBatch(foodName, expiryDate)
                                     }
                                 },
                                 label = { Text("Food Name") },
@@ -10664,15 +10749,35 @@ fun FoodEntryScreen(
                             onValueChange = {
                                 expiryDate = it
                                 if (showError) showError = false
-                                nameExistsError = isDuplicateFood(foodName, it)
+                                batchMergeNotice = hasMatchingFoodBatch(foodName, it)
                             },
                             onCalendarClick = {
                                 openExpiryDatePicker(context) { pickedDate ->
                                     expiryDate = pickedDate
                                     if (showError) showError = false
-                                    nameExistsError = isDuplicateFood(foodName, pickedDate)
+                                    batchMergeNotice = hasMatchingFoodBatch(foodName, pickedDate)
                                 }
                             }
+                        )
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        OutlinedTextField(
+                            value = quantityText,
+                            onValueChange = { value ->
+                                quantityText = value.filter { it.isDigit() }.take(3)
+                                if (showError) showError = false
+                            },
+                            label = { Text("Quantity") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(
+                                keyboardType = KeyboardType.Number,
+                                imeAction = ImeAction.Done
+                            ),
+                            keyboardActions = KeyboardActions(
+                                onDone = { saveCurrentFoodFromForm() }
+                            )
                         )
 
                         Spacer(modifier = Modifier.height(12.dp))
@@ -10720,12 +10825,7 @@ fun FoodEntryScreen(
                             }
                         }
 
-                        if(nameExistsError) {
-                            Text(
-                                "Same food and date already exists.",
-                                color = MaterialTheme.colorScheme.error
-                            )
-                        }else if (showError) {
+                        if (showError) {
                             when {
                                 foodName.isEmpty() && expiryDate.isEmpty() ->
                                     Text(
@@ -10750,7 +10850,20 @@ fun FoodEntryScreen(
                                         "Please enter a valid future date!",
                                         color = MaterialTheme.colorScheme.error
                                     )
+
+                                quantityText.toIntOrNull() == null ||
+                                        quantityText.toIntOrNull() !in MIN_FOOD_QUANTITY..MAX_FOOD_QUANTITY ->
+                                    Text(
+                                        "Please enter a quantity from $MIN_FOOD_QUANTITY to $MAX_FOOD_QUANTITY.",
+                                        color = MaterialTheme.colorScheme.error
+                                    )
                             }
+                        } else if (batchMergeNotice) {
+                            Text(
+                                "Same batch found. Saving will increase its quantity.",
+                                color = MaterialTheme.colorScheme.primary,
+                                style = MaterialTheme.typography.bodySmall
+                            )
                         }
                     }
                 }
