@@ -6795,13 +6795,31 @@ private fun RecipeSuggestionCard(
                 )
 
                 if (onToggleSaved != null) {
-                    TextButton(
+                    val savePillShape = RoundedCornerShape(50.dp)
+                    val savePillColor =
+                        if (isSaved) scheme.primary else scheme.onSurfaceVariant
+                    Button(
                         onClick = onToggleSaved,
-                        colors = ButtonDefaults.textButtonColors(
-                            contentColor = if (isSaved) scheme.primary else scheme.onSurfaceVariant
+                        shape = savePillShape,
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                        border = BorderStroke(
+                            1.dp,
+                            savePillColor.copy(alpha = if (isDarkTheme) 0.38f else 0.26f)
+                        ),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = savePillColor.copy(alpha = if (isDarkTheme) 0.14f else 0.09f),
+                            contentColor = savePillColor
+                        ),
+                        elevation = ButtonDefaults.buttonElevation(
+                            defaultElevation = 0.dp,
+                            pressedElevation = 0.dp
                         )
                     ) {
-                        Text(if (isSaved) "Saved" else "Save")
+                        Text(
+                            text = if (isSaved) "Saved" else "Save",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.SemiBold
+                        )
                     }
                 }
             }
