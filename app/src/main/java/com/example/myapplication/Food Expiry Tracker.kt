@@ -49,8 +49,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkVertically
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -88,6 +86,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -997,15 +996,6 @@ private fun HomeFloatingButtons(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            EditCategoriesStyledFab(
-                onClick = onAddClick,
-                icon = Icons.Default.Add,
-                contentDescription = "Add",
-                backgroundTint = MaterialTheme.colorScheme.primary,
-                iconTint = MaterialTheme.colorScheme.onPrimary,
-                tintAlpha = if (isDarkTheme) 0.76f else 0.62f,
-                onPositioned = onAddPositioned
-            )
 
             EditCategoriesStyledFab(
                 onClick = onAiClick,
@@ -1016,6 +1006,16 @@ private fun HomeFloatingButtons(
                 tintAlpha = if (isDarkTheme) 0.72f else 0.54f,
                 onPositioned = onAiPositioned,
                 fabSize = 42.dp
+            )
+
+            EditCategoriesStyledFab(
+                onClick = onAddClick,
+                icon = Icons.Default.Add,
+                contentDescription = "Add",
+                backgroundTint = MaterialTheme.colorScheme.primary,
+                iconTint = MaterialTheme.colorScheme.onPrimary,
+                tintAlpha = if (isDarkTheme) 0.76f else 0.62f,
+                onPositioned = onAddPositioned
             )
         }
     }
@@ -1848,7 +1848,20 @@ private fun rememberAnimatedImeShiftPx(
 }
 
 @Immutable
-data class FoodItem(val name: String, val expiry: String, val category: String? = null)
+data class FoodItem(
+    val name: String,
+    val expiry: String,
+    val category: String? = null,
+    val quantity: Int = MIN_FOOD_QUANTITY
+)
+
+private const val MIN_FOOD_QUANTITY = 1
+private const val MAX_FOOD_QUANTITY = 999
+
+private data class FoodBatchKey(
+    val nameKey: String,
+    val expiryKey: String
+)
 
 private data class SortedFoodSnapshot(
     val item: FoodItem,
@@ -2271,6 +2284,108 @@ private fun normalizeFoodName(raw: String): String {
         .replace(Regex("[^\\p{L}\\p{N} ]"), "")
 }
 
+private fun cleanFoodLabel(raw: String): String {
+    return raw.trim().replace(Regex("\\s+"), " ")
+}
+
+private fun cleanFoodCategory(raw: String?): String? {
+    return raw?.trim()?.replace(Regex("\\s+"), " ")?.takeIf { it.isNotBlank() }
+}
+
+private fun sanitizeFoodQuantity(quantity: Int): Int {
+    return quantity.coerceIn(MIN_FOOD_QUANTITY, MAX_FOOD_QUANTITY)
+}
+
+private fun foodBatchKey(name: String, expiry: String): FoodBatchKey {
+    return FoodBatchKey(
+        nameKey = normalizeFoodName(name),
+        expiryKey = expiry.trim()
+    )
+}
+
+private fun FoodItem.batchKey(): FoodBatchKey {
+    return foodBatchKey(name, expiry)
+}
+
+private fun FoodItem.sanitized(): FoodItem {
+    return copy(
+        name = cleanFoodLabel(name),
+        expiry = expiry.trim(),
+        category = cleanFoodCategory(category),
+        quantity = sanitizeFoodQuantity(quantity)
+    )
+}
+
+private fun mergeFoodBatches(existing: FoodItem, incoming: FoodItem): FoodItem {
+    val cleanedExisting = existing.sanitized()
+    val cleanedIncoming = incoming.sanitized()
+    val mergedCategory = cleanedExisting.category ?: cleanedIncoming.category
+
+    return cleanedExisting.copy(
+        category = mergedCategory,
+        quantity = sanitizeFoodQuantity(cleanedExisting.quantity + cleanedIncoming.quantity)
+    )
+}
+
+private fun sanitizeAndMergeFoodList(list: List<FoodItem>): MutableList<FoodItem> {
+    val batches = LinkedHashMap<FoodBatchKey, FoodItem>()
+
+    list.forEach { food ->
+        val sanitized = food.sanitized()
+        if (sanitized.name.isBlank() || sanitized.expiry.isBlank()) return@forEach
+
+        val key = sanitized.batchKey()
+        val existing = batches[key]
+        batches[key] = if (existing == null) {
+            sanitized
+        } else {
+            mergeFoodBatches(existing, sanitized)
+        }
+    }
+
+    return batches.values.toMutableList()
+}
+
+private fun findMatchingFoodBatchIndex(
+    list: List<FoodItem>,
+    candidate: FoodItem,
+    ignoredItem: FoodItem? = null
+): Int {
+    val key = candidate.batchKey()
+    return list.indexOfFirst { item ->
+        item != ignoredItem && item.batchKey() == key
+    }
+}
+
+private fun upsertFoodBatch(
+    list: MutableList<FoodItem>,
+    food: FoodItem,
+    oldFood: FoodItem? = null
+): FoodItem {
+    val sanitized = food.sanitized()
+
+    if (oldFood != null) {
+        val oldIndex = list.indexOf(oldFood)
+        if (oldIndex != -1 && oldFood.batchKey() == sanitized.batchKey()) {
+            list[oldIndex] = sanitized
+            return sanitized
+        }
+        if (oldIndex != -1) {
+            list.removeAt(oldIndex)
+        }
+    }
+
+    val existingIndex = findMatchingFoodBatchIndex(list, sanitized)
+    if (existingIndex != -1) {
+        val merged = mergeFoodBatches(list[existingIndex], sanitized)
+        list[existingIndex] = merged
+        return merged
+    }
+
+    list.add(sanitized)
+    return sanitized
+}
+
 private fun isOnboardingDemoFood(food: FoodItem): Boolean {
     return normalizeFoodName(food.name) == normalizeFoodName(ONBOARDING_DEMO_FOOD_NAME) &&
             normalizeFoodName(food.category.orEmpty()) == normalizeFoodName(ONBOARDING_DEMO_CATEGORY_NAME)
@@ -2369,16 +2484,21 @@ private fun saveFoodListRaw(prefs: android.content.SharedPreferences, gson: Gson
 }
 
 private fun loadFoodList(prefs: android.content.SharedPreferences, gson: Gson): MutableList<FoodItem> {
-    val foods = loadFoodListRaw(prefs, gson)
+    val rawFoods = loadFoodListRaw(prefs, gson)
+    val foods = sanitizeAndMergeFoodList(rawFoods)
     val filteredFoods = filterExpiredFoodsIfNeeded(prefs, foods)
-    if (filteredFoods.size != foods.size) {
+    if (filteredFoods != rawFoods) {
         saveFoodListRaw(prefs, gson, filteredFoods)
     }
     return filteredFoods.toMutableList()
 }
 
 private fun saveFoodList(prefs: android.content.SharedPreferences, gson: Gson, list: List<FoodItem>) {
-    saveFoodListRaw(prefs, gson, filterExpiredFoodsIfNeeded(prefs, list))
+    saveFoodListRaw(
+        prefs,
+        gson,
+        filterExpiredFoodsIfNeeded(prefs, sanitizeAndMergeFoodList(list))
+    )
 }
 
 private fun loadStringList(
@@ -2408,7 +2528,7 @@ private suspend fun saveFoodListAsync(
     list: List<FoodItem>
 ) {
     val json = withContext(Dispatchers.Default) {
-        gson.toJson(filterExpiredFoodsIfNeeded(prefs, list))
+        gson.toJson(filterExpiredFoodsIfNeeded(prefs, sanitizeAndMergeFoodList(list)))
     }
     withContext(Dispatchers.IO) {
         if (prefs.getString(FOOD_LIST_KEY, null) != json) {
@@ -5138,6 +5258,7 @@ fun HistoryScreen(
     var quickAddName by remember { mutableStateOf<String?>(null) }
     var quickAddExpiry by remember { mutableStateOf("") }
     var quickAddCategory by remember { mutableStateOf<String?>(null) }
+    var quickAddQuantityText by remember { mutableStateOf(MIN_FOOD_QUANTITY.toString()) }
     var quickAddError by remember { mutableStateOf<String?>(null) }
     var pendingDeleteHistoryEntry by remember { mutableStateOf<HistoryEntry?>(null) }
     val shouldBlurBackground =
@@ -5258,6 +5379,7 @@ fun HistoryScreen(
                                         quickAddName = entry.name
                                         quickAddExpiry = ""
                                         quickAddCategory = null
+                                        quickAddQuantityText = MIN_FOOD_QUANTITY.toString()
                                         quickAddError = null
                                     },
                                     onDelete = {
@@ -5305,6 +5427,7 @@ fun HistoryScreen(
                         quickAddName = null
                         quickAddExpiry = ""
                         quickAddCategory = null
+                        quickAddQuantityText = MIN_FOOD_QUANTITY.toString()
                         quickAddError = null
                     }
                     removeFoodNameFromHistory(prefs, gson, history, entry.name)
@@ -6716,6 +6839,83 @@ private fun RecipeJumpToBottomButton(
 }
 
 @Composable
+private fun RecipeJumpControls(
+    showJumpToTop: Boolean,
+    showJumpToBottom: Boolean,
+    onJumpToTop: () -> Unit,
+    onJumpToBottom: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val buttonEnter = fadeIn(
+        animationSpec = tween(
+            durationMillis = 130,
+            easing = LinearOutSlowInEasing
+        )
+    ) + scaleIn(
+        initialScale = 0.88f,
+        animationSpec = tween(
+            durationMillis = 180,
+            easing = FastOutSlowInEasing
+        )
+    )
+    val buttonExit = fadeOut(
+        animationSpec = tween(
+            durationMillis = 110,
+            easing = FastOutLinearInEasing
+        )
+    ) + scaleOut(
+        targetScale = 0.88f,
+        animationSpec = tween(
+            durationMillis = 150,
+            easing = FastOutLinearInEasing
+        )
+    )
+
+    Row(
+        modifier = modifier.padding(bottom = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        RecipeJumpControlSlot(
+            visible = showJumpToTop,
+            enter = buttonEnter,
+            exit = buttonExit
+        ) {
+            RecipeJumpToTopButton(onClick = onJumpToTop)
+        }
+
+        RecipeJumpControlSlot(
+            visible = showJumpToBottom,
+            enter = buttonEnter,
+            exit = buttonExit
+        ) {
+            RecipeJumpToBottomButton(onClick = onJumpToBottom)
+        }
+    }
+}
+
+@Composable
+private fun RecipeJumpControlSlot(
+    visible: Boolean,
+    enter: EnterTransition,
+    exit: ExitTransition,
+    content: @Composable () -> Unit
+) {
+    Box(
+        modifier = Modifier.size(42.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        AnimatedVisibility(
+            visible = visible,
+            enter = enter,
+            exit = exit
+        ) {
+            content()
+        }
+    }
+}
+
+@Composable
 private fun RecipeNewChatButton(
     modifier: Modifier = Modifier,
     onClick: () -> Unit
@@ -6894,7 +7094,7 @@ private fun AiRecipeLaunchIntro(
                 color = scheme.primary
             )
             Text(
-                text = "Making your recipe space ready",
+                text = "Making your life easy",
                 style = MaterialTheme.typography.titleMedium,
                 color = scheme.onSurfaceVariant.copy(alpha = 0.82f),
                 textAlign = TextAlign.Center
@@ -7400,74 +7600,27 @@ private fun RecipeScreen(
                         .padding(bottom = recipePromptBottomPadding),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Column(
-                        modifier = Modifier.padding(bottom = 10.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        AnimatedVisibility(
-                            visible = showJumpToTop,
-                            enter = fadeIn(animationSpec = tween(140)) +
-                                    slideInVertically(
-                                        animationSpec = tween(180, easing = LinearOutSlowInEasing)
-                                    ) { it / 2 } +
-                                    scaleIn(
-                                        initialScale = 0.92f,
-                                        animationSpec = tween(180, easing = LinearOutSlowInEasing)
-                                    ),
-                            exit = fadeOut(animationSpec = tween(120)) +
-                                    slideOutVertically(
-                                        animationSpec = tween(180, easing = FastOutLinearInEasing)
-                                    ) { it } +
-                                    scaleOut(
-                                        targetScale = 0.92f,
-                                        animationSpec = tween(180, easing = FastOutLinearInEasing)
-                                    )
-                        ) {
-                            RecipeJumpToTopButton(
-                                onClick = {
-                                    scope.launch {
-                                        listState.scrollToItem(0)
-                                    }
+                    RecipeJumpControls(
+                        showJumpToTop = showJumpToTop,
+                        showJumpToBottom = showJumpToBottom,
+                        onJumpToTop = {
+                            scope.launch {
+                                listState.scrollToItem(0)
+                            }
+                        },
+                        onJumpToBottom = {
+                            showJumpToBottom = false
+                            scope.launch {
+                                val measuredLastItemIndex = listState.layoutInfo.totalItemsCount - 1
+                                val lastItemIndex = if (measuredLastItemIndex >= 0) {
+                                    measuredLastItemIndex
+                                } else {
+                                    (totalVisibleItems - 1).coerceAtLeast(0)
                                 }
-                            )
+                                listState.scrollToItem(lastItemIndex, Int.MAX_VALUE)
+                            }
                         }
-
-                        AnimatedVisibility(
-                            visible = showJumpToBottom,
-                            enter = fadeIn(animationSpec = tween(140)) +
-                                    slideInVertically(
-                                        animationSpec = tween(180, easing = LinearOutSlowInEasing)
-                                    ) { it / 2 } +
-                                    scaleIn(
-                                        initialScale = 0.92f,
-                                        animationSpec = tween(180, easing = LinearOutSlowInEasing)
-                                    ),
-                            exit = fadeOut(animationSpec = tween(120)) +
-                                    slideOutVertically(
-                                        animationSpec = tween(180, easing = FastOutLinearInEasing)
-                                    ) { it } +
-                                    scaleOut(
-                                        targetScale = 0.92f,
-                                        animationSpec = tween(180, easing = FastOutLinearInEasing)
-                                    )
-                        ) {
-                            RecipeJumpToBottomButton(
-                                onClick = {
-                                    showJumpToBottom = false
-                                    scope.launch {
-                                        val measuredLastItemIndex = listState.layoutInfo.totalItemsCount - 1
-                                        val lastItemIndex = if (measuredLastItemIndex >= 0) {
-                                            measuredLastItemIndex
-                                        } else {
-                                            (totalVisibleItems - 1).coerceAtLeast(0)
-                                        }
-                                        listState.scrollToItem(lastItemIndex, Int.MAX_VALUE)
-                                    }
-                                }
-                            )
-                        }
-                    }
+                    )
 
                     Box(
                         modifier = Modifier
@@ -7610,6 +7763,9 @@ fun ProfileScreen(navController: NavHostController) {
             localProfileName.isNotBlank() -> "This name stays on this device."
             else -> "Add a name to personalize your profile on this device."
         }
+    val profileTopContentPadding = with(density) {
+        WindowInsets.statusBars.getTop(this).toDp()
+    } + 8.dp
     val profileBottomSafePadding = with(density) {
         WindowInsets.navigationBars.getBottom(this).toDp() + 84.dp
     }
@@ -7623,21 +7779,18 @@ fun ProfileScreen(navController: NavHostController) {
         isDarkIcons = colorScheme.background.luminance() > 0.5f
     )
 
-    Scaffold(
-        containerColor = Color.Transparent,
-        contentWindowInsets = WindowInsets(0, 0, 0, 0)
-    ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .statusBarsPadding()
-                .padding(top = 8.dp)
-                .padding(horizontal = 16.dp)
-                .padding(bottom = profileBottomSafePadding)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        overscrollEffect = null,
+        contentPadding = PaddingValues(
+            start = 16.dp,
+            top = profileTopContentPadding,
+            end = 16.dp,
+            bottom = profileBottomSafePadding
+        ),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        item {
             @Suppress("UNNECESSARY_SAFE_CALL")
             ProfileHeaderCard(
                 name = profileName,
@@ -7654,8 +7807,10 @@ fun ProfileScreen(navController: NavHostController) {
                     showEditLocalNameDialog = true
                 }
             )
+        }
 
-            ProfileSectionTitle("Manage")
+        item { ProfileSectionTitle("Manage") }
+        item {
             ProfileActionRow(
                 title = "Account",
                 subtitle = "Sign in, sync, and move your pantry between devices",
@@ -7663,6 +7818,8 @@ fun ProfileScreen(navController: NavHostController) {
             ) {
                 navController.navigate(Route.Account.r)
             }
+        }
+        item {
             ProfileActionRow(
                 title = "Settings",
                 subtitle = "Theme, countdown format, and notifications",
@@ -7670,11 +7827,13 @@ fun ProfileScreen(navController: NavHostController) {
             ) {
                 navController.navigate(Route.Settings.r)
             }
+        }
 
-            ProfileSectionTitle("Transfer")
-            PantryTransferCard()
+        item { ProfileSectionTitle("Transfer") }
+        item { PantryTransferCard() }
 
-            ProfileSectionTitle("More")
+        item { ProfileSectionTitle("More") }
+        item {
             ProfileActionRow(
                 title = "Help & support",
                 subtitle = "Tips for pantry, history, and AI recipes",
@@ -7682,6 +7841,8 @@ fun ProfileScreen(navController: NavHostController) {
             ) {
                 navController.navigate(Route.Help.r)
             }
+        }
+        item {
             ProfileActionRow(
                 title = "Privacy",
                 subtitle = "How your pantry and AI data are handled",
@@ -7689,6 +7850,8 @@ fun ProfileScreen(navController: NavHostController) {
             ) {
                 navController.navigate(Route.Privacy.r)
             }
+        }
+        item {
             ProfileActionRow(
                 title = "About",
                 subtitle = "App details and version ${BuildConfig.VERSION_NAME}",
