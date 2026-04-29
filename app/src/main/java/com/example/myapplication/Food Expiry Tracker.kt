@@ -1321,17 +1321,17 @@ private val firstLaunchOnboardingSteps = listOf(
     OnboardingStep(
         target = OnboardingSpotlightTarget.HOME_ADD_FAB,
         title = "Add pantry items",
-        body = "Use the big plus button to add food, expiry date, category, barcode details, and quantity."
+        body = "Use the plus button to add food, expiry date, category, and quantity."
     ),
     OnboardingStep(
         target = OnboardingSpotlightTarget.HOME_AI_FAB,
-        title = "Open Food AI",
-        body = "The sparkle button opens Food AI for quick recipe ideas, suggestion chips, and saved recipes."
+        title = "AI Recipe",
+        body = "Use the AI button for quick recipe ideas."
     ),
     OnboardingStep(
         target = OnboardingSpotlightTarget.HOME_SEARCH_SORT,
         title = "Search, sort, and select",
-        body = "Use the header icons to search your pantry, sort by expiry, A-Z, or category, and select multiple foods."
+        body = "Use the header icons to search your pantry, sort, and select multiple foods."
     ),
     OnboardingStep(
         target = OnboardingSpotlightTarget.PANTRY_ITEM,
@@ -1341,13 +1341,13 @@ private val firstLaunchOnboardingSteps = listOf(
     OnboardingStep(
         target = OnboardingSpotlightTarget.PANTRY_ITEM,
         title = "Swipe right to edit",
-        body = "Drag a food card to the right to edit its name, date, category, or quantity.",
+        body = "Swipe a food card to the right to edit its name, date, category, or quantity.",
         swipeHint = OnboardingSwipeHint.RIGHT
     ),
     OnboardingStep(
         target = OnboardingSpotlightTarget.PANTRY_ITEM,
         title = "Swipe left to delete",
-        body = "Drag a food card to the left to delete that item.",
+        body = "Swipe a food card to the left to delete that item.",
         swipeHint = OnboardingSwipeHint.LEFT
     ),
     OnboardingStep(
@@ -1363,7 +1363,7 @@ private val firstLaunchOnboardingSteps = listOf(
     OnboardingStep(
         target = OnboardingSpotlightTarget.PROFILE_TAB,
         title = "Profile",
-        body = "Profile has account sync, settings, pantry transfer, help, privacy, and app info."
+        body = "Profile has account sync, settings, pantry transfer, help, and more."
     )
 )
 
