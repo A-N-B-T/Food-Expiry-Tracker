@@ -121,6 +121,7 @@ private const val ACCOUNT_FOOD_LIST_KEY = "food_list"
 private const val ACCOUNT_HISTORY_LIST_KEY = "history_list"
 private const val ACCOUNT_CATEGORIES_LIST_KEY = "categories_list"
 private const val ACCOUNT_BARCODE_CACHE_KEY = "barcode_cache"
+private const val ACCOUNT_SAVED_RECIPES_KEY = "saved_recipes"
 private const val ACCOUNT_THEME_KEY = "theme_mode"
 private const val ACCOUNT_COUNTDOWN_FORMAT_KEY = "countdown_format"
 private const val ACCOUNT_DAYS_BEFORE_KEY = "days_before"
@@ -157,6 +158,7 @@ private data class CloudSyncSnapshot(
     val historyJson: String = "[]",
     val categoriesJson: String = "[]",
     val barcodeCacheJson: String = "{}",
+    val savedRecipesJson: String? = "[]",
     val themeMode: String = ThemeMode.SYSTEM.name,
     val countdownFormat: String = CountdownFormat.DAYS_ONLY.name,
     val daysBeforeReminder: Int = 3,
@@ -440,6 +442,7 @@ private fun captureLocalSnapshot(context: Context): CloudSyncEnvelope {
             historyJson = foodPrefs.getString(ACCOUNT_HISTORY_LIST_KEY, "[]") ?: "[]",
             categoriesJson = foodPrefs.getString(ACCOUNT_CATEGORIES_LIST_KEY, "[]") ?: "[]",
             barcodeCacheJson = foodPrefs.getString(ACCOUNT_BARCODE_CACHE_KEY, "{}") ?: "{}",
+            savedRecipesJson = foodPrefs.getString(ACCOUNT_SAVED_RECIPES_KEY, "[]") ?: "[]",
             themeMode = themePrefs.getString(ACCOUNT_THEME_KEY, ThemeMode.SYSTEM.name)
                 ?: ThemeMode.SYSTEM.name,
             countdownFormat = themePrefs.getString(
@@ -463,6 +466,7 @@ private fun restoreLocalSnapshot(context: Context, envelope: CloudSyncEnvelope) 
         putString(ACCOUNT_HISTORY_LIST_KEY, snapshot.historyJson)
         putString(ACCOUNT_CATEGORIES_LIST_KEY, snapshot.categoriesJson)
         putString(ACCOUNT_BARCODE_CACHE_KEY, snapshot.barcodeCacheJson)
+        putString(ACCOUNT_SAVED_RECIPES_KEY, snapshot.savedRecipesJson ?: "[]")
     }
 
     themePrefs.edit {
@@ -1004,7 +1008,8 @@ fun AccountCloudSyncEffect(session: AccountSession?) {
                     key == ACCOUNT_FOOD_LIST_KEY ||
                     key == ACCOUNT_HISTORY_LIST_KEY ||
                     key == ACCOUNT_CATEGORIES_LIST_KEY ||
-                    key == ACCOUNT_BARCODE_CACHE_KEY
+                    key == ACCOUNT_BARCODE_CACHE_KEY ||
+                    key == ACCOUNT_SAVED_RECIPES_KEY
                 ) {
                     markLocalMutation(context)
                 }

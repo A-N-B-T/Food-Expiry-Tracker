@@ -1230,6 +1230,12 @@ fun DialogDestructiveText(
 }
 
 @Composable
+private fun trashIconTint(): Color {
+    val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    return if (isDarkTheme) Color(0xFFFF6B63) else MaterialTheme.colorScheme.error
+}
+
+@Composable
 private fun DelayedDestructiveConfirmButton(
     itemCount: Int,
     finalButtonText: String,
@@ -4079,11 +4085,7 @@ private fun EditCategoriesBottomSheet(
                             items(categories, key = { it }) { cat ->
                                 val isDefault =
                                     initialCategories.any { it.equals(cat, ignoreCase = true) }
-                                val isDarkTheme =
-                                    MaterialTheme.colorScheme.background.luminance() < 0.5f
-                                val deleteTint =
-                                    if (isDarkTheme) Color(0xFFFF6B63)
-                                    else MaterialTheme.colorScheme.error
+                                val deleteTint = trashIconTint()
 
                                 ExactFrostedPillCard(
                                     modifier = Modifier.fillMaxWidth(),
@@ -5707,6 +5709,7 @@ private fun PantryFoodCard(
 
     val reveal = (abs(offsetX.value) / revealPx).coerceIn(0f, 1f)
     val bgAlpha = 0.15f + (0.85f * reveal)
+    val deleteTint = trashIconTint()
 
     val bg = when {
         isEditDragNow -> MaterialTheme.colorScheme.secondaryContainer
@@ -5716,7 +5719,7 @@ private fun PantryFoodCard(
 
     val tint = when {
         isEditDragNow -> MaterialTheme.colorScheme.onSecondaryContainer
-        isDeleteDragNow -> MaterialTheme.colorScheme.onErrorContainer
+        isDeleteDragNow -> deleteTint
         else -> MaterialTheme.colorScheme.onSurface
     }
 
@@ -5924,9 +5927,10 @@ private fun HistoryFoodCard(
 
     val reveal = (abs(offsetX.value) / revealPx).coerceIn(0f, 1f)
     val bgAlpha = 0.15f + (0.85f * reveal)
+    val deleteTint = trashIconTint()
     val bg = if (isDeleteDragNow) MaterialTheme.colorScheme.errorContainer else Color.Transparent
     val tint =
-        if (isDeleteDragNow) MaterialTheme.colorScheme.onErrorContainer
+        if (isDeleteDragNow) deleteTint
         else MaterialTheme.colorScheme.onSurface
     val align = Alignment.CenterEnd
 
@@ -6484,6 +6488,104 @@ private fun RecipeIntroCard(hasPantryFoods: Boolean) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
+    }
+}
+
+@Composable
+private fun RecipeQuickSuggestionChips(
+    hasPantryFoods: Boolean,
+    hasExpiringFoods: Boolean,
+    isLoading: Boolean,
+    onUsePantryFoods: () -> Unit,
+    onQuickBreakfast: () -> Unit,
+    onUseExpiringFoods: () -> Unit,
+    onOnlyOneRecipe: () -> Unit
+) {
+    LazyRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        item {
+            RecipeQuickSuggestionChip(
+                text = "Use foods in my list",
+                enabled = hasPantryFoods && !isLoading,
+                onClick = onUsePantryFoods
+            )
+        }
+
+        item {
+            RecipeQuickSuggestionChip(
+                text = "Quick breakfast",
+                enabled = !isLoading,
+                onClick = onQuickBreakfast
+            )
+        }
+
+        item {
+            RecipeQuickSuggestionChip(
+                text = "Use expiring foods",
+                enabled = hasExpiringFoods && !isLoading,
+                onClick = onUseExpiringFoods
+            )
+        }
+
+        item {
+            RecipeQuickSuggestionChip(
+                text = "Only 1 recipe",
+                enabled = !isLoading,
+                onClick = onOnlyOneRecipe
+            )
+        }
+    }
+}
+
+@Composable
+private fun RecipeQuickSuggestionChip(
+    text: String,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    val palette = rememberGlassPalette()
+    val scheme = MaterialTheme.colorScheme
+    val isDarkTheme = scheme.background.luminance() < 0.5f
+    val chipShape = RoundedCornerShape(50.dp)
+    val containerColor =
+        if (enabled) {
+            palette.card.copy(alpha = if (isDarkTheme) 0.58f else 0.68f)
+        } else {
+            palette.card.copy(alpha = if (isDarkTheme) 0.28f else 0.36f)
+        }
+    val borderColor =
+        if (enabled) {
+            palette.border.copy(alpha = if (isDarkTheme) 0.82f else 0.92f)
+        } else {
+            palette.border.copy(alpha = if (isDarkTheme) 0.38f else 0.48f)
+        }
+    val textColor =
+        if (enabled) {
+            scheme.onSurfaceVariant
+        } else {
+            scheme.onSurfaceVariant.copy(alpha = if (isDarkTheme) 0.46f else 0.54f)
+        }
+
+    Box(
+        modifier = Modifier
+            .clip(chipShape)
+            .border(1.dp, borderColor, chipShape)
+            .background(containerColor)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 13.dp, vertical = 8.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = text,
+            color = textColor,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 
@@ -7194,11 +7296,13 @@ private fun RecipeSavedRecipesButton(
 @Composable
 private fun SavedRecipeListCard(
     recipe: RecipeSuggestion,
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
     onRemove: () -> Unit
 ) {
     val scheme = MaterialTheme.colorScheme
     val isDarkTheme = scheme.background.luminance() < 0.5f
-    var expanded by remember(recipe) { mutableStateOf(false) }
+    val deleteTint = trashIconTint()
 
     ExactFrostedPillCard(
         modifier = Modifier.fillMaxWidth(),
@@ -7225,15 +7329,7 @@ private fun SavedRecipeListCard(
                     overflow = TextOverflow.Ellipsis
                 )
 
-                IconButton(onClick = onRemove) {
-                    Icon(
-                        imageVector = Icons.Default.Delete,
-                        contentDescription = "Remove saved recipe",
-                        tint = scheme.error.copy(alpha = if (isDarkTheme) 0.88f else 0.78f)
-                    )
-                }
-
-                IconButton(onClick = { expanded = !expanded }) {
+                IconButton(onClick = { onExpandedChange(!expanded) }) {
                     Icon(
                         imageVector = if (expanded) {
                             Icons.Default.KeyboardArrowUp
@@ -7263,6 +7359,35 @@ private fun SavedRecipeListCard(
                     )
                     Spacer(Modifier.height(12.dp))
                     SavedRecipeDetails(recipe = recipe)
+                    Spacer(Modifier.height(12.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        Button(
+                            onClick = onRemove,
+                            shape = RoundedCornerShape(50.dp),
+                            border = BorderStroke(
+                                width = 1.dp,
+                                color = deleteTint.copy(alpha = if (isDarkTheme) 0.42f else 0.30f)
+                            ),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = deleteTint.copy(
+                                    alpha = if (isDarkTheme) 0.18f else 0.12f
+                                ),
+                                contentColor = deleteTint
+                            ),
+                            elevation = ButtonDefaults.buttonElevation(
+                                defaultElevation = 0.dp,
+                                pressedElevation = 0.dp
+                            )
+                        ) {
+                            Text(
+                                text = "Delete recipe",
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -7341,6 +7466,9 @@ private fun SavedRecipesDialog(
     onDismiss: () -> Unit,
     onRemove: (RecipeSuggestion) -> Unit
 ) {
+    var expandedRecipeKey by remember(savedRecipes) { mutableStateOf<String?>(null) }
+    var pendingDeleteRecipe by remember { mutableStateOf<RecipeSuggestion?>(null) }
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -7393,9 +7521,14 @@ private fun SavedRecipesDialog(
                                 items = savedRecipes,
                                 key = { recipeStorageKey(it.recipe) }
                             ) { savedRecipe ->
+                                val savedRecipeKey = recipeStorageKey(savedRecipe.recipe)
                                 SavedRecipeListCard(
                                     recipe = savedRecipe.recipe,
-                                    onRemove = { onRemove(savedRecipe.recipe) }
+                                    expanded = expandedRecipeKey == savedRecipeKey,
+                                    onExpandedChange = { shouldExpand ->
+                                        expandedRecipeKey = if (shouldExpand) savedRecipeKey else null
+                                    },
+                                    onRemove = { pendingDeleteRecipe = savedRecipe.recipe }
                                 )
                             }
                         }
@@ -7403,6 +7536,37 @@ private fun SavedRecipesDialog(
                 }
             }
         }
+    }
+
+    pendingDeleteRecipe?.let { recipeToDelete ->
+        GlassAlertDialog(
+            onDismissRequest = { pendingDeleteRecipe = null },
+            title = { DialogTitleText("Delete saved recipe?") },
+            text = {
+                DialogBodyText(
+                    "Remove \"${recipeToDelete.title}\" from your saved recipes?"
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val recipeKey = recipeStorageKey(recipeToDelete)
+                        if (expandedRecipeKey == recipeKey) {
+                            expandedRecipeKey = null
+                        }
+                        pendingDeleteRecipe = null
+                        onRemove(recipeToDelete)
+                    }
+                ) {
+                    DialogDestructiveText("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeleteRecipe = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }
 
@@ -7632,8 +7796,10 @@ private fun RecipeScreen(
             1
         }
     }
+    val hasAiPantryFoods = aiEligiblePantryFoods.isNotEmpty()
     val totalVisibleItems =
         (if (showExpiringPrompt) 1 else 0) +
+                1 +
                 (if (messages.isEmpty()) 1 else 0) +
                 visibleMessageItemCount +
                 (if (isLoading) 1 else 0)
@@ -8020,6 +8186,46 @@ private fun RecipeScreen(
                                 }
                             )
                         }
+                    }
+
+                    item(
+                        key = "ai-quick-suggestion-chips",
+                        contentType = "ai-quick-suggestion-chips"
+                    ) {
+                        RecipeQuickSuggestionChips(
+                            hasPantryFoods = hasAiPantryFoods,
+                            hasExpiringFoods = soonExpiringFoods.isNotEmpty(),
+                            isLoading = isLoading,
+                            onUsePantryFoods = {
+                                sendRecipePrompt(
+                                    "Suggest recipes using foods in my list."
+                                )
+                            },
+                            onQuickBreakfast = {
+                                sendRecipePrompt(
+                                    if (hasAiPantryFoods) {
+                                        "Suggest 3 quick breakfast recipes using foods in my list."
+                                    } else {
+                                        "Suggest 3 quick breakfast recipes."
+                                    }
+                                )
+                            },
+                            onUseExpiringFoods = {
+                                sendRecipePrompt(
+                                    rawRequest = buildExpiringFoodsRequest(soonExpiringFoods),
+                                    useExpiringFoods = true
+                                )
+                            },
+                            onOnlyOneRecipe = {
+                                sendRecipePrompt(
+                                    if (hasAiPantryFoods) {
+                                        "Suggest only 1 easy recipe using foods in my list."
+                                    } else {
+                                        "Suggest only 1 easy recipe."
+                                    }
+                                )
+                            }
+                        )
                     }
 
                     if (messages.isEmpty()) {
@@ -10480,7 +10686,7 @@ fun FoodEntryScreen(
 
                 } else if (selectedItems.isNotEmpty()) {
                     val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
-                    val deleteFabRed = if (isDarkTheme) Color(0xFFFF6257) else Color(0xFFD32F2F)
+                    val deleteFabRed = trashIconTint()
                     val deleteFabOverlay = if (isDarkTheme) Color(0xFF9F1F1F) else Color(0xFFB71C1C)
 
                     EditCategoriesStyledFab(
