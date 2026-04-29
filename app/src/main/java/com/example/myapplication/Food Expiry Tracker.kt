@@ -1903,6 +1903,11 @@ private data class RecipeChatMessage(
     val isError: Boolean = false
 )
 
+private data class SavedRecipe(
+    val recipe: RecipeSuggestion,
+    val savedAt: Long = System.currentTimeMillis()
+)
+
 private class RecipeScreenSessionState {
     var expiringPromptDismissed by mutableStateOf(false)
     var messagesJson by mutableStateOf("[]")
@@ -1940,6 +1945,7 @@ private const val FOOD_PREFS = "food_prefs"
 private const val FOOD_LIST_KEY = "food_list"
 private const val HISTORY_LIST_KEY = "history_list"
 private const val CATEGORIES_LIST_KEY = "categories_list"
+private const val SAVED_RECIPES_KEY = "saved_recipes"
 private const val HISTORY_AUTO_DELETE_ENABLED_KEY = "history_auto_delete_enabled"
 private const val HISTORY_RETENTION_DAYS_KEY = "history_retention_days"
 private const val EXPIRED_FOOD_AUTO_REMOVE_ENABLED_KEY = "expired_food_auto_remove_enabled"
@@ -6066,6 +6072,103 @@ private fun loadRecipeIngredientContext(
     }.getOrDefault(emptyList())
 }
 
+private fun normalizeRecipeText(raw: String): String {
+    return raw.trim().lowercase(Locale.US).replace(Regex("\\s+"), " ")
+}
+
+private fun recipeStorageKey(recipe: RecipeSuggestion): String {
+    return listOf(
+        recipe.title,
+        recipe.usedIngredients.joinToString("|"),
+        recipe.missedIngredients.joinToString("|"),
+        recipe.quickGuide.joinToString("|")
+    ).joinToString("::", transform = ::normalizeRecipeText)
+}
+
+private fun cleanRecipeList(items: List<String>): List<String> {
+    return items
+        .map { it.trim().replace(Regex("\\s+"), " ") }
+        .filter { it.isNotBlank() }
+}
+
+private fun cleanSavedRecipe(recipe: RecipeSuggestion): RecipeSuggestion? {
+    val title = recipe.title.trim().replace(Regex("\\s+"), " ")
+    if (title.isBlank()) return null
+
+    val usedIngredients = cleanRecipeList(recipe.usedIngredients)
+    val missedIngredients = cleanRecipeList(recipe.missedIngredients)
+    val quickGuide = cleanRecipeList(recipe.quickGuide)
+
+    return RecipeSuggestion(
+        title = title,
+        usedIngredientCount = usedIngredients.size,
+        missedIngredientCount = missedIngredients.size,
+        usedIngredients = usedIngredients,
+        missedIngredients = missedIngredients,
+        quickGuide = quickGuide
+    )
+}
+
+private fun normalizeSavedRecipes(savedRecipes: List<SavedRecipe>): MutableList<SavedRecipe> {
+    val deduped = LinkedHashMap<String, SavedRecipe>()
+
+    savedRecipes
+        .sortedByDescending { it.savedAt }
+        .forEach { saved ->
+            val cleanedRecipe = cleanSavedRecipe(saved.recipe) ?: return@forEach
+            val key = recipeStorageKey(cleanedRecipe)
+            deduped.putIfAbsent(
+                key,
+                SavedRecipe(
+                    recipe = cleanedRecipe,
+                    savedAt = saved.savedAt
+                )
+            )
+        }
+
+    return deduped.values.toMutableList()
+}
+
+private fun loadSavedRecipes(
+    prefs: android.content.SharedPreferences,
+    gson: Gson
+): MutableList<SavedRecipe> {
+    val json = prefs.getString(SAVED_RECIPES_KEY, null) ?: return mutableListOf()
+    val type = object : TypeToken<List<SavedRecipe>>() {}.type
+    val savedRecipes = runCatching {
+        gson.fromJson<List<SavedRecipe>>(json, type)
+    }.getOrDefault(emptyList())
+
+    return normalizeSavedRecipes(savedRecipes)
+}
+
+private fun saveSavedRecipes(
+    prefs: android.content.SharedPreferences,
+    gson: Gson,
+    savedRecipes: List<SavedRecipe>
+) {
+    val normalized = normalizeSavedRecipes(savedRecipes)
+    val json = gson.toJson(normalized)
+    if (prefs.getString(SAVED_RECIPES_KEY, null) == json) return
+    prefs.edit { putString(SAVED_RECIPES_KEY, json) }
+}
+
+private suspend fun saveSavedRecipesAsync(
+    prefs: android.content.SharedPreferences,
+    gson: Gson,
+    savedRecipes: List<SavedRecipe>
+) {
+    val json = withContext(Dispatchers.Default) {
+        gson.toJson(normalizeSavedRecipes(savedRecipes))
+    }
+
+    withContext(Dispatchers.IO) {
+        if (prefs.getString(SAVED_RECIPES_KEY, null) != json) {
+            prefs.edit { putString(SAVED_RECIPES_KEY, json) }
+        }
+    }
+}
+
 private fun compactIngredientSummary(
     items: List<String>,
     maxVisible: Int = 4
@@ -6506,6 +6609,8 @@ private fun RecipeChatBubble(
 @Composable
 private fun RecipeSuggestionCard(
     recipe: RecipeSuggestion,
+    isSaved: Boolean = false,
+    onToggleSaved: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val scheme = MaterialTheme.colorScheme
@@ -6574,12 +6679,30 @@ private fun RecipeSuggestionCard(
                 .fillMaxWidth()
                 .padding(15.dp)
         ) {
-            Text(
-                text = recipe.title,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = titleColor
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = recipe.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = titleColor,
+                    modifier = Modifier.weight(1f)
+                )
+
+                if (onToggleSaved != null) {
+                    TextButton(
+                        onClick = onToggleSaved,
+                        colors = ButtonDefaults.textButtonColors(
+                            contentColor = if (isSaved) scheme.primary else scheme.onSurfaceVariant
+                        )
+                    ) {
+                        Text(if (isSaved) "Saved" else "Save")
+                    }
+                }
+            }
 
             val usesLine = compactIngredientSummary(recipe.usedIngredients, maxVisible = 5)
             if (usesLine.isNotBlank()) {
@@ -6773,10 +6896,16 @@ private fun RecipeAssistantTextCard(
 }
 
 @Composable
-private fun RecipeAssistantRecipeCard(recipe: RecipeSuggestion) {
+private fun RecipeAssistantRecipeCard(
+    recipe: RecipeSuggestion,
+    isSaved: Boolean,
+    onToggleSaved: () -> Unit
+) {
     RecipeChatMessageRow(isUser = false) { bubbleModifier ->
         RecipeSuggestionCard(
             recipe = recipe,
+            isSaved = isSaved,
+            onToggleSaved = onToggleSaved,
             modifier = bubbleModifier
         )
     }
@@ -7026,6 +7155,265 @@ private fun RecipeNewChatButton(
 }
 
 @Composable
+private fun RecipeSavedRecipesButton(
+    savedCount: Int,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    val scheme = MaterialTheme.colorScheme
+    val isDarkTheme = scheme.background.luminance() < 0.5f
+    val containerColor =
+        if (isDarkTheme) {
+            scheme.surfaceContainerHighest.copy(alpha = 0.86f)
+        } else {
+            Color.White.copy(alpha = 0.92f)
+        }
+    val borderColor = scheme.outlineVariant.copy(alpha = if (isDarkTheme) 0.72f else 0.54f)
+
+    GlassSurface(
+        modifier = modifier
+            .clip(RoundedCornerShape(50.dp))
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(50.dp),
+        tone = GlassTone.CHROME,
+        containerColor = containerColor,
+        borderColor = borderColor,
+        showDecorativeOverlays = false,
+        shadowElevation = 2.dp
+    ) {
+        Text(
+            text = if (savedCount > 0) "Saved recipes ($savedCount)" else "Saved recipes",
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = scheme.onSurface.copy(alpha = 0.88f)
+        )
+    }
+}
+
+@Composable
+private fun SavedRecipeListCard(
+    recipe: RecipeSuggestion,
+    onRemove: () -> Unit
+) {
+    val scheme = MaterialTheme.colorScheme
+    val isDarkTheme = scheme.background.luminance() < 0.5f
+    var expanded by remember(recipe) { mutableStateOf(false) }
+
+    ExactFrostedPillCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .animateContentSize(
+                animationSpec = tween(
+                    durationMillis = 240,
+                    easing = FastOutSlowInEasing
+                )
+            ),
+        shape = RoundedCornerShape(25.dp),
+        shadowElevation = 4.dp
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = recipe.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = scheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                    maxLines = if (expanded) 2 else 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                IconButton(onClick = onRemove) {
+                    Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = "Remove saved recipe",
+                        tint = scheme.error.copy(alpha = if (isDarkTheme) 0.88f else 0.78f)
+                    )
+                }
+
+                IconButton(onClick = { expanded = !expanded }) {
+                    Icon(
+                        imageVector = if (expanded) {
+                            Icons.Default.KeyboardArrowUp
+                        } else {
+                            Icons.Default.KeyboardArrowDown
+                        },
+                        contentDescription = if (expanded) {
+                            "Hide recipe details"
+                        } else {
+                            "Show recipe details"
+                        },
+                        tint = scheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            AnimatedVisibility(visible = expanded) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Spacer(Modifier.height(12.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(1.dp)
+                            .background(
+                                scheme.outlineVariant.copy(alpha = if (isDarkTheme) 0.34f else 0.54f)
+                            )
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    SavedRecipeDetails(recipe = recipe)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SavedRecipeDetails(
+    recipe: RecipeSuggestion
+) {
+    val scheme = MaterialTheme.colorScheme
+    val isDarkTheme = scheme.background.luminance() < 0.5f
+    val usesLabelColor =
+        if (isDarkTheme) scheme.primary.copy(alpha = 0.94f) else scheme.primary
+    val addLabelColor =
+        if (isDarkTheme) scheme.tertiary.copy(alpha = 0.92f) else scheme.tertiary
+    val howLabelColor =
+        if (isDarkTheme) scheme.primary.copy(alpha = 0.95f) else scheme.primary
+    val mainTextColor =
+        if (isDarkTheme) scheme.onSurface.copy(alpha = 0.94f) else scheme.onSurface
+    val secondaryTextColor =
+        if (isDarkTheme) scheme.onSurfaceVariant.copy(alpha = 0.90f) else scheme.onSurfaceVariant
+    val usesLine = compactIngredientSummary(recipe.usedIngredients, maxVisible = 5)
+    val addLine = compactIngredientSummary(recipe.missedIngredients, maxVisible = 3)
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        if (usesLine.isNotBlank()) {
+            RecipeInfoLine(
+                label = "Uses",
+                text = usesLine,
+                labelColor = usesLabelColor,
+                textColor = mainTextColor
+            )
+        }
+
+        if (addLine.isNotBlank()) {
+            if (usesLine.isNotBlank()) {
+                Spacer(Modifier.height(8.dp))
+            }
+            RecipeInfoLine(
+                label = "Add",
+                text = addLine,
+                labelColor = addLabelColor,
+                textColor = secondaryTextColor
+            )
+        }
+
+        if (recipe.quickGuide.isNotEmpty()) {
+            if (usesLine.isNotBlank() || addLine.isNotBlank()) {
+                Spacer(Modifier.height(12.dp))
+            }
+            RecipeInfoLine(
+                label = "How",
+                text = "Quick steps",
+                labelColor = howLabelColor,
+                textColor = mainTextColor
+            )
+            Spacer(Modifier.height(8.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                recipe.quickGuide.forEachIndexed { index, step ->
+                    RecipeStepLine(
+                        index = index + 1,
+                        text = step,
+                        accentColor = howLabelColor,
+                        textColor = secondaryTextColor
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SavedRecipesDialog(
+    savedRecipes: List<SavedRecipe>,
+    onDismiss: () -> Unit,
+    onRemove: (RecipeSuggestion) -> Unit
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 18.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            EditCategoriesBackgroundSurface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 620.dp),
+                shape = RoundedCornerShape(30.dp),
+                shadowElevation = 14.dp
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 18.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Saved recipes", style = MaterialTheme.typography.titleLarge)
+                        Spacer(Modifier.weight(1f))
+                        TextButton(onClick = onDismiss) {
+                            Text("Close")
+                        }
+                    }
+
+                    if (savedRecipes.isEmpty()) {
+                        Text(
+                            text = "Saved recipes will show here after you tap Save on an AI recipe card.",
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(start = 18.dp, end = 18.dp, bottom = 20.dp),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 500.dp),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            items(
+                                items = savedRecipes,
+                                key = { recipeStorageKey(it.recipe) }
+                            ) { savedRecipe ->
+                                SavedRecipeListCard(
+                                    recipe = savedRecipe.recipe,
+                                    onRemove = { onRemove(savedRecipe.recipe) }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun RecipePromptBar(
     value: String,
     placeholder: String,
@@ -7191,6 +7579,11 @@ private fun RecipeScreen(
             addAll(loadFoodList(sharedPrefs, gson))
         }
     }
+    val savedRecipes = remember {
+        mutableStateListOf<SavedRecipe>().apply {
+            addAll(loadSavedRecipes(sharedPrefs, gson))
+        }
+    }
 
     var promptText by rememberSaveable { mutableStateOf("") }
     var isLoading by rememberSaveable { mutableStateOf(false) }
@@ -7199,6 +7592,7 @@ private fun RecipeScreen(
     var showJumpToTop by remember { mutableStateOf(false) }
     var showJumpToBottom by remember { mutableStateOf(false) }
     var showNewChatDialog by rememberSaveable { mutableStateOf(false) }
+    var showSavedRecipesDialog by rememberSaveable { mutableStateOf(false) }
     var showLaunchIntro by rememberSaveable {
         mutableStateOf(!hasShownRecipeLaunchIntroThisProcess)
     }
@@ -7211,6 +7605,9 @@ private fun RecipeScreen(
     }
     val previousIngredients = remember(previousIngredientsJson) {
         loadRecipeIngredientContext(gson, previousIngredientsJson)
+    }
+    val savedRecipeKeys by remember {
+        derivedStateOf { savedRecipes.map { recipeStorageKey(it.recipe) }.toSet() }
     }
     val aiEligiblePantryFoods by remember {
         derivedStateOf { pantryFoods.filterNot(::isOnboardingDemoFood) }
@@ -7285,11 +7682,22 @@ private fun RecipeScreen(
                     EXPIRED_FOOD_AUTO_REMOVE_ENABLED_KEY,
                     EXPIRED_FOOD_AUTO_REMOVE_DAYS_KEY ->
                         replaceListContentsIfChanged(pantryFoods, loadFoodList(sharedPrefs, gson))
+
+                    SAVED_RECIPES_KEY ->
+                        replaceListContentsIfChanged(savedRecipes, loadSavedRecipes(sharedPrefs, gson))
                 }
             }
 
         sharedPrefs.registerOnSharedPreferenceChangeListener(listener)
         onDispose { sharedPrefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+
+    LaunchedEffect(Unit) {
+        snapshotFlow { savedRecipes.toList() }
+            .drop(1)
+            .collectLatest { recipes ->
+                saveSavedRecipesAsync(sharedPrefs, gson, recipes)
+            }
     }
 
     LaunchedEffect(pendingLatestMessageScroll) {
@@ -7332,6 +7740,26 @@ private fun RecipeScreen(
 
     fun persistPreviousIngredients(updated: List<String>) {
         sessionState.previousIngredientsJson = gson.toJson(updated)
+    }
+
+    fun removeSavedRecipe(recipe: RecipeSuggestion) {
+        val key = recipeStorageKey(recipe)
+        val index = savedRecipes.indexOfFirst { recipeStorageKey(it.recipe) == key }
+        if (index != -1) {
+            savedRecipes.removeAt(index)
+        }
+    }
+
+    fun toggleSavedRecipe(recipe: RecipeSuggestion) {
+        val cleanedRecipe = cleanSavedRecipe(recipe) ?: return
+        val key = recipeStorageKey(cleanedRecipe)
+        val index = savedRecipes.indexOfFirst { recipeStorageKey(it.recipe) == key }
+
+        if (index != -1) {
+            savedRecipes.removeAt(index)
+        } else {
+            savedRecipes.add(0, SavedRecipe(recipe = cleanedRecipe))
+        }
     }
 
     fun resetRecipeAi() {
@@ -7557,7 +7985,7 @@ private fun RecipeScreen(
                     ),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    if (messages.isNotEmpty() || isLoading) {
+                    if (messages.isNotEmpty() || isLoading || savedRecipes.isNotEmpty()) {
                         item(
                             key = "recipe-new-chat-header",
                             contentType = "recipe-header"
@@ -7566,9 +7994,18 @@ private fun RecipeScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(top = 2.dp),
-                                horizontalArrangement = Arrangement.End
+                                horizontalArrangement = Arrangement.End,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                RecipeNewChatButton(onClick = { showNewChatDialog = true })
+                                RecipeSavedRecipesButton(
+                                    savedCount = savedRecipes.size,
+                                    onClick = { showSavedRecipesDialog = true }
+                                )
+
+                                if (messages.isNotEmpty() || isLoading) {
+                                    Spacer(Modifier.width(8.dp))
+                                    RecipeNewChatButton(onClick = { showNewChatDialog = true })
+                                }
                             }
                         }
                     }
@@ -7635,7 +8072,11 @@ private fun RecipeScreen(
                                         },
                                         contentType = { _, _ -> "recipe-card" }
                                     ) { _, recipe ->
-                                        RecipeAssistantRecipeCard(recipe)
+                                        RecipeAssistantRecipeCard(
+                                            recipe = recipe,
+                                            isSaved = savedRecipeKeys.contains(recipeStorageKey(recipe)),
+                                            onToggleSaved = { toggleSavedRecipe(recipe) }
+                                        )
                                     }
 
                                     item(
@@ -7750,6 +8191,16 @@ private fun RecipeScreen(
                 TextButton(onClick = { showNewChatDialog = false }) {
                     Text("Cancel")
                 }
+            }
+        )
+    }
+
+    if (showSavedRecipesDialog) {
+        SavedRecipesDialog(
+            savedRecipes = savedRecipes,
+            onDismiss = { showSavedRecipesDialog = false },
+            onRemove = { recipe ->
+                removeSavedRecipe(recipe)
             }
         )
     }
