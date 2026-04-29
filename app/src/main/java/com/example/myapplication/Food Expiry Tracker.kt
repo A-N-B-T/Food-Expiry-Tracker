@@ -1297,10 +1297,11 @@ private fun DelayedDestructiveConfirmButton(
 
 enum class OnboardingSpotlightTarget {
     HOME_ADD_FAB,
+    HOME_AI_FAB,
+    HOME_SEARCH_SORT,
     PANTRY_ITEM,
     CATEGORY_CONTROLS,
     HISTORY_TAB,
-    AI_TAB,
     PROFILE_TAB
 }
 
@@ -1319,45 +1320,50 @@ private data class OnboardingStep(
 private val firstLaunchOnboardingSteps = listOf(
     OnboardingStep(
         target = OnboardingSpotlightTarget.HOME_ADD_FAB,
-        title = "Add food",
-        body = "Tap the plus button to save a food with an expiry date."
+        title = "Add pantry items",
+        body = "Use the big plus button to add food, expiry date, category, barcode details, and quantity."
+    ),
+    OnboardingStep(
+        target = OnboardingSpotlightTarget.HOME_AI_FAB,
+        title = "Open Food AI",
+        body = "The sparkle button opens Food AI for quick recipe ideas, suggestion chips, and saved recipes."
+    ),
+    OnboardingStep(
+        target = OnboardingSpotlightTarget.HOME_SEARCH_SORT,
+        title = "Search, sort, and select",
+        body = "Use the header icons to search your pantry, sort by expiry, A-Z, or category, and select multiple foods."
+    ),
+    OnboardingStep(
+        target = OnboardingSpotlightTarget.PANTRY_ITEM,
+        title = "Read a food card",
+        body = "Each card shows the expiry countdown. If you buy the same food with the same date again, the app merges it into the same batch."
     ),
     OnboardingStep(
         target = OnboardingSpotlightTarget.PANTRY_ITEM,
         title = "Swipe right to edit",
-        body = "Drag a food card to the right when you want to edit it.",
+        body = "Drag a food card to the right to edit its name, date, category, or quantity.",
         swipeHint = OnboardingSwipeHint.RIGHT
     ),
     OnboardingStep(
         target = OnboardingSpotlightTarget.PANTRY_ITEM,
         title = "Swipe left to delete",
-        body = "Drag a food card to the left to remove it.",
+        body = "Drag a food card to the left to delete that item.",
         swipeHint = OnboardingSwipeHint.LEFT
-    ),
-    OnboardingStep(
-        target = OnboardingSpotlightTarget.PANTRY_ITEM,
-        title = "Editing items",
-        body = "Edit an item to change its name, expiry date, or category."
     ),
     OnboardingStep(
         target = OnboardingSpotlightTarget.CATEGORY_CONTROLS,
         title = "Categories",
-        body = "Use these pills to filter your pantry or open category editing."
+        body = "Use the category row to filter your pantry, and tap the pencil to edit your categories."
     ),
     OnboardingStep(
         target = OnboardingSpotlightTarget.HISTORY_TAB,
         title = "History",
-        body = "Open History to see food items you saved or used before."
-    ),
-    OnboardingStep(
-        target = OnboardingSpotlightTarget.AI_TAB,
-        title = "Food AI",
-        body = "Tap this sparkle shortcut to open Food AI and get recipe ideas from your foods."
+        body = "History groups old, deleted, expired, and used foods so you can quickly add them back later."
     ),
     OnboardingStep(
         target = OnboardingSpotlightTarget.PROFILE_TAB,
         title = "Profile",
-        body = "Add an account here to back up your food, settings, and app data."
+        body = "Profile has account sync, settings, pantry transfer, help, privacy, and app info."
     )
 )
 
@@ -1918,6 +1924,7 @@ private class RecipeScreenSessionState {
     var expiringPromptDismissed by mutableStateOf(false)
     var messagesJson by mutableStateOf("[]")
     var previousIngredientsJson by mutableStateOf("[]")
+    var shownRecipeKeysJson by mutableStateOf("[]")
     var conversationId by mutableStateOf("recipe-session-${System.currentTimeMillis()}")
 }
 
@@ -1927,7 +1934,8 @@ private val RecipeScreenSessionStateSaver = listSaver<RecipeScreenSessionState, 
             state.expiringPromptDismissed.toString(),
             state.messagesJson,
             state.previousIngredientsJson,
-            state.conversationId
+            state.conversationId,
+            state.shownRecipeKeysJson
         )
     },
     restore = { saved ->
@@ -1936,6 +1944,7 @@ private val RecipeScreenSessionStateSaver = listSaver<RecipeScreenSessionState, 
             messagesJson = saved.getOrNull(1) ?: "[]"
             previousIngredientsJson = saved.getOrNull(2) ?: "[]"
             conversationId = saved.getOrNull(3) ?: "recipe-session-${System.currentTimeMillis()}"
+            shownRecipeKeysJson = saved.getOrNull(4) ?: "[]"
         }
     }
 )
@@ -4397,6 +4406,25 @@ private fun MyPantryTopBar(
         else "$selectedItemsCount items selected"
     val categoryRowState = rememberLazyListState()
     var showSortMenu by remember { mutableStateOf(false) }
+    val categoryTopSpacing by animateDpAsState(
+        targetValue = if (showSearchBar) 4.dp else 10.dp,
+        animationSpec = tween(
+            durationMillis = 300,
+            easing = FastOutSlowInEasing
+        ),
+        label = "homeCategoryTopSpacing"
+    )
+    val tutorialHeaderActionsModifier =
+        if (tutorialActive) {
+            Modifier.onGloballyPositioned { coordinates ->
+                onTutorialTargetPositioned(
+                    OnboardingSpotlightTarget.HOME_SEARCH_SORT,
+                    coordinates.boundsInRoot()
+                )
+            }
+        } else {
+            Modifier
+        }
 
     Box(
         modifier = modifier
@@ -4481,64 +4509,73 @@ private fun MyPantryTopBar(
                             modifier = Modifier.weight(1f)
                         )
 
-                        IconButton(onClick = onShowSearchBar) {
-                            Icon(
-                                imageVector = Icons.Default.Search,
-                                contentDescription = "Show search"
-                            )
-                        }
-
-                        Box {
-                            IconButton(onClick = { showSortMenu = true }) {
+                        Row(
+                            modifier = tutorialHeaderActionsModifier,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            IconButton(onClick = onShowSearchBar) {
                                 Icon(
-                                    imageVector = Icons.Default.Sort,
-                                    contentDescription = "Show sort options",
-                                    tint = if (selectedSortMode == PantrySortMode.NEAREST_EXPIRY) {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                    } else {
-                                        MaterialTheme.colorScheme.primary
-                                    }
+                                    imageVector = Icons.Default.Search,
+                                    contentDescription = "Show search"
                                 )
                             }
 
-                            DropdownMenu(
-                                expanded = showSortMenu,
-                                onDismissRequest = { showSortMenu = false }
-                            ) {
-                                PantrySortMode.entries.forEach { mode ->
-                                    DropdownMenuItem(
-                                        text = {
-                                            Text(
-                                                text = mode.label,
-                                                fontWeight = if (selectedSortMode == mode) {
-                                                    FontWeight.SemiBold
-                                                } else {
-                                                    FontWeight.Normal
-                                                }
-                                            )
-                                        },
-                                        onClick = {
-                                            showSortMenu = false
-                                            onSortChange(mode)
+                            Box {
+                                IconButton(onClick = { showSortMenu = true }) {
+                                    Icon(
+                                        imageVector = Icons.Default.Sort,
+                                        contentDescription = "Show sort options",
+                                        tint = if (selectedSortMode == PantrySortMode.NEAREST_EXPIRY) {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        } else {
+                                            MaterialTheme.colorScheme.primary
                                         }
                                     )
                                 }
-                            }
-                        }
 
-                        IconButton(onClick = {
-                            showSortMenu = false
-                            onEnterSelectionMode()
-                        }) {
-                            Icon(
-                                Icons.Default.Checklist,
-                                contentDescription = "Enter selection mode"
-                            )
+                                DropdownMenu(
+                                    expanded = showSortMenu,
+                                    onDismissRequest = { showSortMenu = false }
+                                ) {
+                                    PantrySortMode.entries.forEach { mode ->
+                                        DropdownMenuItem(
+                                            text = {
+                                                Text(
+                                                    text = mode.label,
+                                                    fontWeight = if (selectedSortMode == mode) {
+                                                        FontWeight.SemiBold
+                                                    } else {
+                                                        FontWeight.Normal
+                                                    }
+                                                )
+                                            },
+                                            onClick = {
+                                                showSortMenu = false
+                                                onSortChange(mode)
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+
+                            IconButton(onClick = {
+                                showSortMenu = false
+                                onEnterSelectionMode()
+                            }) {
+                                Icon(
+                                    Icons.Default.Checklist,
+                                    contentDescription = "Enter selection mode"
+                                )
+                            }
                         }
                     }
                 }
 
-                if (!isSelecting && showSearchBar) {
+                AnimatedVisibility(
+                    visible = !isSelecting && showSearchBar,
+                    enter = smoothVerticalRevealEnter(),
+                    exit = smoothVerticalRevealExit()
+                ) {
                     Column {
                         Spacer(Modifier.height(10.dp))
 
@@ -4555,7 +4592,7 @@ private fun MyPantryTopBar(
 
                 if (!isSelecting) {
                     Column {
-                        Spacer(Modifier.height(if (showSearchBar) 4.dp else 10.dp))
+                        Spacer(Modifier.height(categoryTopSpacing))
                         CategoryPillsLabel()
                         Spacer(Modifier.height(7.dp))
 
@@ -6080,6 +6117,22 @@ private fun normalizeRecipeText(raw: String): String {
     return raw.trim().lowercase(Locale.US).replace(Regex("\\s+"), " ")
 }
 
+private fun normalizeRecipeTitleKey(raw: String): String {
+    return raw
+        .trim()
+        .lowercase(Locale.US)
+        .replace("&", " and ")
+        .replace(Regex("[^a-z0-9]+"), " ")
+        .replace(Regex("\\s+"), " ")
+        .trim()
+}
+
+private fun recipeIdentityKey(recipe: RecipeSuggestion): String {
+    return normalizeRecipeTitleKey(recipe.title).ifBlank {
+        recipeStorageKey(recipe)
+    }
+}
+
 private fun recipeStorageKey(recipe: RecipeSuggestion): String {
     return listOf(
         recipe.title,
@@ -6120,7 +6173,7 @@ private fun normalizeSavedRecipes(savedRecipes: List<SavedRecipe>): MutableList<
         .sortedByDescending { it.savedAt }
         .forEach { saved ->
             val cleanedRecipe = cleanSavedRecipe(saved.recipe) ?: return@forEach
-            val key = recipeStorageKey(cleanedRecipe)
+            val key = recipeIdentityKey(cleanedRecipe)
             deduped.putIfAbsent(
                 key,
                 SavedRecipe(
@@ -6131,6 +6184,52 @@ private fun normalizeSavedRecipes(savedRecipes: List<SavedRecipe>): MutableList<
         }
 
     return deduped.values.toMutableList()
+}
+
+private fun recipeIdentityKeysFromMessages(messages: List<RecipeChatMessage>): Set<String> {
+    return messages
+        .flatMap { it.recipes }
+        .map(::recipeIdentityKey)
+        .filter { it.isNotBlank() }
+        .toSet()
+}
+
+private fun savedRecipeIdentityKeys(savedRecipes: List<SavedRecipe>): Set<String> {
+    return savedRecipes
+        .map { recipeIdentityKey(it.recipe) }
+        .filter { it.isNotBlank() }
+        .toSet()
+}
+
+private fun savedRecipeTitles(savedRecipes: List<SavedRecipe>): List<String> {
+    return savedRecipes
+        .map { it.recipe.title.trim() }
+        .filter { it.isNotBlank() }
+}
+
+private fun shownRecipeTitles(messages: List<RecipeChatMessage>): List<String> {
+    return messages
+        .flatMap { it.recipes }
+        .map { it.title.trim() }
+        .filter { it.isNotBlank() }
+}
+
+private fun filterRepeatedRecipes(
+    batch: RecipeSuggestionBatch,
+    blockedRecipeKeys: Set<String>,
+    limit: Int
+): RecipeSuggestionBatch {
+    val seenThisBatch = mutableSetOf<String>()
+    val freshRecipes = batch.recipes
+        .filter { recipe ->
+            val key = recipeIdentityKey(recipe)
+            key.isNotBlank() &&
+                    key !in blockedRecipeKeys &&
+                    seenThisBatch.add(key)
+        }
+        .take(limit.coerceIn(1, 3))
+
+    return batch.copy(recipes = freshRecipes)
 }
 
 private fun loadSavedRecipes(
@@ -6202,23 +6301,25 @@ private fun expiringFoodLabel(daysLeft: Int): String {
     }
 }
 
-private fun expiringFoodSummary(
-    items: List<ExpiringFoodHint>,
-    maxVisible: Int = 4
-): String {
-    if (items.isEmpty()) return ""
+private fun expiringFoodsWindowLabel(windowDays: Int): String {
+    return if (windowDays == 1) "1 day" else "$windowDays days"
+}
 
-    val visible = items.take(maxVisible)
-    val hiddenCount = items.size - visible.size
+private fun expiringFoodListAnswer(
+    foods: List<ExpiringFoodHint>,
+    windowDays: Int
+): String {
+    if (foods.isEmpty()) {
+        return "No foods are expiring in the next ${expiringFoodsWindowLabel(windowDays)}."
+    }
 
     return buildString {
-        append(
-            visible.joinToString(" • ") { food ->
-                "${food.name} ${expiringFoodLabel(food.daysLeft)}"
-            }
-        )
-        if (hiddenCount > 0) {
-            append(" • +$hiddenCount more")
+        append("Foods expiring soon:")
+        foods.forEach { food ->
+            append("\n- ")
+            append(food.name)
+            append(": ")
+            append(expiringFoodLabel(food.daysLeft))
         }
     }
 }
@@ -6244,6 +6345,44 @@ private fun buildRecipeAssistantMessage(batch: RecipeSuggestionBatch): RecipeCha
         resolvedIngredients = batch.resolvedIngredients,
         recipes = batch.recipes
     )
+}
+
+private fun wantsExpiringFoodsList(request: String): Boolean {
+    val normalized = request.trim().lowercase(Locale.US)
+    if (normalized.isBlank()) return false
+
+    val expiringIntent = listOf(
+        "expiring soon",
+        "expire soon",
+        "expires soon",
+        "expiry soon",
+        "soon to expire",
+        "about to expire",
+        "almost expired",
+        "close to expiring",
+        "near expiry",
+        "near expiration",
+        "going bad",
+        "go bad",
+        "what expires",
+        "what is expiring",
+        "which foods are expiring",
+        "what foods are expiring",
+        "show expiring",
+        "list expiring"
+    ).any(normalized::contains)
+
+    if (!expiringIntent) return false
+
+    val recipeIntent = listOf(
+        "recipe", "recipes", "cook", "make", "meal", "meals",
+        "breakfast", "lunch", "dinner", "snack"
+    ).any(normalized::contains)
+    val listIntent = listOf(
+        "which", "what", "show", "list", "tell me"
+    ).any(normalized::contains)
+
+    return listIntent || !recipeIntent
 }
 
 private fun looksFoodRelatedRecipeRequest(
@@ -6398,74 +6537,6 @@ private fun buildExpiringFoodsRequest(expiringFoods: List<ExpiringFoodHint>): St
 }
 
 @Composable
-private fun ExpiringFoodsPromptCard(
-    foods: List<ExpiringFoodHint>,
-    windowDays: Int,
-    isLoading: Boolean,
-    onUseExpiringFoods: () -> Unit
-) {
-    val scheme = MaterialTheme.colorScheme
-    val isDarkTheme = scheme.background.luminance() < 0.5f
-    val expiringFoodsButtonContainerColor =
-        if (isDarkTheme) {
-            scheme.primary.copy(alpha = 0.84f)
-        } else {
-            scheme.primary
-        }
-    val expiringFoodsButtonBorderColor =
-        if (isDarkTheme) {
-            scheme.primary.copy(alpha = 0.28f)
-        } else {
-            scheme.primary.copy(alpha = 0.18f)
-        }
-
-    RecipeChatMessageRow(isUser = false) { bubbleModifier ->
-        RecipeChatBubble(
-            modifier = bubbleModifier,
-            isUser = false
-        ) {
-            Text(
-                text = "Foods expiring soon",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold
-            )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = expiringFoodSummary(foods, maxVisible = 5),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(Modifier.height(12.dp))
-            Button(
-                onClick = onUseExpiringFoods,
-                enabled = !isLoading,
-                shape = RoundedCornerShape(22.dp),
-                modifier = Modifier.align(Alignment.Start),
-                border = BorderStroke(1.dp, expiringFoodsButtonBorderColor),
-                elevation = ButtonDefaults.buttonElevation(
-                    defaultElevation = if (isDarkTheme) 2.dp else 4.dp,
-                    pressedElevation = if (isDarkTheme) 3.dp else 5.dp,
-                    disabledElevation = 0.dp
-                ),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = expiringFoodsButtonContainerColor,
-                    contentColor = scheme.onPrimary,
-                    disabledContainerColor =
-                        scheme.surfaceVariant.copy(alpha = if (isDarkTheme) 0.56f else 0.82f),
-                    disabledContentColor =
-                        scheme.onSurfaceVariant.copy(alpha = if (isDarkTheme) 0.78f else 0.88f)
-                )
-            ) {
-                Text(
-                    text = "Use Expiring Foods",
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
-        }
-    }
-}
-
-@Composable
 private fun RecipeIntroCard(hasPantryFoods: Boolean) {
     RecipeChatMessageRow(isUser = false) { bubbleModifier ->
         RecipeChatBubble(
@@ -6496,9 +6567,9 @@ private fun RecipeQuickSuggestionChips(
     hasPantryFoods: Boolean,
     hasExpiringFoods: Boolean,
     isLoading: Boolean,
+    onShowExpiringFoods: () -> Unit,
     onUsePantryFoods: () -> Unit,
     onQuickBreakfast: () -> Unit,
-    onUseExpiringFoods: () -> Unit,
     onOnlyOneRecipe: () -> Unit
 ) {
     LazyRow(
@@ -6506,6 +6577,14 @@ private fun RecipeQuickSuggestionChips(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        item {
+            RecipeQuickSuggestionChip(
+                text = "Show expiring foods",
+                enabled = hasExpiringFoods && !isLoading,
+                onClick = onShowExpiringFoods
+            )
+        }
+
         item {
             RecipeQuickSuggestionChip(
                 text = "Use foods in my list",
@@ -6519,14 +6598,6 @@ private fun RecipeQuickSuggestionChips(
                 text = "Quick breakfast",
                 enabled = !isLoading,
                 onClick = onQuickBreakfast
-            )
-        }
-
-        item {
-            RecipeQuickSuggestionChip(
-                text = "Use expiring foods",
-                enabled = hasExpiringFoods && !isLoading,
-                onClick = onUseExpiringFoods
             )
         }
 
@@ -6945,47 +7016,6 @@ private fun RecipeStepLine(
 }
 
 @Composable
-private fun RecipeFollowUpHint(
-    modifier: Modifier = Modifier
-) {
-    val scheme = MaterialTheme.colorScheme
-    val isDarkTheme = scheme.background.luminance() < 0.5f
-    val hintColor = scheme.primary.copy(alpha = if (isDarkTheme) 0.92f else 0.78f)
-
-    Box(
-        modifier = modifier.fillMaxWidth(),
-        contentAlignment = Alignment.CenterStart
-    ) {
-        Row(
-            modifier = Modifier
-                .clip(RoundedCornerShape(18.dp))
-                .background(hintColor.copy(alpha = if (isDarkTheme) 0.12f else 0.08f))
-                .border(
-                    1.dp,
-                    hintColor.copy(alpha = if (isDarkTheme) 0.24f else 0.18f),
-                    RoundedCornerShape(18.dp)
-                )
-                .padding(horizontal = 12.dp, vertical = 9.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = Icons.Default.AutoAwesome,
-                contentDescription = null,
-                modifier = Modifier.size(16.dp)
-            )
-
-            Spacer(Modifier.width(8.dp))
-
-            Text(
-                text = "You can ask me to make recipes using foods in your list.",
-                style = MaterialTheme.typography.bodySmall,
-                color = hintColor
-            )
-        }
-    }
-}
-
-@Composable
 private fun RecipeAssistantTextCard(
     message: RecipeChatMessage,
     modifier: Modifier = Modifier
@@ -7028,13 +7058,6 @@ private fun RecipeAssistantRecipeCard(
             onToggleSaved = onToggleSaved,
             modifier = bubbleModifier
         )
-    }
-}
-
-@Composable
-private fun RecipeAssistantFollowUpHintCard() {
-    RecipeChatMessageRow(isUser = false) { bubbleModifier ->
-        RecipeFollowUpHint(modifier = bubbleModifier)
     }
 }
 
@@ -7537,9 +7560,9 @@ private fun SavedRecipesDialog(
                         ) {
                             items(
                                 items = savedRecipes,
-                                key = { recipeStorageKey(it.recipe) }
+                                key = { recipeIdentityKey(it.recipe) }
                             ) { savedRecipe ->
-                                val savedRecipeKey = recipeStorageKey(savedRecipe.recipe)
+                                val savedRecipeKey = recipeIdentityKey(savedRecipe.recipe)
                                 SavedRecipeListCard(
                                     recipe = savedRecipe.recipe,
                                     expanded = expandedRecipeKey == savedRecipeKey,
@@ -7568,7 +7591,7 @@ private fun SavedRecipesDialog(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        val recipeKey = recipeStorageKey(recipeToDelete)
+                        val recipeKey = recipeIdentityKey(recipeToDelete)
                         if (expandedRecipeKey == recipeKey) {
                             expandedRecipeKey = null
                         }
@@ -7771,9 +7794,9 @@ private fun RecipeScreen(
     var showLaunchIntro by rememberSaveable {
         mutableStateOf(!hasShownRecipeLaunchIntroThisProcess)
     }
-    val expiringPromptDismissed = sessionState.expiringPromptDismissed
     val messagesJson = sessionState.messagesJson
     val previousIngredientsJson = sessionState.previousIngredientsJson
+    val shownRecipeKeysJson = sessionState.shownRecipeKeysJson
     val conversationId = sessionState.conversationId
     val messages = remember(messagesJson) {
         loadRecipeChatMessages(gson, messagesJson)
@@ -7781,8 +7804,13 @@ private fun RecipeScreen(
     val previousIngredients = remember(previousIngredientsJson) {
         loadRecipeIngredientContext(gson, previousIngredientsJson)
     }
+    val shownRecipeKeys = remember(shownRecipeKeysJson) {
+        loadRecipeIngredientContext(gson, shownRecipeKeysJson)
+            .filter { it.isNotBlank() }
+            .toSet()
+    }
     val savedRecipeKeys by remember {
-        derivedStateOf { savedRecipes.map { recipeStorageKey(it.recipe) }.toSet() }
+        derivedStateOf { savedRecipeIdentityKeys(savedRecipes) }
     }
     val aiEligiblePantryFoods by remember {
         derivedStateOf { pantryFoods.filterNot(::isOnboardingDemoFood) }
@@ -7806,7 +7834,6 @@ private fun RecipeScreen(
                 )
         }
     }
-    val showExpiringPrompt = soonExpiringFoods.isNotEmpty() && !expiringPromptDismissed
     val visibleMessageItemCount = messages.sumOf { message ->
         if (message.role == RecipeChatRole.ASSISTANT && message.recipes.isNotEmpty()) {
             message.recipes.size + 2
@@ -7816,8 +7843,7 @@ private fun RecipeScreen(
     }
     val hasAiPantryFoods = aiEligiblePantryFoods.isNotEmpty()
     val totalVisibleItems =
-        (if (showExpiringPrompt) 1 else 0) +
-                1 +
+        1 +
                 (if (messages.isEmpty()) 1 else 0) +
                 visibleMessageItemCount +
                 (if (isLoading) 1 else 0)
@@ -7919,9 +7945,13 @@ private fun RecipeScreen(
         sessionState.previousIngredientsJson = gson.toJson(updated)
     }
 
+    fun persistShownRecipeKeys(updated: Set<String>) {
+        sessionState.shownRecipeKeysJson = gson.toJson(updated.toList())
+    }
+
     fun removeSavedRecipe(recipe: RecipeSuggestion) {
-        val key = recipeStorageKey(recipe)
-        val index = savedRecipes.indexOfFirst { recipeStorageKey(it.recipe) == key }
+        val key = recipeIdentityKey(recipe)
+        val index = savedRecipes.indexOfFirst { recipeIdentityKey(it.recipe) == key }
         if (index != -1) {
             savedRecipes.removeAt(index)
         }
@@ -7929,8 +7959,8 @@ private fun RecipeScreen(
 
     fun toggleSavedRecipe(recipe: RecipeSuggestion) {
         val cleanedRecipe = cleanSavedRecipe(recipe) ?: return
-        val key = recipeStorageKey(cleanedRecipe)
-        val index = savedRecipes.indexOfFirst { recipeStorageKey(it.recipe) == key }
+        val key = recipeIdentityKey(cleanedRecipe)
+        val index = savedRecipes.indexOfFirst { recipeIdentityKey(it.recipe) == key }
 
         if (index != -1) {
             savedRecipes.removeAt(index)
@@ -7955,12 +7985,39 @@ private fun RecipeScreen(
         }
     }
 
+    fun showExpiringFoodsList(rawRequest: String = "Show foods expiring soon.") {
+        val trimmed = rawRequest.trim().ifBlank { "Show foods expiring soon." }
+        val assistantMessage = RecipeChatMessage(
+            role = RecipeChatRole.ASSISTANT,
+            text = expiringFoodListAnswer(
+                foods = soonExpiringFoods,
+                windowDays = AI_EXPIRING_FOOD_WINDOW_DAYS
+            )
+        )
+        persistMessages(
+            messages +
+                    RecipeChatMessage(
+                        role = RecipeChatRole.USER,
+                        text = trimmed
+                    ) +
+                    assistantMessage
+        )
+        promptText = ""
+        keyboard?.hide()
+        pendingLatestMessageScroll += 1
+    }
+
     fun sendRecipePrompt(
         rawRequest: String,
         useExpiringFoods: Boolean = false
     ) {
         val trimmed = rawRequest.trim()
         if (trimmed.isBlank() || isLoading) return
+
+        if (!useExpiringFoods && wantsExpiringFoodsList(trimmed)) {
+            showExpiringFoodsList(trimmed)
+            return
+        }
 
         if (!useExpiringFoods && requestedRecipeLimitTooHigh(trimmed)) {
             val tooManyRecipeMessages = messages +
@@ -8025,6 +8082,11 @@ private fun RecipeScreen(
 
         val frozenExpiringFoods = soonExpiringFoods
         val frozenPantryIngredients = pantryIngredientNames
+        val blockedRecipeKeys =
+            shownRecipeKeys + recipeIdentityKeysFromMessages(messages) + savedRecipeIdentityKeys(savedRecipes)
+        val blockedRecipeTitles = (shownRecipeTitles(messages) + savedRecipeTitles(savedRecipes))
+            .distinctBy(::normalizeRecipeTitleKey)
+            .take(12)
         val useFullPantryList = !useExpiringFoods && wantsRecipesFromPantryList(trimmed)
         val requestedLimit = requestedRecipeLimit(trimmed) ?: 3
         val requestedRecipeWord = if (requestedLimit == 1) "recipe" else "recipes"
@@ -8047,7 +8109,7 @@ private fun RecipeScreen(
             return
         }
 
-        val requestText = if (useExpiringFoods) {
+        val baseRequestText = if (useExpiringFoods) {
             buildExpiringFoodsRequest(frozenExpiringFoods)
         } else if (useFullPantryList) {
             "Please suggest $requestedLimit easy and quick $requestedRecipeWord using foods from my pantry list."
@@ -8056,6 +8118,14 @@ private fun RecipeScreen(
         } else {
             trimmed
         }
+        val requestText =
+            if (!useExpiringFoods && blockedRecipeTitles.isNotEmpty()) {
+                "$baseRequestText Do not suggest these already shown or saved recipe names again: ${
+                    blockedRecipeTitles.joinToString(", ")
+                }."
+            } else {
+                baseRequestText
+            }
 
         val userMessage = RecipeChatMessage(
             role = RecipeChatRole.USER,
@@ -8104,10 +8174,29 @@ private fun RecipeScreen(
 
             val assistantMessage = result.fold(
                 onSuccess = { batch ->
-                    if (batch.resolvedIngredients.isNotEmpty()) {
-                        persistPreviousIngredients(batch.resolvedIngredients)
+                    val freshBatch = filterRepeatedRecipes(
+                        batch = batch,
+                        blockedRecipeKeys = blockedRecipeKeys,
+                        limit = requestedLimit
+                    )
+
+                    if (freshBatch.recipes.isNotEmpty() && freshBatch.resolvedIngredients.isNotEmpty()) {
+                        persistPreviousIngredients(freshBatch.resolvedIngredients)
                     }
-                    buildRecipeAssistantMessage(batch)
+                    if (freshBatch.recipes.isNotEmpty()) {
+                        persistShownRecipeKeys(
+                            shownRecipeKeys + freshBatch.recipes.map(::recipeIdentityKey)
+                        )
+                    }
+
+                    if (batch.recipes.isNotEmpty() && freshBatch.recipes.isEmpty()) {
+                        RecipeChatMessage(
+                            role = RecipeChatRole.ASSISTANT,
+                            text = "I only found recipes that were already shown or saved, so I skipped them. Try a different chip or different foods for fresh ideas."
+                        )
+                    } else {
+                        buildRecipeAssistantMessage(freshBatch)
+                    }
                 },
                 onFailure = { error ->
                     RecipeChatMessage(
@@ -8187,25 +8276,6 @@ private fun RecipeScreen(
                         }
                     }
 
-                    if (showExpiringPrompt) {
-                        item(
-                            key = "ai-expiring-prompt",
-                            contentType = "ai-expiring-prompt"
-                        ) {
-                            ExpiringFoodsPromptCard(
-                                foods = soonExpiringFoods,
-                                windowDays = AI_EXPIRING_FOOD_WINDOW_DAYS,
-                                isLoading = isLoading,
-                                onUseExpiringFoods = {
-                                    sendRecipePrompt(
-                                        rawRequest = buildExpiringFoodsRequest(soonExpiringFoods),
-                                        useExpiringFoods = true
-                                    )
-                                }
-                            )
-                        }
-                    }
-
                     item(
                         key = "ai-quick-suggestion-chips",
                         contentType = "ai-quick-suggestion-chips"
@@ -8214,6 +8284,9 @@ private fun RecipeScreen(
                             hasPantryFoods = hasAiPantryFoods,
                             hasExpiringFoods = soonExpiringFoods.isNotEmpty(),
                             isLoading = isLoading,
+                            onShowExpiringFoods = {
+                                showExpiringFoodsList()
+                            },
                             onUsePantryFoods = {
                                 sendRecipePrompt(
                                     "Suggest recipes using foods in my list."
@@ -8226,12 +8299,6 @@ private fun RecipeScreen(
                                     } else {
                                         "Suggest 3 quick breakfast recipes."
                                     }
-                                )
-                            },
-                            onUseExpiringFoods = {
-                                sendRecipePrompt(
-                                    rawRequest = buildExpiringFoodsRequest(soonExpiringFoods),
-                                    useExpiringFoods = true
                                 )
                             },
                             onOnlyOneRecipe = {
@@ -8291,16 +8358,9 @@ private fun RecipeScreen(
                                     ) { _, recipe ->
                                         RecipeAssistantRecipeCard(
                                             recipe = recipe,
-                                            isSaved = savedRecipeKeys.contains(recipeStorageKey(recipe)),
+                                            isSaved = savedRecipeKeys.contains(recipeIdentityKey(recipe)),
                                             onToggleSaved = { toggleSavedRecipe(recipe) }
                                         )
-                                    }
-
-                                    item(
-                                        key = "recipe-follow-up-$messageIndex-${message.text.hashCode()}",
-                                        contentType = "recipe-follow-up"
-                                    ) {
-                                        RecipeAssistantFollowUpHintCard()
                                     }
                                 }
                             }
@@ -8401,7 +8461,7 @@ private fun RecipeScreen(
                         resetRecipeAi()
                     }
                 ) {
-                    Text("New chat")
+                    Text("Confirm")
                 }
             },
             dismissButton = {
@@ -9012,7 +9072,7 @@ fun HelpScreen(navController: NavHostController) {
         navController = navController,
         title = "Help & Support",
         headline = "Quick help",
-        body = "Home: add and manage foods.\nHistory: re-add old items.\nAI: get recipe ideas from food items.\nProfile: account, sync, and settings.",
+        body = "Home: add foods with expiry dates, categories, barcodes, and quantities. Use the header to search, sort, and select items.\n\nFood cards: swipe right to edit, swipe left to delete. Matching duplicate batches merge together.\n\nFood AI: tap the sparkle button for recipe chips, saved recipes, and recipe ideas from your pantry.\n\nHistory: grouped old items are easy to search and add back.\n\nProfile: manage account sync, settings, pantry transfer, help, privacy, and app info.",
         footer = "If something looks off, try closing and reopening the app."
     )
 }
@@ -9892,7 +9952,6 @@ fun BottomBar(
                 bottomBarItems.forEach { item ->
                     val tutorialTarget = when (item.route) {
                         Route.History.r -> OnboardingSpotlightTarget.HISTORY_TAB
-                        Route.Recipe.r -> OnboardingSpotlightTarget.AI_TAB
                         Route.Profile.r -> OnboardingSpotlightTarget.PROFILE_TAB
                         else -> null
                     }
@@ -10182,7 +10241,7 @@ fun FoodEntryScreen(
     var savedListIndex by rememberSaveable { mutableIntStateOf(0) }
     var savedListOffset by rememberSaveable { mutableIntStateOf(0) }
     var filterChangeJob by remember { mutableStateOf<Job?>(null) }
-    var sortChangeJob by remember { mutableStateOf<Job?>(null) }
+    var sortScrollRequest by remember { mutableIntStateOf(0) }
     val selectedSortMode =
         PantrySortMode.entries.firstOrNull { it.name == selectedSortModeName }
             ?: PantrySortMode.NEAREST_EXPIRY
@@ -10247,12 +10306,16 @@ fun FoodEntryScreen(
     fun updatePantrySort(newSortMode: PantrySortMode) {
         if (selectedSortMode == newSortMode) return
 
-        sortChangeJob?.cancel()
-        sortChangeJob = formScope.launch {
-            selectedSortModeName = newSortMode.name
-            if (listState.firstVisibleItemIndex != 0 || listState.firstVisibleItemScrollOffset != 0) {
-                listState.animateScrollToItem(0)
-            }
+        selectedSortModeName = newSortMode.name
+        sortScrollRequest += 1
+    }
+
+    LaunchedEffect(sortScrollRequest) {
+        if (sortScrollRequest == 0) return@LaunchedEffect
+
+        withFrameNanos { }
+        if (listState.firstVisibleItemIndex != 0 || listState.firstVisibleItemScrollOffset != 0) {
+            listState.animateScrollToTopSlowly(slowTopScrollFallbackPx)
         }
     }
 
@@ -10673,7 +10736,7 @@ fun FoodEntryScreen(
                         onAiPositioned = if (tutorialActive) {
                             { bounds: Rect ->
                                 onTutorialTargetPositioned(
-                                    OnboardingSpotlightTarget.AI_TAB,
+                                    OnboardingSpotlightTarget.HOME_AI_FAB,
                                     bounds
                                 )
                             }
@@ -10817,9 +10880,12 @@ fun FoodEntryScreen(
                     searchQuery = searchQuery,
                     onSearchQueryChange = { searchQuery = it },
                     onShowSearchBar = {
-                        showPantrySearchBar = true
-                        homeSearchFocus.requestFocus()
-                        keyboard?.show()
+                        if (!showPantrySearchBar) {
+                            showPantrySearchBar = true
+                        } else {
+                            homeSearchFocus.requestFocus()
+                            keyboard?.show()
+                        }
                     },
                     searchTextFieldModifier = Modifier.focusRequester(homeSearchFocus),
                     onSearchBarTap = {
