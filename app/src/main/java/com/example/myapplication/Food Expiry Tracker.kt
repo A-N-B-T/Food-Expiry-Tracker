@@ -7201,14 +7201,7 @@ private fun SavedRecipeListCard(
     var expanded by remember(recipe) { mutableStateOf(false) }
 
     ExactFrostedPillCard(
-        modifier = Modifier
-            .fillMaxWidth()
-            .animateContentSize(
-                animationSpec = tween(
-                    durationMillis = 240,
-                    easing = FastOutSlowInEasing
-                )
-            ),
+        modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(25.dp),
         shadowElevation = 4.dp
     ) {
