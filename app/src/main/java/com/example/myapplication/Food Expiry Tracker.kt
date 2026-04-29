@@ -6611,7 +6611,7 @@ private fun RecipeSuggestionCard(
     recipe: RecipeSuggestion,
     isSaved: Boolean = false,
     onToggleSaved: (() -> Unit)? = null,
-    modifier: Modifier = Modifier
+    @SuppressLint("ModifierParameter") modifier: Modifier = Modifier
 ) {
     val scheme = MaterialTheme.colorScheme
     val isDarkTheme = scheme.background.luminance() < 0.5f
@@ -7182,7 +7182,7 @@ private fun RecipeSavedRecipesButton(
         shadowElevation = 2.dp
     ) {
         Text(
-            text = if (savedCount > 0) "Saved recipes ($savedCount)" else "Saved recipes",
+            text = if (savedCount > 0) "Saved recipes $savedCount" else "Saved recipes",
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
             style = MaterialTheme.typography.labelLarge,
             fontWeight = FontWeight.SemiBold,
