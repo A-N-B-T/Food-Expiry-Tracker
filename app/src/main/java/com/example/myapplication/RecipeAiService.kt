@@ -262,12 +262,9 @@ private fun findRequestedRecipeCountToken(normalizedRequest: String): String? {
         Regex("\\b$numberPattern\\s+more\\b")
     )
 
-    val matchedNumber = directCountPatterns
-        .asSequence()
-        .mapNotNull { pattern -> pattern.find(normalizedRequest)?.groupValues?.getOrNull(1) }
-        .firstOrNull()
-
-    return matchedNumber
+    return directCountPatterns.firstNotNullOfOrNull { pattern ->
+        pattern.find(normalizedRequest)?.groupValues?.getOrNull(1)
+    }
 }
 
 private fun recipeCountTokenPattern(): String {
@@ -371,25 +368,19 @@ internal object RecipeAiService {
                 else -> rawExplicitRequestIngredients
             }
         val addedConversationalIngredients =
-            if (conversationalIngredientUpdate != null) {
-                conversationalIngredientUpdate.filter { updatedIngredient ->
-                    cleanedPreviousIngredients.none { previousIngredient ->
-                        ingredientMatchesEitherWay(updatedIngredient, previousIngredient)
-                    }
+            conversationalIngredientUpdate?.filter { updatedIngredient ->
+                cleanedPreviousIngredients.none { previousIngredient ->
+                    ingredientMatchesEitherWay(updatedIngredient, previousIngredient)
                 }
-            } else {
-                emptyList()
-            }
+            }.orEmpty()
         val removedConversationalIngredients =
-            if (conversationalIngredientUpdate != null) {
+            conversationalIngredientUpdate?.let { updatedIngredients ->
                 cleanedPreviousIngredients.filter { previousIngredient ->
-                    conversationalIngredientUpdate.none { updatedIngredient ->
+                    updatedIngredients.none { updatedIngredient ->
                         ingredientMatchesEitherWay(previousIngredient, updatedIngredient)
                     }
                 }
-            } else {
-                emptyList()
-            }
+            }.orEmpty()
         val effectivePantryIngredients =
             when {
                 wantsMoreFromPrevious -> emptyList()
@@ -1000,6 +991,7 @@ internal object RecipeAiService {
             ingredientMatchTokensFromList(pantryIngredients + previousIngredients)
         val matchedTokens = remainingText
             .split(Regex("[^a-z0-9]+"))
+            .asSequence()
             .map { it.trim() }
             .filter { it.length >= 3 }
             .map { rawToken -> rawToken to normalizeIngredientMatchToken(rawToken) }
@@ -1008,6 +1000,7 @@ internal object RecipeAiService {
                     normalizedToken in referenceTokens
             }
             .map { (rawToken, _) -> rawToken }
+            .toList()
 
         return sanitizeIngredients(matchedPhrases + matchedTokens)
     }

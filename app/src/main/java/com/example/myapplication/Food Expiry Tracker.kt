@@ -1507,7 +1507,9 @@ private fun FirstLaunchOnboardingOverlay(
         ExactFrostedPillCard(
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .offset(y = animatedCardTop)
+                .offset {
+                    IntOffset(0, with(density) { animatedCardTop.roundToPx() })
+                }
                 .padding(horizontal = 22.dp)
                 .fillMaxWidth()
                 .animateContentSize(
@@ -1900,6 +1902,13 @@ private data class HistoryDateSection(
     val entries: List<HistoryEntry>
 )
 
+private data class ProfileStats(
+    val foodsSaved: Int,
+    val foodsExpired: Int,
+    val mostUsedCategory: String,
+    val wasteAvoided: Int
+)
+
 private data class ExpiringFoodHint(
     val name: String,
     val daysLeft: Int
@@ -1985,7 +1994,7 @@ private const val SWIPE_ITEM_PLACEMENT_DURATION_MS = 320
 private const val BOTTOM_TAB_TRANSITION_GUARD_MS = 460L
 private const val EDIT_CATEGORIES_SHEET_EXIT_DURATION_MS = 250
 private const val EDIT_CATEGORIES_SHEET_ENTER_DURATION_MS = 260
-private const val AI_EXPIRING_FOOD_WINDOW_DAYS = 3
+private const val AI_EXPIRING_FOOD_WINDOW_DAYS = 2
 
 private val historyAutoDeletePresets = listOf(
     AutoDeletePreset(30L, "1 month"),
@@ -2774,6 +2783,41 @@ private fun buildHistoryDateSections(
             entries = sectionEntries
         )
     }
+}
+
+private fun buildProfileStats(
+    foods: List<FoodItem>,
+    today: LocalDate = LocalDate.now()
+): ProfileStats {
+    val pantryFoods = foods.filterNot(::isOnboardingDemoFood)
+    val foodsSaved = pantryFoods.sumOf { sanitizeFoodQuantity(it.quantity) }
+    val foodsExpired = pantryFoods.sumOf { food ->
+        val expiryDate = foodExpiryDate(food)
+        if (expiryDate != null && expiryDate.isBefore(today)) {
+            sanitizeFoodQuantity(food.quantity)
+        } else {
+            0
+        }
+    }
+    val categoryTotals = linkedMapOf<String, Int>()
+
+    pantryFoods.forEach { food ->
+        val category = cleanFoodCategory(food.category) ?: return@forEach
+        categoryTotals[category] = (categoryTotals[category] ?: 0) + sanitizeFoodQuantity(food.quantity)
+    }
+
+    val mostUsedCategory =
+        categoryTotals.entries
+            .maxWithOrNull(compareBy<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
+            ?.key
+            ?: "None"
+
+    return ProfileStats(
+        foodsSaved = foodsSaved,
+        foodsExpired = foodsExpired,
+        mostUsedCategory = mostUsedCategory,
+        wasteAvoided = (foodsSaved - foodsExpired).coerceAtLeast(0)
+    )
 }
 
 private fun recordFoodNameInHistory(
@@ -5103,7 +5147,9 @@ fun AppNav(
             bottomBar = {
                 BottomBar(
                     modifier = Modifier
-                        .offset(y = bottomBarOffset)
+                        .offset {
+                            IntOffset(0, bottomBarOffset.roundToPx())
+                        }
                         .graphicsLayer { alpha = bottomBarAlpha },
                     navController = navController,
                     currentRoute = current,
@@ -6315,8 +6361,10 @@ private fun expiringFoodListAnswer(
 
     return buildString {
         append("Foods expiring soon:")
-        foods.forEach { food ->
-            append("\n- ")
+        foods.forEachIndexed { index, food ->
+            append("\n")
+            append(index + 1)
+            append(". ")
             append(food.name)
             append(": ")
             append(expiringFoodLabel(food.daysLeft))
@@ -8519,9 +8567,22 @@ fun CategoryScreen() {
 @Composable
 fun ProfileScreen(navController: NavHostController) {
     val context = LocalContext.current
+    val appCtx = context.applicationContext
     val density = LocalDensity.current
     val colorScheme = MaterialTheme.colorScheme
     val accountSession = rememberAccountSessionPreference()
+    val statsPrefs = remember(appCtx) {
+        appCtx.getSharedPreferences(FOOD_PREFS, Context.MODE_PRIVATE)
+    }
+    val statsGson = remember { Gson() }
+    val profileFoods = remember {
+        mutableStateListOf<FoodItem>().apply {
+            addAll(loadFoodList(statsPrefs, statsGson))
+        }
+    }
+    val profileStats by remember {
+        derivedStateOf { buildProfileStats(profileFoods) }
+    }
     var localProfileName by rememberSaveable { mutableStateOf(loadLocalProfileName(context)) }
     var localProfilePhotoUri by rememberSaveable { mutableStateOf(loadLocalProfilePhotoUri(context)) }
     var showEditLocalNameDialog by rememberSaveable { mutableStateOf(false) }
@@ -8576,6 +8637,21 @@ fun ProfileScreen(navController: NavHostController) {
         isDarkIcons = colorScheme.background.luminance() > 0.5f
     )
 
+    DisposableEffect(statsPrefs, statsGson) {
+        val listener =
+            android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+                when (key) {
+                    FOOD_LIST_KEY,
+                    EXPIRED_FOOD_AUTO_REMOVE_ENABLED_KEY,
+                    EXPIRED_FOOD_AUTO_REMOVE_DAYS_KEY ->
+                        replaceListContentsIfChanged(profileFoods, loadFoodList(statsPrefs, statsGson))
+                }
+            }
+
+        statsPrefs.registerOnSharedPreferenceChangeListener(listener)
+        onDispose { statsPrefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         overscrollEffect = null,
@@ -8605,6 +8681,9 @@ fun ProfileScreen(navController: NavHostController) {
                 }
             )
         }
+
+        item { ProfileSectionTitle("Stats") }
+        item { ProfileStatsCard(profileStats) }
 
         item { ProfileSectionTitle("Manage") }
         item {
@@ -8919,6 +8998,119 @@ private fun profileInitials(name: String): String {
         parts.isEmpty() -> ""
         parts.size == 1 -> parts.first().take(1).uppercase(Locale.US)
         else -> (parts[0].take(1) + parts[1].take(1)).uppercase(Locale.US)
+    }
+}
+
+@Composable
+private fun ProfileStatsCard(stats: ProfileStats) {
+    MatchingPillCard(
+        modifier = Modifier.fillMaxWidth(),
+        shadowElevation = 0.dp
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 15.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                text = "Pantry progress",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                ProfileStatTile(
+                    label = "Foods saved",
+                    value = stats.foodsSaved.toString(),
+                    icon = Icons.Filled.Checklist,
+                    modifier = Modifier.weight(1f)
+                )
+                ProfileStatTile(
+                    label = "Foods expired",
+                    value = stats.foodsExpired.toString(),
+                    icon = Icons.Filled.DateRange,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                ProfileStatTile(
+                    label = "Most used category",
+                    value = stats.mostUsedCategory,
+                    icon = Icons.Filled.Category,
+                    modifier = Modifier.weight(1f)
+                )
+                ProfileStatTile(
+                    label = "Waste avoided",
+                    value = stats.wasteAvoided.toString(),
+                    icon = Icons.Filled.AutoAwesome,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProfileStatTile(
+    label: String,
+    value: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    modifier: Modifier = Modifier
+) {
+    val scheme = MaterialTheme.colorScheme
+
+    Column(
+        modifier = modifier
+            .heightIn(min = 92.dp)
+            .clip(RoundedCornerShape(22.dp))
+            .background(scheme.primary.copy(alpha = 0.08f))
+            .border(
+                width = 1.dp,
+                color = scheme.primary.copy(alpha = 0.14f),
+                shape = RoundedCornerShape(22.dp)
+            )
+            .padding(12.dp),
+        verticalArrangement = Arrangement.SpaceBetween
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium,
+                color = scheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = scheme.primary,
+                modifier = Modifier
+                    .padding(start = 6.dp)
+                    .size(18.dp)
+            )
+        }
+
+        Text(
+            text = value,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold,
+            color = scheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 
