@@ -29,7 +29,7 @@ private const val DEFAULT_RECIPE_LIMIT = 3
 private const val MIN_RECIPE_LIMIT = 1
 private const val MAX_RECIPE_LIMIT = 3
 private const val MAX_RECIPE_STEPS = 5
-private const val MAX_PANTRY_INGREDIENT_CONTEXT = 30
+private const val MAX_PANTRY_INGREDIENT_CONTEXT = 80
 private const val MAX_DIRECT_INGREDIENT_CONTEXT = 14
 private val KNOWN_FOOD_HINT_TOKENS = setOf(
     "apple", "avocado", "banana", "bean", "beans", "beef", "bread", "broccoli",
@@ -309,7 +309,9 @@ internal object RecipeAiService {
         pantryIngredients: List<String>,
         previousIngredients: List<String>,
         contextId: String,
-        limit: Int = DEFAULT_RECIPE_LIMIT
+        limit: Int = DEFAULT_RECIPE_LIMIT,
+        avoidRepeatingIngredients: List<String> = emptyList(),
+        avoidRecipeTitles: List<String> = emptyList()
     ): RecipeSuggestionBatch = withContext(Dispatchers.IO) {
         val trimmedRequest = request.trim()
         if (trimmedRequest.isBlank()) {
@@ -324,6 +326,12 @@ internal object RecipeAiService {
         val cleanedPantryIngredients = sanitizeIngredients(pantryIngredients)
             .take(MAX_PANTRY_INGREDIENT_CONTEXT)
         val cleanedPreviousIngredients = sanitizeIngredients(previousIngredients).take(8)
+        val cleanedAvoidRepeatingIngredients = sanitizeIngredients(avoidRepeatingIngredients).take(24)
+        val cleanedAvoidRecipeTitles = avoidRecipeTitles
+            .map { it.trim().replace(Regex("\\s+"), " ") }
+            .filter { it.isNotBlank() }
+            .distinctBy { it.lowercase(Locale.US) }
+            .take(12)
         val ingredientEditFollowUp =
             looksLikeIngredientEditFollowUp(
                 request = trimmedRequest,
@@ -430,7 +438,9 @@ internal object RecipeAiService {
                 limit = effectiveLimit,
                 strictRequestedIngredients = strictRequestedIngredients,
                 requiredRecipeIngredients = requiredRecipeIngredients,
-                excludedRecipeIngredients = removedConversationalIngredients
+                excludedRecipeIngredients = removedConversationalIngredients,
+                avoidRepeatingIngredients = cleanedAvoidRepeatingIngredients,
+                avoidRecipeTitles = cleanedAvoidRecipeTitles
             ),
             responseMimeType = "application/json"
         )
@@ -463,6 +473,8 @@ internal object RecipeAiService {
                     strictRequestedIngredients = strictRequestedIngredients,
                     requiredRecipeIngredients = requiredRecipeIngredients,
                     excludedRecipeIngredients = removedConversationalIngredients,
+                    avoidRepeatingIngredients = cleanedAvoidRepeatingIngredients,
+                    avoidRecipeTitles = cleanedAvoidRecipeTitles,
                     strictRetry = true
                 ),
                 responseMimeType = "application/json"
@@ -740,6 +752,8 @@ internal object RecipeAiService {
         strictRequestedIngredients: List<String> = emptyList(),
         requiredRecipeIngredients: List<String> = emptyList(),
         excludedRecipeIngredients: List<String> = emptyList(),
+        avoidRepeatingIngredients: List<String> = emptyList(),
+        avoidRecipeTitles: List<String> = emptyList(),
         strictRetry: Boolean = false
     ): String {
         val pantryText = pantryIngredients.joinToString(", ").ifBlank { "none" }
@@ -748,13 +762,15 @@ internal object RecipeAiService {
         val strictText = strictRequestedIngredients.joinToString(", ").ifBlank { "none" }
         val requiredText = requiredRecipeIngredients.joinToString(", ").ifBlank { "none" }
         val excludedText = excludedRecipeIngredients.joinToString(", ").ifBlank { "none" }
+        val avoidRepeatText = avoidRepeatingIngredients.joinToString(", ").ifBlank { "none" }
+        val avoidTitleText = avoidRecipeTitles.joinToString(", ").ifBlank { "none" }
         val strictRuleBlock =
             if (strictRequestedIngredients.isNotEmpty()) {
                 """
                 Strict ingredient mode:
                 - Treat these as the only user food ingredients for this request: $strictText
                 - Do not switch to unrelated pantry or previous foods.
-                - usedIngredients must only contain foods from that strict list.
+                - usedIngredients must only contain foods from that strict food set.
                 - If there are 3 or fewer strict ingredients, every recipe must use all of them.
                 - If required ingredients are not "none", every recipe must use them: $requiredText
                 - If excluded ingredients are not "none", never use them in usedIngredients: $excludedText
@@ -792,12 +808,16 @@ internal object RecipeAiService {
 
             Ingredient priority:
             - If current request ingredients are not "none", use only those as the main set.
-            - If the user asks for pantry, list, saved foods, or available foods, use pantry ingredients.
+            - If the user asks for pantry, saved foods, or available foods, use pantry ingredients.
             - If the user asks for more, another, same ingredients, those ingredients, or previous ingredients and current request ingredients are "none", reuse previous recipe ingredients.
             - If the user says add/include/also use an ingredient with previous foods, combine it with previous recipe ingredients.
             - If the user says remove/without an ingredient, remove it from previous recipe ingredients.
             - If the user says replace one ingredient with another, swap them.
             - If no ingredients are named, use previous recipe ingredients when available, otherwise pantry ingredients.
+            - When using pantry ingredients, choose from the current pantry every time and vary the foods across replies.
+            - If already used ingredients are not "none", prefer other pantry foods when possible: $avoidRepeatText
+            - Do not keep choosing the same few pantry foods when other pantry foods can make good recipes.
+            - If already shown or saved recipe names are not "none", do not suggest those names or near-duplicate recipes: $avoidTitleText
 
             $strictRuleBlock
             $strictRetryBlock
