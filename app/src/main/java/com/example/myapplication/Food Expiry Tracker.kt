@@ -1925,6 +1925,8 @@ private class RecipeScreenSessionState {
     var messagesJson by mutableStateOf("[]")
     var previousIngredientsJson by mutableStateOf("[]")
     var shownRecipeKeysJson by mutableStateOf("[]")
+    var recentPantryRecipeIngredientsJson by mutableStateOf("[]")
+    var recentPantryRecipeTitlesJson by mutableStateOf("[]")
     var conversationId by mutableStateOf("recipe-session-${System.currentTimeMillis()}")
 }
 
@@ -1935,7 +1937,9 @@ private val RecipeScreenSessionStateSaver = listSaver<RecipeScreenSessionState, 
             state.messagesJson,
             state.previousIngredientsJson,
             state.conversationId,
-            state.shownRecipeKeysJson
+            state.shownRecipeKeysJson,
+            state.recentPantryRecipeIngredientsJson,
+            state.recentPantryRecipeTitlesJson
         )
     },
     restore = { saved ->
@@ -1945,6 +1949,8 @@ private val RecipeScreenSessionStateSaver = listSaver<RecipeScreenSessionState, 
             previousIngredientsJson = saved.getOrNull(2) ?: "[]"
             conversationId = saved.getOrNull(3) ?: "recipe-session-${System.currentTimeMillis()}"
             shownRecipeKeysJson = saved.getOrNull(4) ?: "[]"
+            recentPantryRecipeIngredientsJson = saved.getOrNull(5) ?: "[]"
+            recentPantryRecipeTitlesJson = saved.getOrNull(6) ?: "[]"
         }
     }
 )
@@ -1987,7 +1993,10 @@ private const val EDIT_CATEGORIES_SHEET_EXIT_DURATION_MS = 250
 private const val EDIT_CATEGORIES_SHEET_ENTER_DURATION_MS = 260
 private const val AI_EXPIRING_FOOD_WINDOW_DAYS = 2
 private const val PANTRY_RECIPE_RETRY_ATTEMPTS = 5
-private const val PANTRY_RECIPE_FOCUS_INGREDIENTS = 14
+private const val PANTRY_RECIPE_FOCUS_INGREDIENTS = 20
+private const val PANTRY_RECIPE_MIN_UNUSED_INGREDIENTS = 6
+private const val PANTRY_RECIPE_RECENT_INGREDIENT_LIMIT = 35
+private const val PANTRY_RECIPE_RECENT_TITLE_LIMIT = 20
 
 private val historyAutoDeletePresets = listOf(
     AutoDeletePreset(30L, "1 month"),
@@ -6221,7 +6230,8 @@ private fun shownRecipeTitles(messages: List<RecipeChatMessage>): List<String> {
 private fun filterRepeatedRecipes(
     batch: RecipeSuggestionBatch,
     blockedRecipeKeys: Set<String>,
-    limit: Int
+    limit: Int,
+    blockedRecipeTitles: List<String> = emptyList()
 ): RecipeSuggestionBatch {
     val seenThisBatch = mutableSetOf<String>()
     val freshRecipes = batch.recipes
@@ -6229,11 +6239,52 @@ private fun filterRepeatedRecipes(
             val key = recipeIdentityKey(recipe)
             key.isNotBlank() &&
                     key !in blockedRecipeKeys &&
+                    !isNearDuplicateRecipeTitle(recipe.title, blockedRecipeTitles) &&
                     seenThisBatch.add(key)
         }
         .take(limit.coerceIn(1, 3))
 
     return batch.copy(recipes = freshRecipes)
+}
+
+private fun isNearDuplicateRecipeTitle(
+    title: String,
+    blockedRecipeTitles: List<String>
+): Boolean {
+    val titleKey = normalizeRecipeTitleKey(title)
+    if (titleKey.isBlank()) return false
+
+    val titleTokens = recipeTitleComparisonTokens(titleKey)
+    return blockedRecipeTitles.any { blockedTitle ->
+        val blockedKey = normalizeRecipeTitleKey(blockedTitle)
+        if (blockedKey.isBlank()) {
+            false
+        } else if (titleKey == blockedKey) {
+            true
+        } else if (titleKey.length >= 10 && blockedKey.length >= 10 &&
+            (titleKey.contains(blockedKey) || blockedKey.contains(titleKey))
+        ) {
+            true
+        } else {
+            val blockedTokens = recipeTitleComparisonTokens(blockedKey)
+            val sharedTokens = titleTokens.intersect(blockedTokens).size
+            val totalTokens = (titleTokens + blockedTokens).size
+            sharedTokens >= 3 && totalTokens > 0 && sharedTokens.toFloat() / totalTokens >= 0.72f
+        }
+    }
+}
+
+private fun recipeTitleComparisonTokens(normalizedTitleKey: String): Set<String> {
+    val lowSignalWords = setOf(
+        "easy", "quick", "simple", "fresh", "warm", "creamy", "crispy", "crunchy",
+        "pantry", "recipe", "recipes", "with", "and", "the", "for", "style"
+    )
+
+    return normalizedTitleKey
+        .split(" ")
+        .map { it.trim() }
+        .filter { it.length >= 3 && it !in lowSignalWords }
+        .toSet()
 }
 
 private fun loadSavedRecipes(
@@ -6365,16 +6416,20 @@ private fun pantryIngredientsForRecipeAttempt(
         .toSet()
     val preferredIngredients = cleanedIngredients.filter { normalizeFoodName(it) !in avoidedKeys }
     val fallbackIngredients = cleanedIngredients.filter { normalizeFoodName(it) in avoidedKeys }
-    val base = preferredIngredients.ifEmpty { cleanedIngredients }
+    val shouldResetRotation = preferredIngredients.size < PANTRY_RECIPE_MIN_UNUSED_INGREDIENTS
+    val base = if (shouldResetRotation) cleanedIngredients else preferredIngredients
     val offset = ((attemptIndex * PANTRY_RECIPE_FOCUS_INGREDIENTS) % base.size)
     val rotatedBase = base.drop(offset) + base.take(offset)
+    val fallbackOffset =
+        if (fallbackIngredients.isEmpty()) 0 else (attemptIndex * 3) % fallbackIngredients.size
+    val rotatedFallback = fallbackIngredients.drop(fallbackOffset) + fallbackIngredients.take(fallbackOffset)
 
-    return if (attemptIndex == 0) {
-        rotatedBase + fallbackIngredients
+    return if (shouldResetRotation) {
+        rotatedBase
     } else {
-        rotatedBase.take(PANTRY_RECIPE_FOCUS_INGREDIENTS)
-            .ifEmpty { rotatedBase }
-    }
+        rotatedBase + rotatedFallback
+    }.take(PANTRY_RECIPE_FOCUS_INGREDIENTS)
+        .ifEmpty { cleanedIngredients.take(PANTRY_RECIPE_FOCUS_INGREDIENTS) }
 }
 
 private fun soonExpiringFoodHints(foods: List<FoodItem>): List<ExpiringFoodHint> {
@@ -6400,6 +6455,24 @@ private fun usedRecipeIngredientsFromMessages(messages: List<RecipeChatMessage>)
 private fun usedRecipeIngredientsFromSaved(savedRecipes: List<SavedRecipe>): List<String> {
     return cleanRecipeList(savedRecipes.flatMap { it.recipe.usedIngredients })
         .distinctBy(::normalizeFoodName)
+}
+
+private fun updateRecentPantryRecipeIngredients(
+    recentIngredients: List<String>,
+    newIngredients: List<String>
+): List<String> {
+    return cleanRecipeList(newIngredients + recentIngredients)
+        .distinctBy(::normalizeFoodName)
+        .take(PANTRY_RECIPE_RECENT_INGREDIENT_LIMIT)
+}
+
+private fun updateRecentPantryRecipeTitles(
+    recentTitles: List<String>,
+    newTitles: List<String>
+): List<String> {
+    return cleanRecipeList(newTitles + recentTitles)
+        .distinctBy(::normalizeRecipeTitleKey)
+        .take(PANTRY_RECIPE_RECENT_TITLE_LIMIT)
 }
 
 private fun buildRecipeAssistantMessage(batch: RecipeSuggestionBatch): RecipeChatMessage {
@@ -7881,6 +7954,8 @@ private fun RecipeScreen(
     val messagesJson = sessionState.messagesJson
     val previousIngredientsJson = sessionState.previousIngredientsJson
     val shownRecipeKeysJson = sessionState.shownRecipeKeysJson
+    val recentPantryRecipeIngredientsJson = sessionState.recentPantryRecipeIngredientsJson
+    val recentPantryRecipeTitlesJson = sessionState.recentPantryRecipeTitlesJson
     val conversationId = sessionState.conversationId
     val messages = remember(messagesJson) {
         loadRecipeChatMessages(gson, messagesJson)
@@ -7892,6 +7967,14 @@ private fun RecipeScreen(
         loadRecipeIngredientContext(gson, shownRecipeKeysJson)
             .filter { it.isNotBlank() }
             .toSet()
+    }
+    val recentPantryRecipeIngredients = remember(recentPantryRecipeIngredientsJson) {
+        loadRecipeIngredientContext(gson, recentPantryRecipeIngredientsJson)
+            .distinctBy(::normalizeFoodName)
+    }
+    val recentPantryRecipeTitles = remember(recentPantryRecipeTitlesJson) {
+        loadRecipeIngredientContext(gson, recentPantryRecipeTitlesJson)
+            .distinctBy(::normalizeRecipeTitleKey)
     }
     val savedRecipeKeys by remember {
         derivedStateOf { savedRecipeIdentityKeys(savedRecipes) }
@@ -8017,6 +8100,14 @@ private fun RecipeScreen(
         sessionState.shownRecipeKeysJson = gson.toJson(updated.toList())
     }
 
+    fun persistRecentPantryRecipeIngredients(updated: List<String>) {
+        sessionState.recentPantryRecipeIngredientsJson = gson.toJson(updated)
+    }
+
+    fun persistRecentPantryRecipeTitles(updated: List<String>) {
+        sessionState.recentPantryRecipeTitlesJson = gson.toJson(updated)
+    }
+
     fun removeSavedRecipe(recipe: RecipeSuggestion) {
         val key = recipeIdentityKey(recipe)
         val index = savedRecipes.indexOfFirst { recipeIdentityKey(it.recipe) == key }
@@ -8045,6 +8136,9 @@ private fun RecipeScreen(
         showJumpToBottom = false
         sessionState.messagesJson = "[]"
         sessionState.previousIngredientsJson = "[]"
+        sessionState.shownRecipeKeysJson = "[]"
+        sessionState.recentPantryRecipeIngredientsJson = "[]"
+        sessionState.recentPantryRecipeTitlesJson = "[]"
         sessionState.expiringPromptDismissed = false
         sessionState.conversationId = "recipe-session-${System.currentTimeMillis()}"
         keyboard?.hide()
@@ -8084,7 +8178,8 @@ private fun RecipeScreen(
 
     fun sendRecipePrompt(
         rawRequest: String,
-        useExpiringFoods: Boolean = false
+        useExpiringFoods: Boolean = false,
+        usePantryRotation: Boolean = false
     ) {
         val trimmed = rawRequest.trim()
         if (trimmed.isBlank() || isLoading) return
@@ -8158,7 +8253,8 @@ private fun RecipeScreen(
             return
         }
 
-        val useFullPantryList = !useExpiringFoods && wantsRecipesFromPantryList(trimmed)
+        val useFullPantryList =
+            !useExpiringFoods && (usePantryRotation || wantsRecipesFromPantryList(trimmed))
         val pantryRequestSeed = aiRequestVersion + messages.sumOf { it.recipes.size } + savedRecipes.size
         val frozenExpiringFoods = soonExpiringFoodHints(latestPantryFoods)
         val frozenPantryIngredients =
@@ -8172,12 +8268,31 @@ private fun RecipeScreen(
         val blockedRecipeTitles = (shownRecipeTitles(messages) + savedRecipeTitles(savedRecipes))
             .distinctBy(::normalizeRecipeTitleKey)
             .take(12)
+        val pantryRotationRecipeTitles = (recentPantryRecipeTitles + savedRecipeTitles(savedRecipes))
+            .distinctBy(::normalizeRecipeTitleKey)
+            .take(PANTRY_RECIPE_RECENT_TITLE_LIMIT)
         val blockedRecipeIngredients =
             (usedRecipeIngredientsFromMessages(messages) +
                     usedRecipeIngredientsFromSaved(savedRecipes) +
                     previousIngredients)
                 .distinctBy(::normalizeFoodName)
                 .take(24)
+        val unusedPantryIngredientCount =
+            if (usePantryRotation) {
+                val recentIngredientKeys = recentPantryRecipeIngredients
+                    .map(::normalizeFoodName)
+                    .filter { it.isNotBlank() }
+                    .toSet()
+                frozenPantryIngredients.count { normalizeFoodName(it) !in recentIngredientKeys }
+            } else {
+                0
+            }
+        val pantryRotationAvoidIngredients =
+            if (usePantryRotation && unusedPantryIngredientCount >= PANTRY_RECIPE_MIN_UNUSED_INGREDIENTS) {
+                recentPantryRecipeIngredients
+            } else {
+                emptyList()
+            }
         val requestedLimit = requestedRecipeLimit(trimmed) ?: 3
         val requestedRecipeWord = if (requestedLimit == 1) "recipe" else "recipes"
 
@@ -8245,14 +8360,17 @@ private fun RecipeScreen(
                         recipes = recipes
                     )
                 } else {
-                    val attemptCount = if (useFullPantryList) PANTRY_RECIPE_RETRY_ATTEMPTS else 1
-                    var avoidedIngredients = blockedRecipeIngredients
+                    val attemptCount = if (usePantryRotation) PANTRY_RECIPE_RETRY_ATTEMPTS else 1
+                    var avoidedIngredients =
+                        if (usePantryRotation) pantryRotationAvoidIngredients else blockedRecipeIngredients
                     var blockedKeysForAttempts = blockedRecipeKeys
                     var fallbackBatch: RecipeSuggestionBatch? = null
+                    val accumulatedFreshRecipes = mutableListOf<RecipeSuggestion>()
+                    var accumulatedResolvedIngredients = emptyList<String>()
 
                     repeat(attemptCount) { attemptIndex ->
                         val attemptPantryIngredients =
-                            if (useFullPantryList) {
+                            if (usePantryRotation) {
                                 pantryIngredientsForRecipeAttempt(
                                     ingredients = frozenPantryIngredients,
                                     avoidedIngredients = avoidedIngredients,
@@ -8262,7 +8380,7 @@ private fun RecipeScreen(
                                 frozenPantryIngredients
                             }
                         val attemptRequest =
-                            if (useFullPantryList && attemptIndex > 0) {
+                            if (usePantryRotation && attemptIndex > 0) {
                                 "$requestText Try a different combination from the pantry foods this time."
                             } else {
                                 requestText
@@ -8270,20 +8388,48 @@ private fun RecipeScreen(
                         val batch = RecipeAiService.generateRecipeSuggestions(
                             request = attemptRequest,
                             pantryIngredients = attemptPantryIngredients,
-                            previousIngredients = previousIngredients,
+                            previousIngredients = if (usePantryRotation) emptyList() else previousIngredients,
                             contextId = conversationId,
                             limit = requestedLimit,
-                            avoidRepeatingIngredients = if (useFullPantryList) avoidedIngredients else emptyList(),
-                            avoidRecipeTitles = blockedRecipeTitles
+                            avoidRepeatingIngredients = if (usePantryRotation) avoidedIngredients else emptyList(),
+                            avoidRecipeTitles = if (usePantryRotation) {
+                                pantryRotationRecipeTitles
+                            } else {
+                                blockedRecipeTitles
+                            }
                         )
                         val freshBatch = filterRepeatedRecipes(
                             batch = batch,
-                            blockedRecipeKeys = blockedKeysForAttempts,
-                            limit = requestedLimit
+                            blockedRecipeKeys = blockedKeysForAttempts +
+                                    accumulatedFreshRecipes.map(::recipeIdentityKey),
+                            limit = (requestedLimit - accumulatedFreshRecipes.size).coerceAtLeast(1),
+                            blockedRecipeTitles = if (usePantryRotation) {
+                                pantryRotationRecipeTitles + accumulatedFreshRecipes.map { it.title }
+                            } else {
+                                emptyList()
+                            }
                         )
 
                         if (freshBatch.recipes.isNotEmpty()) {
-                            return@runCatching freshBatch
+                            if (usePantryRotation) {
+                                accumulatedFreshRecipes += freshBatch.recipes
+                                accumulatedResolvedIngredients =
+                                    cleanRecipeList(
+                                        accumulatedResolvedIngredients +
+                                                freshBatch.resolvedIngredients +
+                                                freshBatch.recipes.flatMap { it.usedIngredients }
+                                    )
+                                        .distinctBy(::normalizeFoodName)
+                                        .take(8)
+                                if (accumulatedFreshRecipes.size >= requestedLimit) {
+                                    return@runCatching RecipeSuggestionBatch(
+                                        resolvedIngredients = accumulatedResolvedIngredients,
+                                        recipes = accumulatedFreshRecipes.take(requestedLimit)
+                                    )
+                                }
+                            } else {
+                                return@runCatching freshBatch
+                            }
                         }
 
                         if (batch.recipes.isNotEmpty()) {
@@ -8294,7 +8440,18 @@ private fun RecipeScreen(
                             (avoidedIngredients + batch.recipes.flatMap { it.usedIngredients })
                                 .let(::cleanRecipeList)
                                 .distinctBy(::normalizeFoodName)
-                                .take(36)
+                                .take(PANTRY_RECIPE_RECENT_INGREDIENT_LIMIT)
+                    }
+
+                    if (usePantryRotation && accumulatedFreshRecipes.isNotEmpty()) {
+                        return@runCatching RecipeSuggestionBatch(
+                            resolvedIngredients = accumulatedResolvedIngredients.ifEmpty {
+                                cleanRecipeList(accumulatedFreshRecipes.flatMap { it.usedIngredients })
+                                    .distinctBy(::normalizeFoodName)
+                                    .take(8)
+                            },
+                            recipes = accumulatedFreshRecipes.take(requestedLimit)
+                        )
                     }
 
                     fallbackBatch ?: RecipeSuggestionBatch(
@@ -8309,12 +8466,17 @@ private fun RecipeScreen(
                     val freshBatch = filterRepeatedRecipes(
                         batch = batch,
                         blockedRecipeKeys = blockedRecipeKeys,
-                        limit = requestedLimit
+                        limit = requestedLimit,
+                        blockedRecipeTitles = if (usePantryRotation) {
+                            pantryRotationRecipeTitles
+                        } else {
+                            emptyList()
+                        }
                     )
                     val displayBatch =
                         if (freshBatch.recipes.isNotEmpty()) {
                             freshBatch
-                        } else if (useFullPantryList && batch.recipes.isNotEmpty()) {
+                        } else if (!usePantryRotation && useFullPantryList && batch.recipes.isNotEmpty()) {
                             batch.copy(recipes = batch.recipes.take(requestedLimit))
                         } else {
                             freshBatch
@@ -8326,6 +8488,20 @@ private fun RecipeScreen(
                     if (displayBatch.recipes.isNotEmpty()) {
                         persistShownRecipeKeys(
                             shownRecipeKeys + displayBatch.recipes.map(::recipeIdentityKey)
+                        )
+                    }
+                    if (usePantryRotation && displayBatch.recipes.isNotEmpty()) {
+                        persistRecentPantryRecipeIngredients(
+                            updateRecentPantryRecipeIngredients(
+                                recentIngredients = recentPantryRecipeIngredients,
+                                newIngredients = displayBatch.recipes.flatMap { it.usedIngredients }
+                            )
+                        )
+                        persistRecentPantryRecipeTitles(
+                            updateRecentPantryRecipeTitles(
+                                recentTitles = recentPantryRecipeTitles,
+                                newTitles = displayBatch.recipes.map { it.title }
+                            )
                         )
                     }
 
@@ -8428,7 +8604,8 @@ private fun RecipeScreen(
                             },
                             onUsePantryFoods = {
                                 sendRecipePrompt(
-                                    "Suggest recipes using foods in my pantry."
+                                    "Suggest recipes using foods in my pantry.",
+                                    usePantryRotation = true
                                 )
                             },
                             onQuickBreakfast = {

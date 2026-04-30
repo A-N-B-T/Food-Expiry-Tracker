@@ -326,12 +326,12 @@ internal object RecipeAiService {
         val cleanedPantryIngredients = sanitizeIngredients(pantryIngredients)
             .take(MAX_PANTRY_INGREDIENT_CONTEXT)
         val cleanedPreviousIngredients = sanitizeIngredients(previousIngredients).take(8)
-        val cleanedAvoidRepeatingIngredients = sanitizeIngredients(avoidRepeatingIngredients).take(24)
+        val cleanedAvoidRepeatingIngredients = sanitizeIngredients(avoidRepeatingIngredients).take(35)
         val cleanedAvoidRecipeTitles = avoidRecipeTitles
             .map { it.trim().replace(Regex("\\s+"), " ") }
             .filter { it.isNotBlank() }
             .distinctBy { it.lowercase(Locale.US) }
-            .take(12)
+            .take(20)
         val ingredientEditFollowUp =
             looksLikeIngredientEditFollowUp(
                 request = trimmedRequest,
@@ -814,10 +814,11 @@ internal object RecipeAiService {
             - If the user says remove/without an ingredient, remove it from previous recipe ingredients.
             - If the user says replace one ingredient with another, swap them.
             - If no ingredients are named, use previous recipe ingredients when available, otherwise pantry ingredients.
-            - When using pantry ingredients, choose from the current pantry every time and vary the foods across replies.
-            - If already used ingredients are not "none", prefer other pantry foods when possible: $avoidRepeatText
+            - When using pantry ingredients, use these pantry foods as the active pantry set for this request: $pantryText
+            - Do not use avoided ingredients unless there are not enough usable foods: $avoidRepeatText
+            - Avoid repeating recipe titles from the avoid list: $avoidTitleText
+            - Make the next set noticeably different from previous pantry recipe suggestions.
             - Do not keep choosing the same few pantry foods when other pantry foods can make good recipes.
-            - If already shown or saved recipe names are not "none", do not suggest those names or near-duplicate recipes: $avoidTitleText
 
             $strictRuleBlock
             $strictRetryBlock
