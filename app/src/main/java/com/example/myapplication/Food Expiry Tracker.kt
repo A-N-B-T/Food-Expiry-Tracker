@@ -6699,7 +6699,7 @@ private fun RecipeIntroCard(hasPantryFoods: Boolean) {
             Spacer(Modifier.height(6.dp))
             Text(
                 text = if (hasPantryFoods) {
-                    "Ask me to make recipes using foods in your pantry, or type a few ingredients."
+                    "Ask me for recipes using your saved foods, or tap a suggestion above."
                 } else {
                     "Add some foods in Home then ask for recipes."
                 },
