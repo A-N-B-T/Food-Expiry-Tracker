@@ -2,6 +2,21 @@
 
 package com.example.myapplication
 
+// Search guide for this large file:
+// SEARCH: APP_NAVIGATION
+// SEARCH: HOME_SCREEN
+// SEARCH: PANTRY_PERSISTENCE
+// SEARCH: ADD_EDIT_FOOD_MAIN
+// SEARCH: ADD_EDIT_FOOD_DIALOG
+// SEARCH: DELETE_FOOD_SINGLE_DIALOG
+// SEARCH: DELETE_FOOD_BULK_DIALOG
+// SEARCH: CATEGORY_MANAGEMENT
+// SEARCH: PROFILE_SCREEN
+// SEARCH: SETTINGS_SCREEN
+// SEARCH: NOTIFICATIONS_SETTINGS
+// SEARCH: AUTO_DELETE_SETTINGS
+// SEARCH: BARCODE_SCANNER
+
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
@@ -2396,6 +2411,8 @@ private fun findMatchingFoodBatchIndex(
     }
 }
 
+// SEARCH: ADD_EDIT_FOOD_SAVE_HANDLER
+// Saves a pantry item and merges it into an existing batch when name + expiry already match.
 private fun upsertFoodBatch(
     list: MutableList<FoodItem>,
     food: FoodItem,
@@ -2434,6 +2451,8 @@ private fun cleanHistoryName(raw: String): String {
     return raw.trim().replace(Regex("\\s+"), " ")
 }
 
+// SEARCH: PANTRY_PERSISTENCE
+// Pantry list storage, sanitizing, and expired-food cleanup all flow through this block.
 private fun loadFoodListRaw(prefs: android.content.SharedPreferences, gson: Gson): MutableList<FoodItem> {
     val json = prefs.getString(FOOD_LIST_KEY, null) ?: return mutableListOf()
     val type = object : TypeToken<MutableList<FoodItem>>() {}.type
@@ -3960,6 +3979,8 @@ private fun HistoryTopBar(
     }
 }
 
+// SEARCH: CATEGORY_MANAGEMENT
+// Edit sheet for creating and deleting pantry categories.
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun EditCategoriesBottomSheet(
@@ -4145,6 +4166,8 @@ private fun EditCategoriesBottomSheet(
     }
 }
 
+// SEARCH: CATEGORY_MANAGEMENT
+// Bulk category picker used when multiple pantry items are selected at once.
 @Composable
 private fun BulkCategorySelectionSheet(
     show: Boolean,
@@ -4380,6 +4403,8 @@ private fun BulkCategorySelectionSheet(
     }
 }
 
+// SEARCH: CATEGORY_MANAGEMENT
+// Pantry header with search, sort, selection mode, and quick category access.
 @Composable
 private fun MyPantryTopBar(
     modifier: Modifier = Modifier,
@@ -4657,6 +4682,8 @@ private fun MyPantryTopBar(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+// SEARCH: CATEGORY_MANAGEMENT
+// Category dropdown used inside the add/edit food form.
 fun CategoryDropdown(
     categories: List<String>,
     initialCategories: List<String>,
@@ -5021,6 +5048,8 @@ private fun bottomBarRouteIndex(route: String?): Int {
     return if (homeIndex >= 0) homeIndex else 0
 }
 
+// SEARCH: APP_NAVIGATION
+// Main route map for Home, History, Profile, Account, Settings, and the recipe screen.
 @RequiresApi(Build.VERSION_CODES.TIRAMISU)
 @Composable
 fun AppNav(
@@ -7769,6 +7798,8 @@ private fun SavedRecipesDialog(
 }
 
 @Composable
+// SEARCH: AI_SCREEN_PROMPT_BAR
+// Bottom input field for the AI recipe screen.
 private fun RecipePromptBar(
     value: String,
     placeholder: String,
@@ -7909,6 +7940,8 @@ private fun AiRecipeLaunchIntro(
 }
 
 @Composable
+// SEARCH: AI_SCREEN_MAIN
+// Main AI recipe screen with messages, saved recipes, prompt entry, and request dispatch.
 private fun RecipeScreen(
     sessionState: RecipeScreenSessionState,
     immersiveMode: Boolean = false,
@@ -8176,6 +8209,8 @@ private fun RecipeScreen(
         pendingLatestMessageScroll += 1
     }
 
+    // SEARCH: AI_SCREEN_SEND_HANDLER
+    // Validates the user's AI request, chooses the request mode, and calls RecipeAiService.
     fun sendRecipePrompt(
         rawRequest: String,
         useExpiringFoods: Boolean = false,
@@ -8800,6 +8835,8 @@ private fun RecipeScreen(
 }
 
 @Composable
+// SEARCH: HOME_SCREEN
+// Home just forwards into the main pantry experience in FoodEntryScreen.
 fun HomeScreen(
     showForm: Boolean,
     onShowFormChange: (Boolean) -> Unit,
@@ -8833,6 +8870,8 @@ fun CategoryScreen() {
 }
 
 @Composable
+// SEARCH: PROFILE_SCREEN
+// Profile hub with entry points to Account, Settings, transfer, About, and local profile edits.
 fun ProfileScreen(navController: NavHostController) {
     val context = LocalContext.current
     val density = LocalDensity.current
@@ -9349,6 +9388,8 @@ private fun ProfileInfoScreen(
 }
 
 @Composable
+// SEARCH: ACCOUNT_SCREEN_MAIN
+// Route entry point for the full account sync screen implemented in AccountSync.kt.
 fun AccountScreen(navController: NavHostController) {
     AccountSyncScreen(navController)
 }
@@ -9388,6 +9429,8 @@ fun PrivacyScreen(navController: NavHostController) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+// SEARCH: SETTINGS_SCREEN
+// Settings landing screen for theme, countdown format, notifications, and auto-delete.
 fun SettingsScreen(navController: NavHostController) {
     val countdownFormat = rememberCountdownFormatPreference()
 
@@ -9434,6 +9477,8 @@ fun SettingsScreen(navController: NavHostController) {
     }
 }
 
+// SEARCH: AUTO_DELETE_SETTINGS
+// Controls automatic cleanup for pantry history and expired foods.
 @Composable
 fun AutoDeleteScreen(navController: NavHostController) {
     val context = LocalContext.current
@@ -10055,6 +10100,8 @@ private fun ThemeOption(
 @RequiresApi(Build.VERSION_CODES.TIRAMISU)
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+// SEARCH: NOTIFICATIONS_SETTINGS
+// Notification settings screen for daily reminders and reminder lead time.
 fun NotificationsScreen(navController: NavHostController) {
     val context = LocalContext.current
     val appCtx = context.applicationContext
@@ -10381,6 +10428,8 @@ private fun NavHostController.safeNavigate(route: String) {
 @SuppressLint("Range")
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
+// SEARCH: ADD_EDIT_FOOD_MAIN
+// Main pantry screen: add food, edit food, delete items, categories, search, sort, and bulk actions.
 fun FoodEntryScreen(
     showForm: Boolean,
     onShowFormChange: (Boolean) -> Unit,
@@ -10427,6 +10476,8 @@ fun FoodEntryScreen(
     var bulkCustomCategoryName by remember { mutableStateOf("") }
     var bulkCustomCategoryExistsError by remember { mutableStateOf(false) }
 
+    // SEARCH: CATEGORY_MANAGEMENT
+    // Converts a custom typed category into a saved category and selects it in the form.
     fun commitCustomCategory() {
         val cleaned = customCategory.trim()
         if (cleaned.isBlank()) return
@@ -10444,6 +10495,8 @@ fun FoodEntryScreen(
         else selectedCategory?.trim()?.takeIf { it.isNotBlank() }
     }
 
+    // SEARCH: CATEGORY_MANAGEMENT
+    // Removes a category from the local category list without deleting the foods themselves.
     fun deleteCategory(cat: String) {
 
         if (initialCategories.any { it.equals(cat, ignoreCase = true) }) return
@@ -10475,6 +10528,8 @@ fun FoodEntryScreen(
         return categories.any { it.equals(cleaned, ignoreCase = true) }
     }
 
+    // SEARCH: CATEGORY_MANAGEMENT
+    // Adds a new category only when it is non-empty and not already present.
     fun addCategoryOnly(name: String): String? {
         val cleaned = name.trim()
         if (cleaned.isBlank()) return null
@@ -10758,6 +10813,8 @@ fun FoodEntryScreen(
         onDispose { sharedPrefs.unregisterOnSharedPreferenceChangeListener(listener) }
     }
 
+    // SEARCH: CATEGORY_MANAGEMENT
+    // Applies one category change to every currently selected pantry item.
     fun applyCategoryToSelected(newCategory: String?) {
         val chosen = newCategory?.trim()?.takeIf { it.isNotBlank() }
 
@@ -10786,12 +10843,16 @@ fun FoodEntryScreen(
         }
     }
 
+    // SEARCH: BARCODE_SCANNER
+    // Resets the barcode lookup/loading message shown in the add/edit food dialog.
     fun clearBarcodeLookupUi() {
         isLookingUpBarcode = false
         barcodeLookupMessage = null
         lastScannedBarcode = null
     }
 
+    // SEARCH: ADD_EDIT_FOOD_DIALOG
+    // Closes the food dialog and clears all in-progress form state.
     fun closeFoodForm() {
         onShowFormChange(false)
         editingItem = null
@@ -10841,6 +10902,8 @@ fun FoodEntryScreen(
         onShowFormChange(true)
     }
 
+    // SEARCH: DELETE_FOOD_SINGLE_DIALOG
+    // Deletes one pantry item and keeps selection/edit state in sync.
     fun deleteFoodItem(food: FoodItem) {
         foodList.remove(food)
         selectedItems.remove(food)
@@ -10850,6 +10913,8 @@ fun FoodEntryScreen(
         }
     }
 
+    // SEARCH: ADD_EDIT_FOOD_SAVE_HANDLER
+    // Validates the form, saves the pantry item, records history, and updates barcode cache.
     fun saveCurrentFoodFromForm(): Boolean {
         val missing = foodName.isBlank() || expiryDate.isBlank()
         val invalidDate = expiryDate.isNotBlank() && !isValidFutureExpiryDate(expiryDate)
@@ -10897,6 +10962,8 @@ fun FoodEntryScreen(
         return true
     }
 
+    // SEARCH: BARCODE_SCANNER
+    // Returns barcode scan results back into the add/edit food dialog.
     val barcodeScannerLauncher =
         rememberLauncherForActivityResult(
             contract = ActivityResultContracts.StartActivityForResult()
@@ -11236,6 +11303,8 @@ fun FoodEntryScreen(
             }
         }
 
+        // SEARCH: CATEGORY_MANAGEMENT
+        // Category edit and bulk-category sheets are launched from the pantry top bar.
         EditCategoriesBottomSheet(
             show = showEditCategoriesSheet,
             categories = categories,
@@ -11270,7 +11339,8 @@ fun FoodEntryScreen(
         )
     }
 
-
+    // SEARCH: DELETE_FOOD_SINGLE_DIALOG
+    // Confirmation dialog for deleting one pantry item card.
     pendingDelete?.let { item ->
         GlassAlertDialog(
             onDismissRequest = { pendingDelete = null },
@@ -11302,6 +11372,8 @@ fun FoodEntryScreen(
         )
     }
 
+    // SEARCH: CATEGORY_MANAGEMENT
+    // Confirmation dialog for deleting a category while keeping the foods in the pantry.
     pendingDeleteCategory?.let { cat ->
         GlassAlertDialog(
             onDismissRequest = { pendingDeleteCategory = null },
@@ -11336,6 +11408,8 @@ fun FoodEntryScreen(
         )
     }
 
+    // SEARCH: CATEGORY_MANAGEMENT
+    // Dialog for creating a new category from the Edit Categories sheet.
     if (showAddCategorySheetDialog) {
         val addCategoryFocus = remember { FocusRequester() }
         val keyboard = LocalSoftwareKeyboardController.current
@@ -11423,6 +11497,8 @@ fun FoodEntryScreen(
         )
     }
 
+    // SEARCH: CATEGORY_MANAGEMENT
+    // Dialog for assigning a brand-new custom category to all selected items.
     if (showBulkCustomCategoryDialog) {
         val bulkCustomFocus = remember { FocusRequester() }
         val keyboard = LocalSoftwareKeyboardController.current
@@ -11510,6 +11586,8 @@ fun FoodEntryScreen(
         )
     }
 
+    // SEARCH: DELETE_FOOD_BULK_DIALOG
+    // Confirmation dialog for deleting multiple selected pantry items.
     if (pendingDeleteSelected) {
         GlassAlertDialog(
             onDismissRequest = { pendingDeleteSelected = false },
@@ -11539,6 +11617,8 @@ fun FoodEntryScreen(
         )
     }
 
+    // SEARCH: CATEGORY_MANAGEMENT
+    // Dialogs for custom category creation inside the add/edit food form.
     if (showCustomCategoryDialog) {
 
         if (showQuickAddCategoryDialog) {
@@ -11670,6 +11750,8 @@ fun FoodEntryScreen(
         )
     }
 
+    // SEARCH: ADD_EDIT_FOOD_DIALOG
+    // Main add/edit food dialog with name, expiry, quantity, category, and barcode scanner.
     if (showForm) {
         val animatedImeShiftPx = rememberAnimatedImeShiftPx(label = "addFoodImeShift")
 
@@ -11904,6 +11986,8 @@ fun FoodEntryScreen(
     }
 }
 
+// SEARCH: BARCODE_SCANNER
+// Standalone camera flow used when the pantry form launches barcode scanning.
 class BarcodeScannerActivity : ComponentActivity() {
 
     private val cameraPermissionLauncher =

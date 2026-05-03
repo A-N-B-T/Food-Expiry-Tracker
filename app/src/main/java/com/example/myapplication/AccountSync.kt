@@ -1,5 +1,18 @@
 package com.example.myapplication
 
+// Search guide for this account file:
+// SEARCH: ACCOUNT_SESSION_STORAGE
+// SEARCH: ACCOUNT_CLOUD_SNAPSHOT
+// SEARCH: ACCOUNT_AUTO_SYNC_WORKER
+// SEARCH: ACCOUNT_FOREGROUND_SYNC_EFFECT
+// SEARCH: ACCOUNT_SCREEN_MAIN
+// SEARCH: ACCOUNT_SCREEN_SIGNED_OUT
+// SEARCH: ACCOUNT_SCREEN_SIGNED_IN
+// SEARCH: ACCOUNT_AUTO_SYNC_SETTINGS
+// SEARCH: ACCOUNT_PASSWORD_POLICY
+// SEARCH: ACCOUNT_PASSWORD_FIELD_UI
+// SEARCH: ACCOUNT_PASSWORD_RESET
+
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
@@ -231,6 +244,8 @@ private enum class AccountAutoSyncMode {
     MONTHLY
 }
 
+// SEARCH: ACCOUNT_SESSION_STORAGE
+// SharedPreferences helpers for account session, sync status, and auto-sync preferences.
 private fun accountPrefs(context: Context): SharedPreferences {
     return context.applicationContext.getSharedPreferences(ACCOUNT_PREFS, Context.MODE_PRIVATE)
 }
@@ -430,6 +445,8 @@ private fun cloudDocumentUrl(uid: String): String {
     return "https://firestore.googleapis.com/v1/projects/${BuildConfig.FIREBASE_PROJECT_ID}/databases/(default)/documents/users/$uid"
 }
 
+// SEARCH: ACCOUNT_CLOUD_SNAPSHOT
+// Captures local pantry, settings, and notification state before cloud sync pushes/restores.
 private fun captureLocalSnapshot(context: Context): CloudSyncEnvelope {
     val foodPrefs = context.applicationContext.getSharedPreferences(ACCOUNT_FOOD_PREFS, Context.MODE_PRIVATE)
     val themePrefs = context.applicationContext.getSharedPreferences(ACCOUNT_THEME_PREFS, Context.MODE_PRIVATE)
@@ -613,6 +630,8 @@ private suspend fun signUpWithEmailPassword(
     }
 }
 
+// SEARCH: ACCOUNT_PASSWORD_POLICY
+// Account login currently accepts the same password rules enforced by the sign-up flow.
 private suspend fun signInWithEmailPassword(
     email: String,
     password: String
@@ -637,6 +656,8 @@ private suspend fun signInWithEmailPassword(
     }
 }
 
+// SEARCH: ACCOUNT_PASSWORD_RESET
+// Password reset email flow and its user-facing error handling.
 private suspend fun sendPasswordResetEmail(email: String) {
     requireCloudSetup()
     val url =
@@ -850,6 +871,8 @@ private fun statusMessageDisplayDurationMillis(message: String): Long {
     return (4200L + (wordCount * 260L)).coerceIn(5200L, 9000L)
 }
 
+// SEARCH: ACCOUNT_AUTO_SYNC_WORKER
+// Background WorkManager scheduling for account cloud sync.
 private fun scheduleAccountAutoSyncWork(
     context: Context,
     mode: AccountAutoSyncMode
@@ -877,6 +900,8 @@ private fun cancelAccountAutoSyncWork(context: Context) {
     WorkManager.getInstance(context).cancelUniqueWork(ACCOUNT_AUTO_SYNC_WORK_NAME)
 }
 
+// SEARCH: ACCOUNT_AUTO_SYNC_WORKER
+// Worker that keeps cloud sync running even when the app is not in the foreground.
 class AccountAutoSyncWorker(
     appContext: Context,
     params: WorkerParameters
@@ -958,6 +983,8 @@ private tailrec fun Context.findActivity(): Activity? {
     }
 }
 
+// SEARCH: ACCOUNT_FOREGROUND_SYNC_EFFECT
+// Hooks account sync into app lifecycle and local preference changes while the app is open.
 @Composable
 fun AccountCloudSyncEffect(session: AccountSession?) {
     val context = LocalContext.current.applicationContext
@@ -1057,6 +1084,8 @@ fun AccountCloudSyncEffect(session: AccountSession?) {
     }
 }
 
+// SEARCH: ACCOUNT_SCREEN_MAIN
+// Main account screen that switches between sign-in UI and signed-in sync controls.
 @Composable
 fun AccountSyncScreen(navController: NavHostController) {
     val context = LocalContext.current
@@ -1111,6 +1140,8 @@ fun AccountSyncScreen(navController: NavHostController) {
     }
 
     val isPasswordResetCoolingDown = passwordResetCooldownSecondsLeft > 0
+    // SEARCH: ACCOUNT_PASSWORD_POLICY
+    // Change this boolean when you want stricter password requirements before sign-up/login buttons enable.
     val canUseEmailPassword =
         email.isNotBlank() &&
                 password.length >= 6 &&
@@ -1373,6 +1404,8 @@ fun AccountSyncScreen(navController: NavHostController) {
 
 }
 
+// SEARCH: ACCOUNT_SCREEN_SIGNED_OUT
+// Email/password and Google sign-in UI shown before an account session exists.
 @Composable
 private fun SignedOutAccountContent(
     email: String,
@@ -1457,6 +1490,8 @@ private fun SignedOutAccountContent(
             onValueChange = onPasswordChange,
             label = "Password",
             isError = hasEmailAuthError,
+            // SEARCH: ACCOUNT_PASSWORD_FIELD_UI
+            // Change the password input behavior here, such as visibility toggles, helper text, or strength hints.
             visualTransformation = PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Password,
@@ -1566,6 +1601,8 @@ private fun SignedOutAccountContent(
     }
 }
 
+// SEARCH: ACCOUNT_SCREEN_SIGNED_IN
+// Signed-in account summary plus manual sync, restore, logout, and auto-sync controls.
 @Composable
 private fun SignedInAccountContent(
     session: AccountSession,
@@ -1725,6 +1762,8 @@ private fun AccountLogoutButton(
     }
 }
 
+// SEARCH: ACCOUNT_AUTO_SYNC_SETTINGS
+// Toggle card that enables or disables automatic cloud sync.
 @Composable
 private fun AccountAutoSyncToggleCard(
     enabled: Boolean,
@@ -1770,6 +1809,8 @@ private fun AccountAutoSyncToggleCard(
     }
 }
 
+// SEARCH: ACCOUNT_AUTO_SYNC_SETTINGS
+// Lets the user choose the background sync frequency after auto-sync is enabled.
 @Composable
 private fun AccountSyncScheduleCard(
     autoSyncEnabled: Boolean,

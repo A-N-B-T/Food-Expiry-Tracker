@@ -1,5 +1,11 @@
 package com.example.myapplication
 
+// Search guide for AI recipe behavior:
+// SEARCH: AI_MAIN_REQUEST_FLOW
+// SEARCH: AI_PROMPT_RULES
+// SEARCH: AI_PANTRY_PROMPT_RULES
+// SEARCH: AI_RESPONSE_FILTERS
+
 import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.JsonArray
@@ -304,6 +310,8 @@ internal data class RecipeSuggestionBatch(
 internal object RecipeAiService {
     private val gson = Gson()
 
+    // SEARCH: AI_MAIN_REQUEST_FLOW
+    // Main AI request pipeline: request parsing, prompt building, retrying, and result filtering.
     suspend fun generateRecipeSuggestions(
         request: String,
         pantryIngredients: List<String>,
@@ -742,6 +750,8 @@ internal object RecipeAiService {
         return modelName == "gemini-3.1-flash-lite-preview"
     }
 
+    // SEARCH: AI_PROMPT_RULES
+    // Core recipe assistant prompt. Add or change AI obedience rules here.
     private fun buildRecipeRequestPrompt(
         request: String,
         pantryIngredients: List<String>,
@@ -1098,6 +1108,8 @@ internal object RecipeAiService {
         }
     }
 
+    // SEARCH: AI_PANTRY_PROMPT_RULES
+    // Simpler pantry-only prompt used when the app asks for ideas from a direct ingredient list.
     private fun buildRecipeIdeasPrompt(
         ingredients: List<String>,
         limit: Int
@@ -1154,6 +1166,8 @@ internal object RecipeAiService {
         )
     }
 
+    // SEARCH: AI_RESPONSE_FILTERS
+    // Parses the model JSON and recovers resolved ingredients used by the UI.
     private fun parseRecipeSuggestionBatch(
         responseBody: String,
         fallbackIngredients: List<String>
@@ -1178,6 +1192,8 @@ internal object RecipeAiService {
         )
     }
 
+    // SEARCH: AI_RESPONSE_FILTERS
+    // Decides whether the model ignored strict requested ingredients and must be retried.
     private fun shouldRetryForStrictIngredients(
         batch: RecipeSuggestionBatch,
         strictRequestedIngredients: List<String>,
@@ -1197,6 +1213,8 @@ internal object RecipeAiService {
         }
     }
 
+    // SEARCH: AI_RESPONSE_FILTERS
+    // Final guardrail that removes recipes not matching required/excluded ingredient rules.
     private fun sanitizeBatchForRequestedIngredients(
         batch: RecipeSuggestionBatch,
         strictRequestedIngredients: List<String>,
