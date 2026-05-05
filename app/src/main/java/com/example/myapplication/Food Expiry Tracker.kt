@@ -1982,7 +1982,6 @@ private const val FOOD_LIST_KEY = "food_list"
 private const val HISTORY_LIST_KEY = "history_list"
 private const val CATEGORIES_LIST_KEY = "categories_list"
 private const val SAVED_RECIPES_KEY = "saved_recipes"
-private const val HISTORY_AUTO_DELETE_ENABLED_KEY = "history_auto_delete_enabled"
 private const val HISTORY_RETENTION_DAYS_KEY = "history_retention_days"
 private const val EXPIRED_FOOD_AUTO_REMOVE_ENABLED_KEY = "expired_food_auto_remove_enabled"
 private const val EXPIRED_FOOD_AUTO_REMOVE_DAYS_KEY = "expired_food_auto_remove_days"
@@ -1991,7 +1990,7 @@ private const val ONBOARDING_DEMO_SEEDED_KEY = "first_launch_demo_seeded"
 private const val ONBOARDING_DEMO_FOOD_NAME = "Example"
 private const val ONBOARDING_DEMO_CATEGORY_NAME = "Example"
 private const val NOTIF_FIRST_PROMPT_SHOWN_KEY = "notif_first_prompt_shown"
-private const val DEFAULT_HISTORY_RETENTION_DAYS = 30L
+private const val DEFAULT_HISTORY_RETENTION_DAYS = 90L
 private const val MIN_HISTORY_RETENTION_DAYS = 30L
 private const val MAX_HISTORY_RETENTION_DAYS = 360L
 private const val DEFAULT_EXPIRED_FOOD_AUTO_REMOVE_DAYS = 7L
@@ -2015,7 +2014,8 @@ private const val PANTRY_RECIPE_RECENT_TITLE_LIMIT = 20
 
 private val historyAutoDeletePresets = listOf(
     AutoDeletePreset(30L, "1 month"),
-    AutoDeletePreset(90L, "3 months")
+    AutoDeletePreset(90L, "3 months"),
+    AutoDeletePreset(180L, "6 months")
 )
 
 private val expiredFoodAutoRemovePresets = listOf(
@@ -2627,10 +2627,6 @@ private fun <T> replaceListContentsIfChanged(
     target.addAll(updated)
 }
 
-private fun loadHistoryAutoDeleteEnabled(prefs: android.content.SharedPreferences): Boolean {
-    return prefs.getBoolean(HISTORY_AUTO_DELETE_ENABLED_KEY, false)
-}
-
 private fun loadHistoryRetentionDays(prefs: android.content.SharedPreferences): Long {
     return clampHistoryRetentionDays(
         readLongPreference(
@@ -2641,13 +2637,6 @@ private fun loadHistoryRetentionDays(prefs: android.content.SharedPreferences): 
     )
 }
 
-private fun saveHistoryAutoDeleteEnabled(
-    prefs: android.content.SharedPreferences,
-    enabled: Boolean
-) {
-    prefs.edit { putBoolean(HISTORY_AUTO_DELETE_ENABLED_KEY, enabled) }
-}
-
 private fun saveHistoryRetentionDays(
     prefs: android.content.SharedPreferences,
     days: Long
@@ -2655,12 +2644,8 @@ private fun saveHistoryRetentionDays(
     prefs.edit { putLong(HISTORY_RETENTION_DAYS_KEY, clampHistoryRetentionDays(days)) }
 }
 
-private fun activeHistoryRetentionDays(prefs: android.content.SharedPreferences): Long? {
-    return if (loadHistoryAutoDeleteEnabled(prefs)) {
-        loadHistoryRetentionDays(prefs)
-    } else {
-        null
-    }
+private fun activeHistoryRetentionDays(prefs: android.content.SharedPreferences): Long {
+    return loadHistoryRetentionDays(prefs)
 }
 
 private fun historyCutoffMillis(
@@ -2765,7 +2750,8 @@ private fun historyEntryLocalDate(
 private fun historySectionTitle(
     entryDate: LocalDate,
     today: LocalDate,
-    weekFields: WeekFields
+    weekFields: WeekFields,
+    olderMonthFormatter: DateTimeFormatter
 ): String {
     return when {
         entryDate == today -> "Today"
@@ -2774,7 +2760,7 @@ private fun historySectionTitle(
                 entryDate.get(weekFields.weekOfWeekBasedYear()) == today.get(weekFields.weekOfWeekBasedYear()) ->
             "This week"
         entryDate.month == today.month && entryDate.year == today.year -> "This month"
-        else -> "Earlier"
+        else -> entryDate.format(olderMonthFormatter)
     }
 }
 
@@ -2787,13 +2773,15 @@ private fun buildHistoryDateSections(
     if (entries.isEmpty()) return emptyList()
 
     val weekFields = WeekFields.of(locale)
+    val olderMonthFormatter = DateTimeFormatter.ofPattern("MMM yyyy", Locale.US)
     val groupedEntries = linkedMapOf<String, MutableList<HistoryEntry>>()
 
-    entries.forEach { entry ->
+    entries.sortedByDescending { it.lastUsedAt }.forEach { entry ->
         val title = historySectionTitle(
             entryDate = historyEntryLocalDate(entry.lastUsedAt, zoneId),
             today = today,
-            weekFields = weekFields
+            weekFields = weekFields,
+            olderMonthFormatter = olderMonthFormatter
         )
         groupedEntries.getOrPut(title) { mutableListOf() }.add(entry)
     }
@@ -2854,7 +2842,7 @@ private suspend fun applyAutoDeleteRulesOnAppLoad(context: Context) {
         val prefs = context.applicationContext.getSharedPreferences(FOOD_PREFS, Context.MODE_PRIVATE)
         val gson = Gson()
 
-        if (loadHistoryAutoDeleteEnabled(prefs) && prefs.contains(HISTORY_LIST_KEY)) {
+        if (prefs.contains(HISTORY_LIST_KEY)) {
             loadAndSyncHistoryEntries(prefs, gson)
         }
 
@@ -5338,7 +5326,6 @@ fun HistoryScreen(
             android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
                 when (key) {
                     HISTORY_LIST_KEY,
-                    HISTORY_AUTO_DELETE_ENABLED_KEY,
                     HISTORY_RETENTION_DAYS_KEY ->
                         replaceListContentsIfChanged(history, loadHistoryEntries(prefs, gson))
 
@@ -9488,9 +9475,6 @@ fun AutoDeleteScreen(navController: NavHostController) {
     }
     val gson = remember { Gson() }
 
-    var historyEnabled by rememberSaveable {
-        mutableStateOf(loadHistoryAutoDeleteEnabled(prefs))
-    }
     var historyDays by rememberSaveable {
         mutableLongStateOf(loadHistoryRetentionDays(prefs))
     }
@@ -9505,9 +9489,7 @@ fun AutoDeleteScreen(navController: NavHostController) {
     }
 
     fun applyHistoryCleanup() {
-        if (historyEnabled) {
-            loadAndSyncHistoryEntries(prefs, gson)
-        }
+        loadAndSyncHistoryEntries(prefs, gson)
     }
 
     fun applyExpiredFoodCleanup() {
@@ -9535,43 +9517,29 @@ fun AutoDeleteScreen(navController: NavHostController) {
                 .padding(bottom = 96.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            AutoDeleteSectionCard(
-                title = "History auto-delete",
-                description = if (historyEnabled) {
-                    "Remove history entries not used for ${autoDeleteDurationLabel(historyDays)}."
-                } else {
-                    "Keep history until you remove it."
-                },
-                enabled = historyEnabled,
+            HistoryCleanupSectionCard(
                 selectedDays = historyDays,
+                description = "Remove food names you haven't used again for ${autoDeleteDurationLabel(historyDays)}.",
+                sectionLabel = "Keep history for",
                 presets = historyAutoDeletePresets,
-                selectedSummary = "Older than ${autoDeleteDurationLabel(historyDays)}",
-                onEnabledChange = { checked ->
-                    historyEnabled = checked
-                    saveHistoryAutoDeleteEnabled(prefs, checked)
-                    applyHistoryCleanup()
-                },
                 onPresetSelected = { days ->
                     historyDays = days
                     saveHistoryRetentionDays(prefs, days)
                     applyHistoryCleanup()
-                },
-                onCustomClick = {
-                    customTarget = AutoDeleteCustomTarget.HISTORY
                 }
             )
 
             AutoDeleteSectionCard(
                 title = "Auto-remove expired foods",
                 description = if (expiredFoodsEnabled) {
-                    "Remove from List after expired for ${autoDeleteDurationLabel(expiredFoodDays)}."
+                    "Remove foods ${autoDeleteDurationLabel(expiredFoodDays)} after they expire."
                 } else {
                     "Expired foods stay until you remove them."
                 },
                 enabled = expiredFoodsEnabled,
                 selectedDays = expiredFoodDays,
                 presets = expiredFoodAutoRemovePresets,
-                selectedSummary = "Expired for ${autoDeleteDurationLabel(expiredFoodDays)}",
+                selectedSummary = "Auto-remove after ",
                 onEnabledChange = { checked ->
                     expiredFoodsEnabled = checked
                     saveExpiredFoodAutoRemoveEnabled(prefs, checked)
@@ -9589,24 +9557,17 @@ fun AutoDeleteScreen(navController: NavHostController) {
         }
     }
 
-    customTarget?.let { target ->
-        val isHistoryTarget = target == AutoDeleteCustomTarget.HISTORY
+    customTarget?.let {
         AutoDeleteCustomDialog(
-            title = if (isHistoryTarget) "Custom history cleanup" else "Custom expired foods cleanup",
-            initialDays = if (isHistoryTarget) historyDays else expiredFoodDays,
-            minDays = if (isHistoryTarget) MIN_HISTORY_RETENTION_DAYS else MIN_EXPIRED_FOOD_AUTO_REMOVE_DAYS,
-            maxDays = if (isHistoryTarget) MAX_HISTORY_RETENTION_DAYS else MAX_EXPIRED_FOOD_AUTO_REMOVE_DAYS,
+            title = "Custom expired foods cleanup",
+            initialDays = expiredFoodDays,
+            minDays = MIN_EXPIRED_FOOD_AUTO_REMOVE_DAYS,
+            maxDays = MAX_EXPIRED_FOOD_AUTO_REMOVE_DAYS,
             onDismiss = { customTarget = null },
             onConfirm = { days ->
-                if (isHistoryTarget) {
-                    historyDays = days
-                    saveHistoryRetentionDays(prefs, days)
-                    applyHistoryCleanup()
-                } else {
-                    expiredFoodDays = days
-                    saveExpiredFoodAutoRemoveDays(prefs, days)
-                    applyExpiredFoodCleanup()
-                }
+                expiredFoodDays = days
+                saveExpiredFoodAutoRemoveDays(prefs, days)
+                applyExpiredFoodCleanup()
                 customTarget = null
             }
         )
@@ -9614,8 +9575,56 @@ fun AutoDeleteScreen(navController: NavHostController) {
 }
 
 private enum class AutoDeleteCustomTarget {
-    HISTORY,
     EXPIRED_FOODS
+}
+
+@Composable
+private fun HistoryCleanupSectionCard(
+    selectedDays: Long,
+    description: String,
+    sectionLabel: String,
+    presets: List<AutoDeletePreset>,
+    onPresetSelected: (Long) -> Unit
+) {
+    MatchingPillCard(
+        modifier = Modifier.fillMaxWidth(),
+        shadowElevation = 4.dp
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp)
+        ) {
+            Text(
+                text = "History cleanup",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(Modifier.height(3.dp))
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(14.dp))
+            Text(
+                text = sectionLabel,
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(8.dp))
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(end = 2.dp)
+            ) {
+                items(presets, key = { it.label }) { option ->
+                    AutoDeleteChoiceChip(
+                        label = option.label,
+                        selected = option.days == selectedDays,
+                        onClick = { onPresetSelected(option.days) }
+                    )
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -9849,7 +9858,7 @@ private fun AutoDeleteCustomDialog(
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    text = "Choose when cleanup should happen.",
+                    text = "Choose when expired foods should be removed.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
