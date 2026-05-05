@@ -2131,6 +2131,12 @@ private data class BarcodeLookupResult(
     val wasCached: Boolean
 )
 
+private sealed interface BarcodeLookupOutcome {
+    data class Found(val result: BarcodeLookupResult) : BarcodeLookupOutcome
+    data object NotFound : BarcodeLookupOutcome
+    data object Unavailable : BarcodeLookupOutcome
+}
+
 private data class OffLookupResponse(
     val status: Int? = null,
     val product: OffLookupProduct? = null
@@ -2248,10 +2254,13 @@ private fun buildBestProductName(
     return combined
 }
 
-private suspend fun lookupFromOpenFoodFacts(barcode: String): BarcodeLookupResult? {
+private suspend fun lookupFromOpenFoodFactsHost(
+    host: String,
+    barcode: String
+): BarcodeLookupOutcome {
     return withContext(Dispatchers.IO) {
         val url = URL(
-            "https://world.openfoodfacts.net/api/v2/product/$barcode" +
+            "https://$host/api/v2/product/$barcode" +
                     "?fields=product_name,product_name_en,product_name_ar,brands"
         )
 
@@ -2259,16 +2268,24 @@ private suspend fun lookupFromOpenFoodFacts(barcode: String): BarcodeLookupResul
             requestMethod = "GET"
             connectTimeout = 3500
             readTimeout = 3500
+            setRequestProperty("Accept", "application/json")
+            setRequestProperty("User-Agent", "Food Expiry Tracker Android barcode lookup")
         }
 
         try {
-            if (connection.responseCode !in 200..299) return@withContext null
+            if (connection.responseCode == HttpURLConnection.HTTP_NOT_FOUND) {
+                return@withContext BarcodeLookupOutcome.NotFound
+            }
+            if (connection.responseCode !in 200..299) {
+                return@withContext BarcodeLookupOutcome.Unavailable
+            }
 
             val body = connection.inputStream.bufferedReader().use { it.readText() }
-            val response = Gson().fromJson(body, OffLookupResponse::class.java) ?: return@withContext null
-            if (response.status != 1) return@withContext null
+            val response = Gson().fromJson(body, OffLookupResponse::class.java)
+                ?: return@withContext BarcodeLookupOutcome.Unavailable
+            if (response.status != 1) return@withContext BarcodeLookupOutcome.NotFound
 
-            val product = response.product ?: return@withContext null
+            val product = response.product ?: return@withContext BarcodeLookupOutcome.NotFound
 
             val bestName = buildBestProductName(
                 rawName = product.product_name,
@@ -2276,16 +2293,18 @@ private suspend fun lookupFromOpenFoodFacts(barcode: String): BarcodeLookupResul
                 rawNameAr = product.product_name_ar,
                 brand = product.brands,
                 barcode = barcode
-            ) ?: return@withContext null
+            ) ?: return@withContext BarcodeLookupOutcome.NotFound
 
-            BarcodeLookupResult(
-                barcode = barcode,
-                productName = bestName,
-                source = "Open Food Facts",
-                wasCached = false
+            BarcodeLookupOutcome.Found(
+                BarcodeLookupResult(
+                    barcode = barcode,
+                    productName = bestName,
+                    source = "Open Food Facts",
+                    wasCached = false
+                )
             )
         } catch (_: Exception) {
-            null
+            BarcodeLookupOutcome.Unavailable
         } finally {
             connection.disconnect()
         }
@@ -2295,31 +2314,56 @@ private suspend fun lookupFromOpenFoodFacts(barcode: String): BarcodeLookupResul
 private suspend fun lookupBarcodeName(
     context: Context,
     barcode: String
-): BarcodeLookupResult? {
+): BarcodeLookupOutcome {
     val cleanedBarcode = normalizeBarcode(barcode)
-    if (cleanedBarcode.isBlank()) return null
+    if (cleanedBarcode.isBlank()) return BarcodeLookupOutcome.NotFound
 
-    getBarcodeNameFromCache(context, cleanedBarcode)?.let { return it }
-
-    val providers = listOf<suspend (String) -> BarcodeLookupResult?> { code ->
-        withTimeoutOrNull(
-            3500
-        ) { lookupFromOpenFoodFacts(code) }
+    getBarcodeNameFromCache(context, cleanedBarcode)?.let { cached ->
+        return BarcodeLookupOutcome.Found(cached)
     }
-    for (provider in providers) {
-        val result = provider(cleanedBarcode)
-        if (result != null) {
-            saveBarcodeNameToCache(
-                context = context,
-                barcode = cleanedBarcode,
-                productName = result.productName,
-                source = result.source
-            )
-            return result.copy(wasCached = false)
+
+    val openFoodFactsHosts = listOf(
+        "world.openfoodfacts.org",
+        "world.openfoodfacts.net"
+    )
+    var serviceUnavailable = false
+
+    for (host in openFoodFactsHosts) {
+        val outcome = withTimeoutOrNull(3500) {
+            lookupFromOpenFoodFactsHost(host, cleanedBarcode)
+        } ?: BarcodeLookupOutcome.Unavailable
+
+        when (outcome) {
+            is BarcodeLookupOutcome.Found -> {
+                val result = outcome.result
+                saveBarcodeNameToCache(
+                    context = context,
+                    barcode = cleanedBarcode,
+                    productName = result.productName,
+                    source = result.source
+                )
+                return BarcodeLookupOutcome.Found(result.copy(wasCached = false))
+            }
+
+            BarcodeLookupOutcome.NotFound -> return BarcodeLookupOutcome.NotFound
+            BarcodeLookupOutcome.Unavailable -> serviceUnavailable = true
         }
     }
 
-    return null
+    return if (serviceUnavailable) {
+        BarcodeLookupOutcome.Unavailable
+    } else {
+        BarcodeLookupOutcome.NotFound
+    }
+}
+
+private fun barcodeLookupStatusMessage(outcome: BarcodeLookupOutcome): String {
+    return when (outcome) {
+        is BarcodeLookupOutcome.Found -> "Found product"
+        BarcodeLookupOutcome.NotFound -> "No product found for this barcode."
+        BarcodeLookupOutcome.Unavailable ->
+            "Product lookup is unavailable. Check your internet connection and try again."
+    }
 }
 
 private suspend fun Context.getCameraProvider(): ProcessCameraProvider =
@@ -3577,6 +3621,29 @@ private fun FoodQuantityBadge(quantity: Int) {
             color = scheme.primary,
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+        )
+    }
+}
+
+@Composable
+private fun FoodQuantityUseButton(
+    onClick: () -> Unit
+) {
+    val errorColor = MaterialTheme.colorScheme.error
+
+    TextButton(
+        onClick = onClick,
+        colors = ButtonDefaults.textButtonColors(
+            contentColor = errorColor
+        ),
+        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+        modifier = Modifier.height(32.dp)
+    ) {
+        Text(
+            text = "Ate -1",
+            style = MaterialTheme.typography.bodySmall,
+            color = errorColor,
+            fontWeight = FontWeight.SemiBold
         )
     }
 }
@@ -5766,6 +5833,7 @@ private fun PantryFoodCard(
     isSelected: Boolean,
     onSelectionChange: (Boolean) -> Unit,
     onEdit: () -> Unit,
+    onDeductQuantity: () -> Unit,
     onDelete: () -> Unit
 ) {
     val cardShape = RoundedCornerShape(25.dp)
@@ -5948,7 +6016,15 @@ private fun PantryFoodCard(
 
                             if (food.quantity > MIN_FOOD_QUANTITY) {
                                 Spacer(modifier = Modifier.height(6.dp))
-                                FoodQuantityBadge(quantity = food.quantity)
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    FoodQuantityBadge(quantity = food.quantity)
+                                    if (!isSelecting) {
+                                        FoodQuantityUseButton(onClick = onDeductQuantity)
+                                    }
+                                }
                             }
                         }
 
@@ -10948,6 +11024,28 @@ fun FoodEntryScreen(
         }
     }
 
+    // SEARCH: QUANTITY_DEDUCT
+    // Reduces a pantry batch when the user consumes part of the saved quantity.
+    fun deductFoodQuantity(food: FoodItem, usedQuantity: Int) {
+        val currentIndex = foodList.indexOf(food).takeIf { it >= 0 }
+            ?: foodList.indexOfFirst { it.batchKey() == food.batchKey() }.takeIf { it >= 0 }
+            ?: return
+        val currentFood = foodList[currentIndex]
+        val currentQuantity = sanitizeFoodQuantity(currentFood.quantity)
+        val used = usedQuantity.coerceIn(MIN_FOOD_QUANTITY, currentQuantity)
+
+        selectedItems.remove(currentFood)
+        if (editingItem == currentFood || editingItem?.batchKey() == currentFood.batchKey()) {
+            closeFoodForm()
+        }
+
+        if (used >= currentQuantity) {
+            foodList.removeAt(currentIndex)
+        } else {
+            foodList[currentIndex] = currentFood.copy(quantity = currentQuantity - used)
+        }
+    }
+
     // SEARCH: ADD_EDIT_FOOD_SAVE_HANDLER
     // Validates the form, saves the pantry item, records history, and updates barcode cache.
     fun saveCurrentFoodFromForm(): Boolean {
@@ -11018,12 +11116,10 @@ fun FoodEntryScreen(
 
                     isLookingUpBarcode = false
 
-                    if (lookup != null) {
-                        foodName = lookup.productName.take(50)
-                        barcodeLookupMessage = "Found product"
-                    } else {
-                        barcodeLookupMessage = "No product found for this barcode."
+                    if (lookup is BarcodeLookupOutcome.Found) {
+                        foodName = lookup.result.productName.take(50)
                     }
+                    barcodeLookupMessage = barcodeLookupStatusMessage(lookup)
 
                     showError = false
                     batchMergeNotice = hasMatchingFoodBatch(foodName, expiryDate)
@@ -11259,6 +11355,7 @@ fun FoodEntryScreen(
                                             }
                                         },
                                         onEdit = { openEditFoodForm(food) },
+                                        onDeductQuantity = { deductFoodQuantity(food, MIN_FOOD_QUANTITY) },
                                         onDelete = { pendingDelete = food }
                                     )
                                 }
