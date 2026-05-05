@@ -9519,7 +9519,7 @@ fun AutoDeleteScreen(navController: NavHostController) {
         ) {
             HistoryCleanupSectionCard(
                 selectedDays = historyDays,
-                description = "Remove food names you haven't used again for ${autoDeleteDurationLabel(historyDays)}.",
+                description = "Remove food names not used for ${autoDeleteDurationLabel(historyDays)}.",
                 sectionLabel = "Keep history for",
                 presets = historyAutoDeletePresets,
                 onPresetSelected = { days ->
