@@ -5,6 +5,7 @@ sealed class Route(val r: String) {
     data object Category : Route("category")
     data object Profile : Route("profile")
     data object Account : Route("profile/account")
+    data object PantryTransfer : Route("profile/pantry-transfer")
     data object Settings : Route("profile/settings")
     data object About : Route("profile/about")
     data object Help : Route("profile/help")

@@ -17,10 +17,14 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.SharedPreferences
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.Arrangement
@@ -46,6 +50,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -108,9 +113,13 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.IOException
+import java.net.ConnectException
 import java.net.HttpURLConnection
+import java.net.NoRouteToHostException
+import java.net.SocketTimeoutException
 import java.net.URL
 import java.net.URLEncoder
+import java.net.UnknownHostException
 import java.nio.charset.StandardCharsets
 import java.time.Instant
 import java.time.ZoneId
@@ -146,6 +155,8 @@ private const val EMAIL_PASSWORD_INCORRECT_MESSAGE = "Email or password is incor
 private const val ENTER_EMAIL_FIRST_MESSAGE = "Enter your email first."
 private const val PASSWORD_RESET_SENT_MESSAGE =
     "A reset link has been sent. Please check your email."
+private const val NO_INTERNET_MESSAGE =
+    "No internet connection. Connect to the internet and try again."
 private const val PASSWORD_RESET_COOLDOWN_SECONDS = 30
 private const val PASSWORD_RESET_COOLDOWN_MILLIS = PASSWORD_RESET_COOLDOWN_SECONDS * 1_000L
 
@@ -231,6 +242,48 @@ private data class SyncMeta(
     val lastSyncedAt: Long,
     val lastError: String?
 )
+
+// SEARCH: Account offline detection and no-internet login errors.
+private class AccountNetworkException(cause: IOException) : IOException(NO_INTERNET_MESSAGE, cause)
+
+private fun isConnectivityIOException(error: Throwable?): Boolean {
+    return when (error) {
+        null -> false
+        is AccountNetworkException,
+        is UnknownHostException,
+        is SocketTimeoutException,
+        is ConnectException,
+        is NoRouteToHostException -> true
+        else -> isConnectivityIOException(error.cause)
+    }
+}
+
+private fun hasInternetConnection(context: Context): Boolean {
+    val connectivityManager =
+        context.applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: return true
+    val activeNetwork = connectivityManager.activeNetwork ?: return false
+    val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork) ?: return false
+
+    return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+}
+
+private fun networkAwareErrorMessage(
+    error: IOException,
+    fallback: (String?) -> String
+): String {
+    return if (isConnectivityIOException(error)) {
+        NO_INTERNET_MESSAGE
+    } else {
+        fallback(error.message)
+    }
+}
+
+// SEARCH: Account logout only on real expired-session failures.
+private fun isSessionExpiredFailure(failure: Throwable): Boolean {
+    return failure.message?.contains("sign in again", ignoreCase = true) == true
+}
 
 private enum class AccountStatusPlacement {
     EMAIL_AUTH,
@@ -562,37 +615,44 @@ private suspend fun executeJsonRequest(
     bearerToken: String? = null,
     contentType: String = "application/json"
 ): String = withContext(Dispatchers.IO) {
-    val connection = (URL(url).openConnection() as HttpURLConnection).apply {
-        requestMethod = method
-        connectTimeout = 15_000
-        readTimeout = 15_000
-        doInput = true
-        setRequestProperty("Accept", "application/json")
-        bearerToken?.let { setRequestProperty("Authorization", "Bearer $it") }
-        if (bodyJson != null) {
-            doOutput = true
-            setRequestProperty("Content-Type", contentType)
+    try {
+        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+            requestMethod = method
+            connectTimeout = 15_000
+            readTimeout = 15_000
+            doInput = true
+            setRequestProperty("Accept", "application/json")
+            bearerToken?.let { setRequestProperty("Authorization", "Bearer $it") }
+            if (bodyJson != null) {
+                doOutput = true
+                setRequestProperty("Content-Type", contentType)
+            }
         }
-    }
 
-    bodyJson?.let { json ->
-        connection.outputStream.bufferedWriter().use { writer ->
-            writer.write(json)
+        bodyJson?.let { json ->
+            connection.outputStream.bufferedWriter().use { writer ->
+                writer.write(json)
+            }
         }
-    }
 
-    val stream = if (connection.responseCode in 200..299) {
-        connection.inputStream
-    } else {
-        connection.errorStream
-    }
+        val stream = if (connection.responseCode in 200..299) {
+            connection.inputStream
+        } else {
+            connection.errorStream
+        }
 
-    val responseText = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
-    if (connection.responseCode !in 200..299) {
-        throw IOException(responseText.ifBlank { "HTTP ${connection.responseCode}" })
-    }
+        val responseText = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+        if (connection.responseCode !in 200..299) {
+            throw IOException(responseText.ifBlank { "HTTP ${connection.responseCode}" })
+        }
 
-    responseText
+        responseText
+    } catch (error: IOException) {
+        if (isConnectivityIOException(error)) {
+            throw AccountNetworkException(error)
+        }
+        throw error
+    }
 }
 
 private fun IdentityAuthResponse.toAccountSession(provider: AccountProvider): AccountSession {
@@ -626,7 +686,7 @@ private suspend fun signUpWithEmailPassword(
         accountGson.fromJson(responseText, IdentityAuthResponse::class.java)
             .toAccountSession(AccountProvider.EMAIL)
     } catch (error: IOException) {
-        throw IllegalStateException(friendlyIdentityError(error.message))
+        throw IllegalStateException(networkAwareErrorMessage(error, ::friendlyIdentityError))
     }
 }
 
@@ -652,7 +712,7 @@ private suspend fun signInWithEmailPassword(
         accountGson.fromJson(responseText, IdentityAuthResponse::class.java)
             .toAccountSession(AccountProvider.EMAIL)
     } catch (error: IOException) {
-        throw IllegalStateException(friendlyIdentityError(error.message))
+        throw IllegalStateException(networkAwareErrorMessage(error, ::friendlyIdentityError))
     }
 }
 
@@ -672,6 +732,9 @@ private suspend fun sendPasswordResetEmail(email: String) {
     try {
         executeJsonRequest(url = url, method = "POST", bodyJson = body)
     } catch (error: IOException) {
+        if (isConnectivityIOException(error)) {
+            throw IllegalStateException(NO_INTERNET_MESSAGE)
+        }
         if (parseIdentityErrorCode(error.message) == "EMAIL_NOT_FOUND") {
             return
         }
@@ -700,7 +763,7 @@ private suspend fun exchangeGoogleIdToken(googleIdToken: String): AccountSession
         accountGson.fromJson(responseText, IdentityAuthResponse::class.java)
             .toAccountSession(AccountProvider.GOOGLE)
     } catch (error: IOException) {
-        throw IllegalStateException(friendlyIdentityError(error.message))
+        throw IllegalStateException(networkAwareErrorMessage(error, ::friendlyIdentityError))
     }
 }
 
@@ -726,6 +789,9 @@ private suspend fun refreshAccountSession(current: AccountSession): AccountSessi
             refreshToken = refreshed.refresh_token ?: current.refreshToken
         )
     } catch (error: IOException) {
+        if (isConnectivityIOException(error)) {
+            throw IllegalStateException(NO_INTERNET_MESSAGE)
+        }
         throw IllegalStateException("Your session expired. Please sign in again.")
     }
 }
@@ -743,6 +809,9 @@ private suspend fun fetchRemoteSnapshot(session: AccountSession): CloudSyncEnvel
         val payloadJson = document.fields?.get("payloadJson")?.stringValue ?: return null
         accountGson.fromJson(payloadJson, CloudSyncEnvelope::class.java)
     } catch (error: IOException) {
+        if (isConnectivityIOException(error)) {
+            throw IllegalStateException(NO_INTERNET_MESSAGE)
+        }
         val body = error.message.orEmpty()
         if (body.contains("NOT_FOUND")) {
             null
@@ -787,6 +856,9 @@ private suspend fun pushSnapshotToCloud(
         saveLastSyncedAt(context, envelope.updatedAtMs)
         return refreshedSession
     } catch (error: IOException) {
+        if (isConnectivityIOException(error)) {
+            throw IllegalStateException(NO_INTERNET_MESSAGE)
+        }
         throw IllegalStateException(friendlyCloudSyncError(error.message))
     }
 }
@@ -918,7 +990,7 @@ class AccountAutoSyncWorker(
             saveLastSyncError(applicationContext, null)
             Result.success()
         }.getOrElse { failure ->
-            if (failure.message?.contains("sign in again", ignoreCase = true) == true) {
+            if (isSessionExpiredFailure(failure)) {
                 clearAccountSession(applicationContext)
             }
             saveLastSyncError(
@@ -933,6 +1005,10 @@ class AccountAutoSyncWorker(
 private suspend fun launchGoogleSignIn(context: Context): AccountSession {
     check(isGoogleAccountConfigured()) {
         "Google sign-in is not configured yet. Add GOOGLE_WEB_CLIENT_ID in local.properties and enable Google in Firebase Authentication."
+    }
+    // SEARCH: Google sign-in offline guard before Credential Manager.
+    if (!hasInternetConnection(context)) {
+        throw IllegalStateException(NO_INTERNET_MESSAGE)
     }
 
     val activity = context.findActivity()
@@ -967,8 +1043,14 @@ private suspend fun launchGoogleSignIn(context: Context): AccountSession {
     } catch (_: GetCredentialCancellationException) {
         throw IllegalStateException("Google sign-in was canceled.")
     } catch (_: NoCredentialException) {
+        if (!hasInternetConnection(context)) {
+            throw IllegalStateException(NO_INTERNET_MESSAGE)
+        }
         throw IllegalStateException("No Google account was found. Please add one on this device and try again.")
     } catch (error: GetCredentialException) {
+        if (!hasInternetConnection(context)) {
+            throw IllegalStateException(NO_INTERNET_MESSAGE)
+        }
         throw IllegalStateException(
             "Google sign-in failed: ${error.javaClass.simpleName} - ${error.message ?: "no message"}"
         )
@@ -1019,7 +1101,7 @@ fun AccountCloudSyncEffect(session: AccountSession?) {
                         saveAccountSession(context, result.session)
                         saveLastSyncError(context, null)
                     }.onFailure { failure ->
-                        if (failure.message?.contains("sign in again", ignoreCase = true) == true) {
+                        if (isSessionExpiredFailure(failure)) {
                             clearAccountSession(context)
                         }
                         saveLastSyncError(
@@ -1428,6 +1510,7 @@ private fun SignedOutAccountContent(
 ) {
     val hasEmailAuthMessage = !emailAuthMessage.isNullOrBlank()
     val hasEmailAuthError = hasEmailAuthMessage && emailAuthMessageIsError
+    var passwordVisible by rememberSaveable { mutableStateOf(false) }
     val forgotPasswordButtonText = when {
         busyAction == "reset" -> "Sending..."
         forgotPasswordCooldownSecondsLeft > 0 -> "Try again in ${forgotPasswordCooldownSecondsLeft}s"
@@ -1492,7 +1575,27 @@ private fun SignedOutAccountContent(
             isError = hasEmailAuthError,
             // SEARCH: ACCOUNT_PASSWORD_FIELD_UI
             // Change the password input behavior here, such as visibility toggles, helper text, or strength hints.
-            visualTransformation = PasswordVisualTransformation(),
+            visualTransformation = if (passwordVisible) {
+                VisualTransformation.None
+            } else {
+                PasswordVisualTransformation()
+            },
+            trailingIcon = {
+                IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                    Icon(
+                        imageVector = if (passwordVisible) {
+                            Icons.Filled.VisibilityOff
+                        } else {
+                            Icons.Filled.Visibility
+                        },
+                        contentDescription = if (passwordVisible) {
+                            "Hide password"
+                        } else {
+                            "Show password"
+                        }
+                    )
+                }
+            },
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Password,
                 imeAction = ImeAction.Done
@@ -2015,7 +2118,8 @@ private fun AccountPillTextField(
     label: String,
     isError: Boolean = false,
     keyboardOptions: KeyboardOptions,
-    visualTransformation: VisualTransformation = VisualTransformation.None
+    visualTransformation: VisualTransformation = VisualTransformation.None,
+    trailingIcon: (@Composable () -> Unit)? = null
 ) {
     val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
     val textColor = MaterialTheme.colorScheme.onSurface
@@ -2036,6 +2140,7 @@ private fun AccountPillTextField(
         shape = RoundedCornerShape(12.dp),
         isError = isError,
         visualTransformation = visualTransformation,
+        trailingIcon = trailingIcon,
         keyboardOptions = keyboardOptions,
         textStyle = MaterialTheme.typography.bodyLarge,
         colors = OutlinedTextFieldDefaults.colors(

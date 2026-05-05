@@ -138,6 +138,7 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Sort
+import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Person
@@ -451,6 +452,15 @@ private fun autoDeleteDurationLabel(days: Long): String {
             days % 7L == 0L -> "${days / 7L} weeks"
             else -> "$days days"
         }
+    }
+}
+
+private fun autoDeleteDurationSentenceLabel(days: Long): String {
+    return when (days) {
+        1L -> "a day"
+        7L -> "a week"
+        30L -> "a month"
+        else -> autoDeleteDurationLabel(days)
     }
 }
 
@@ -3453,10 +3463,10 @@ private fun countdownStyle(daysLeft: Int?): CountdownStyle {
         daysLeft == 1 -> Color(0xFFFF5B45)
         daysLeft == 2 -> Color(0xFFFF7A33)
         daysLeft == 3 -> Color(0xFFFFA025)
-        daysLeft == 4 -> Color(0xFFFFDB25)
-        daysLeft == 5 -> Color(0xFF8DE83D)
-        daysLeft == 6 -> Color(0xFF78DA45)
-        daysLeft == 7 -> Color(0xFF3DCC5C)
+        daysLeft == 4 -> Color(0xFFE6FF00)
+        daysLeft == 5 -> Color(0xFF8AEE38)
+        daysLeft == 6 -> Color(0xFF66B73C)
+        daysLeft == 7 -> Color(0xFF2F9A46)
         else -> Color(0xFF9CA8B7)
     }
 
@@ -5197,6 +5207,7 @@ fun AppNav(
 
                 composable(Route.Profile.r) { ProfileScreen(navController) }
                 composable(Route.Account.r) { AccountScreen(navController) }
+                composable(Route.PantryTransfer.r) { PantryTransferScreen(navController) }
                 composable(Route.Settings.r) { SettingsScreen(navController) }
                 composable(Route.About.r) { AboutScreen(navController) }
                 composable(Route.Help.r) { HelpScreen(navController) }
@@ -6495,7 +6506,7 @@ private fun buildRecipeAssistantMessage(batch: RecipeSuggestionBatch): RecipeCha
     val ingredientSummary = compactIngredientSummary(batch.resolvedIngredients)
     val headline = when {
         batch.recipes.isEmpty() && ingredientSummary.isNotBlank() ->
-            "I couldn't find strong recipe cards using $ingredientSummary yet."
+            "I couldn't make a perfect match, but here are the closest recipe ideas."
 
         batch.recipes.isEmpty() ->
             "I couldn't find recipe cards right now."
@@ -6570,6 +6581,13 @@ private fun looksFoodRelatedRecipeRequest(
     )
 
     if (foodKeywords.any(normalized::contains)) return true
+
+    val simpleRecipeStyleRequest =
+        Regex("\\b(?:make|cook|prepare)\\s+(?:me\\s+)?(?:something|anything)\\s+(?:easy|quick|simple)\\b")
+            .containsMatchIn(normalized) ||
+                Regex("\\b(?:something|anything)\\s+(?:easy|quick|simple)\\b")
+                    .containsMatchIn(normalized)
+    if (simpleRecipeStyleRequest) return true
 
     val pantryTokens = pantryIngredients
         .flatMap { ingredient ->
@@ -6691,7 +6709,7 @@ private fun isSingleFoodLikeRequest(
 }
 
 private fun recipePromptPlaceholder(): String {
-    return "Give me any foods like eggs, rice, milk..."
+    return "Ask for any recipe."
 }
 
 private fun buildExpiringFoodsRequest(expiringFoods: List<ExpiringFoodHint>): String {
@@ -6752,7 +6770,7 @@ private fun RecipeQuickSuggestionChips(
 
         item {
             RecipeQuickSuggestionChip(
-                text = "Use soon to expire foods",
+                text = "Use Expiring foods",
                 enabled = hasExpiringFoods && !isLoading,
                 onClick = onUseSoonToExpireFoods
             )
@@ -8256,7 +8274,7 @@ private fun RecipeScreen(
                 } else if (looksLikeFoodIngredientInput(trimmed, latestPantryIngredientNames)) {
                     "Can you give me some more food items?"
                 } else {
-                    "I can only help with food-related recipe requests."
+                    "I can only help with food and recipe ideas."
                 }
             val invalidMessages = messages +
                     RecipeChatMessage(
@@ -8498,7 +8516,7 @@ private fun RecipeScreen(
                     val displayBatch =
                         if (freshBatch.recipes.isNotEmpty()) {
                             freshBatch
-                        } else if (!usePantryRotation && useFullPantryList && batch.recipes.isNotEmpty()) {
+                        } else if (batch.recipes.isNotEmpty()) {
                             batch.copy(recipes = batch.recipes.take(requestedLimit))
                         } else {
                             freshBatch
@@ -8967,10 +8985,18 @@ fun ProfileScreen(navController: NavHostController) {
                 navController.navigate(Route.Settings.r)
             }
         }
-
+        item { Spacer(Modifier.height(6.dp)) }
         item { ProfileSectionTitle("Transfer") }
-        item { PantryTransferCard() }
-
+        item {
+            ProfileActionRow(
+                title = "Pantry transfer",
+                subtitle = "Export or import your pantry data and categories",
+                icon = Icons.Filled.Upload
+            ) {
+                navController.navigate(Route.PantryTransfer.r)
+            }
+        }
+        item { Spacer(Modifier.height(6.dp)) }
         item { ProfileSectionTitle("More") }
         item {
             ProfileActionRow(
@@ -9519,7 +9545,7 @@ fun AutoDeleteScreen(navController: NavHostController) {
         ) {
             HistoryCleanupSectionCard(
                 selectedDays = historyDays,
-                description = "Remove food names not used for ${autoDeleteDurationLabel(historyDays)}.",
+                description = "Remove food names not used for ${autoDeleteDurationSentenceLabel(historyDays)}.",
                 sectionLabel = "Keep history for",
                 presets = historyAutoDeletePresets,
                 onPresetSelected = { days ->
@@ -9532,7 +9558,7 @@ fun AutoDeleteScreen(navController: NavHostController) {
             AutoDeleteSectionCard(
                 title = "Auto-remove expired foods",
                 description = if (expiredFoodsEnabled) {
-                    "Remove foods ${autoDeleteDurationLabel(expiredFoodDays)} after they expire."
+                    "Remove foods ${autoDeleteDurationSentenceLabel(expiredFoodDays)} after they expire."
                 } else {
                     "Expired foods stay until you remove them."
                 },
